@@ -23,6 +23,7 @@ use tauri::{AppHandle, Manager, Runtime, WindowEvent};
 
 use crate::core::sidecar::{self, SidecarHandle};
 use crate::proxy;
+use crate::tray;
 
 /// Global flag: when true, the next `CloseRequested` performs a real exit
 /// (proxy restore + sidecar kill + drop window). When false, the close is
@@ -81,6 +82,15 @@ fn install_window_close_hook<R: Runtime>(app: &AppHandle<R>) {
 
             // (3) Hard cleanup fallback.
             sidecar::hard_cleanup();
+
+            // (4) Refresh the tray icon so the last visible state in
+            //     the system tray reflects "idle" (proxy restored,
+            //     sidecar gone, TUN also Off after the proxy restore
+            //     unless an elevated child is still around — in which
+            //     case update_tray_icon still picks the right state).
+            if let Err(e) = tray::update_tray_icon(&app_handle) {
+                eprintln!("[shutdown] final tray icon refresh failed: {e}");
+            }
         }
     });
 }

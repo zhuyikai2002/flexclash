@@ -9,6 +9,7 @@ use crate::core::shutdown;
 use crate::error::AppError;
 use crate::events::SYSTEM_PROXY_CHANGED;
 use crate::proxy::{self, ProxyStatus};
+use crate::tray;
 
 type CmdResult<T> = Result<T, AppError>;
 
@@ -36,6 +37,8 @@ pub fn enable_system_proxy<R: Runtime>(
             "source": "command",
         }),
     );
+    // Refresh the tray icon (best-effort — don't fail the command).
+    let _ = tray::update_tray_icon(&app);
     Ok(ProxyToggleResult {
         enabled: true,
         port: Some(p),
@@ -54,6 +57,7 @@ pub fn disable_system_proxy<R: Runtime>(app: AppHandle<R>) -> CmdResult<ProxyTog
             "source": "command",
         }),
     );
+    let _ = tray::update_tray_icon(&app);
     Ok(ProxyToggleResult {
         enabled: false,
         port: None,

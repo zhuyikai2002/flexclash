@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, Runtime};
 use crate::core::sidecar::SidecarHandle;
 use crate::core::tun::{TunManager, TunStatus};
 use crate::error::Result;
+use crate::tray;
 
 /// Cheap status read. Frontend polls this on mount + on every
 /// `tun://state-changed` event so the toggle always reflects the
@@ -36,7 +37,11 @@ pub fn enable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
         .ok_or_else(|| crate::error::AppError::Tun("SidecarHandle not registered".into()))?;
     let work = sidecar.work_dir();
     let storage = crate::config::profile::ProfileStorage::new(&work);
-    mgr.enable(&app, &storage)
+    let res = mgr.enable(&app, &storage);
+    // Refresh the tray icon regardless of success — a Failed transition
+    // is still a state change worth reflecting.
+    let _ = tray::update_tray_icon(&app);
+    res
 }
 
 /// Disable TUN. Symmetric to `enable_tun`; rolls forward even on
@@ -51,7 +56,9 @@ pub fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
         .ok_or_else(|| crate::error::AppError::Tun("SidecarHandle not registered".into()))?;
     let work = sidecar.work_dir();
     let storage = crate::config::profile::ProfileStorage::new(&work);
-    mgr.disable(&app, &storage)
+    let res = mgr.disable(&app, &storage);
+    let _ = tray::update_tray_icon(&app);
+    res
 }
 
 /// Best-effort sweep exposed for the "fix it now" button on the UI.

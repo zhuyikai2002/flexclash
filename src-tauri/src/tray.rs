@@ -7,47 +7,136 @@
 //       * Toggle system proxy (check menu item, reflects current state)
 //       * Quit (triggers the same CloseRequested path so shutdown runs)
 //   - Left-click: toggle window visibility (hide-to-tray UX).
+//   - DYNAMIC ICON: the tray icon swaps between `tray-active.png`
+//     (neon cat) and `tray-idle.png` (graphite cat) depending on
+//     whether the system proxy AND/OR TUN mode is currently active.
+//     Tooltip text updates to match.
 //
 // State coordination:
 //   The proxy check state is updated in two places:
 //     1. When the proxy is toggled from the tray menu (immediate).
-//     2. When the user toggles from the dashboard (via the `system_proxy_changed`
-//        event we emit in `commands::proxy`).
+//     2. When the user toggles from the dashboard (via the
+//        `SYSTEM_PROXY_CHANGED` event we emit in `commands::proxy`).
 //   The single source of truth is the registry; both code paths emit
-//   `SYSTEM_PROXY_CHANGED` so listeners re-read the registry and update UI.
+//   `SYSTEM_PROXY_CHANGED` so listeners re-read the registry and
+//   update UI.
+//   The tray icon also subscribes to `TUN_STATE_CHANGED` so a TUN
+//   flip swaps the icon on its own.
 // ============================================================================
 
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Listener, Manager, Wry};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Listener, Manager, Runtime, Wry};
 
 use crate::core::shutdown::ExitFlag;
 use crate::error::AppError;
-use crate::events::{KERNEL_LOG, SYSTEM_PROXY_CHANGED};
+use crate::events::{KERNEL_LOG, SYSTEM_PROXY_CHANGED, TUN_STATE_CHANGED};
 use crate::proxy;
 
 const ID_SHOW:    &str = "tray_show";
 const ID_TOGGLE:  &str = "tray_toggle_proxy";
 const ID_QUIT:    &str = "tray_quit";
 
-/// Container for handles the tray code needs to access from event callbacks.
-/// Tray APIs only exist on the desktop Wry runtime, so the concrete type is
-/// fixed here (Phase 1 ships Windows only).
+// --- Icons (embedded at compile time so the bundle doesn't depend on
+//     the working directory of the launcher).  tray-active.png 888 B,
+//     tray-idle.png 590 B — negligible.  Generated from
+//     src-tauri/icons/tray-{active,idle}.svg via
+//     `node tools/svg-to-png.cjs` (uses @resvg/resvg-js). -----------------
+const ICON_ACTIVE_PNG: &[u8] = include_bytes!("../icons/tray-active.png");
+const ICON_IDLE_PNG:   &[u8] = include_bytes!("../icons/tray-idle.png");
+
+const TOOLTIP_ACTIVE: &str = "FlexClash - 代理已连接";
+const TOOLTIP_IDLE:   &str = "FlexClash - 直连模式";
+
+/// Container for handles the tray code needs to access from event
+/// callbacks. Tray APIs only exist on the desktop Wry runtime, so the
+/// concrete type is fixed here (Phase 1 ships Windows only).
+#[derive(Default)]
 pub struct TrayHandles {
     pub toggle_item: Arc<Mutex<Option<CheckMenuItem<Wry>>>>,
     pub show_item:   Arc<Mutex<Option<MenuItem<Wry>>>>,
+    /// The TrayIcon itself, so we can call `set_icon` / `set_tooltip`
+    /// at runtime. Built once in `install()` and stashed here.
+    pub tray_icon:   Arc<Mutex<Option<TrayIcon<Wry>>>>,
 }
 
 impl TrayHandles {
-    pub fn new() -> Self {
-        Self {
-            toggle_item: Arc::new(Mutex::new(None)),
-            show_item:   Arc::new(Mutex::new(None)),
-        }
+    /// Kept for API consistency with the rest of the codebase
+    /// (`TunManager::new()`, `SidecarHandle::new()`, ...).
+    pub fn new() -> Self { Self::default() }
+}
+
+// ============================================================================
+// update_tray_icon — public sync helper, called from every state-change
+// site.  Decision matrix:
+//
+//     proxy enabled?   TUN On?   icon
+//     ----------------------------------
+//     false            false     idle
+//     true             false     active
+//     false            true      active
+//     true             true      active
+//
+// We re-load both icons from the embedded bytes every time, which is
+// cheap (the bytes are already in .rodata) and means we never need to
+// worry about handle / path lifetimes.
+//
+// On non-Windows builds this is a no-op (the tray is only installed
+// on Windows) so commands can call it unconditionally.
+// ============================================================================
+pub fn update_tray_icon<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        return Ok(());
     }
+    #[cfg(target_os = "windows")]
+    {
+        update_tray_icon_impl(app)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn update_tray_icon_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
+    let proxy_on = proxy::query_system_proxy_status()
+        .map(|s| s.enabled)
+        .unwrap_or(false);
+    let tun_on = app
+        .try_state::<crate::core::tun::TunManager>()
+        .map(|m| m.snapshot().state == crate::core::tun::TunState::On)
+        .unwrap_or(false);
+    let active = proxy_on || tun_on;
+
+    let (png, tooltip) = if active {
+        (ICON_ACTIVE_PNG, TOOLTIP_ACTIVE)
+    } else {
+        (ICON_IDLE_PNG, TOOLTIP_IDLE)
+    };
+
+    let handles = app
+        .try_state::<TrayHandles>()
+        .ok_or_else(|| AppError::Tray("TrayHandles not managed".into()))?;
+    let icon: Image<'_> = Image::from_bytes(png)
+        .map_err(|e| AppError::Tray(format!("decode tray png: {e}")))?;
+
+    let g = handles.tray_icon.lock().expect("tray handles poisoned");
+    if let Some(tray) = g.as_ref() {
+        tray.set_icon(Some(icon))
+            .map_err(|e| AppError::Tray(format!("set tray icon: {e}")))?;
+        tray.set_tooltip(Some(tooltip))
+            .map_err(|e| AppError::Tray(format!("set tray tooltip: {e}")))?;
+    }
+    // Note: when both `proxy_on` and `tun_on` are false but the
+    // kernel is running, we still show the idle icon — the user
+    // metric is "is traffic going through FlexClash?", and that
+    // requires either proxy or TUN.  The kernel can be started
+    // before either of those is flipped, so this is the right
+    // behaviour.
+    Ok(())
 }
 
 /// Build and install the tray icon + context menu. Phase 1 desktop-only.
@@ -107,8 +196,11 @@ fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
     }
     app.manage(handles);
 
-    // Build the icon. We re-use the app's bundle icon.
-    let _tray = TrayIconBuilder::with_id("main")
+    // Build the icon. We re-use the app's bundle icon for the *initial*
+    // render, then immediately call `update_tray_icon` which swaps in
+    // the correct active/idle variant.  This avoids a one-frame flash
+    // of the wrong icon on first boot.
+    let tray = TrayIconBuilder::with_id("main")
         .tooltip("FlexClash")
         .icon(app.default_window_icon().cloned().ok_or_else(|| {
             AppError::Tray("no default window icon configured".into())
@@ -124,9 +216,22 @@ fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
         .build(app)
         .map_err(|e| AppError::Tray(format!("build tray icon: {e}")))?;
 
-    // Also subscribe to SYSTEM_PROXY_CHANGED so external toggles (e.g. the
-    // dashboard switch) keep the menu item in sync.
+    // Stash the TrayIcon handle so update_tray_icon can mutate it.
+    {
+        let state = app.state::<TrayHandles>();
+        let mut g = state.tray_icon.lock().expect("tray handles poisoned");
+        *g = Some(tray);
+    }
+
+    // Subscribe to SYSTEM_PROXY_CHANGED + TUN_STATE_CHANGED so the
+    // icon stays in sync with whatever flipped the underlying state.
     subscribe_proxy_state(app);
+    subscribe_tun_state(app);
+
+    // First paint: read current state and pick the right icon now.
+    if let Err(e) = update_tray_icon(app) {
+        let _ = app.emit(KERNEL_LOG, format!("[tray] initial icon update failed: {e}"));
+    }
 
     let _ = app.emit(KERNEL_LOG, "[tray] installed");
     Ok(())
@@ -211,6 +316,31 @@ fn subscribe_proxy_state(app: &AppHandle<Wry>) {
                         let _ = item.set_checked(p.enabled);
                     }
                 }
+                // Swap the icon / tooltip.
+                if let Err(e) = update_tray_icon(&app_for_cb) {
+                    let _ = app_for_cb.emit(
+                        KERNEL_LOG,
+                        format!("[tray] icon update on proxy change failed: {e}"),
+                    );
+                }
+            }
+        });
+    });
+}
+
+fn subscribe_tun_state(app: &AppHandle<Wry>) {
+    let app_for_task = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let app_for_cb = app_for_task.clone();
+        let _ = app_for_task.listen_any(TUN_STATE_CHANGED, move |_event| {
+            // The payload is the full TunStatus; we don't need to parse
+            // it because `update_tray_icon` re-reads the canonical state
+            // from the TunManager. Just re-paint the icon.
+            if let Err(e) = update_tray_icon(&app_for_cb) {
+                let _ = app_for_cb.emit(
+                    KERNEL_LOG,
+                    format!("[tray] icon update on tun change failed: {e}"),
+                );
             }
         });
     });

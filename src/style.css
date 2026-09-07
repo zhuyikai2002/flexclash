@@ -24,3 +24,24 @@ main {
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
+
+/* ------------------------------------------------------------------------
+ * Brand logo (Navbar).  The SVG (`src/assets/navbar-logo.svg`) is loaded
+ * as a URL and used as a `mask-image` so a sky-500 → indigo-400
+ * gradient is "cut into" the cat silhouette.  Matches the gradient of
+ * the tray-active icon and the main app-icon.svg for a consistent
+ * visual identity across window title bar / tray / navbar.
+ * ------------------------------------------------------------------------ */
+.brand-logo {
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+  -webkit-mask-image: var(--brand-mask);
+  mask-image: var(--brand-mask);
+  -webkit-mask-size: 70% auto;
+  mask-size: 70% auto;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  display: inline-block;
+}
+

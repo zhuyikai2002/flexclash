@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="50%" stop-color="#09090b"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="catGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <filter id="subtleGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  <rect width="504" height="504" x="4" y="4" rx="124" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8"/>
+  <path d="M 140 170 L 185 245 C 210 238, 302 238, 327 245 L 372 170 C 395 210, 400 270, 395 320 C 385 410, 320 440, 256 440 C 192 440, 127 410, 117 320 C 112 270, 117 210, 140 170 Z" fill="#ffffff" filter="url(#subtleGlow)"/>
+  <rect x="180" y="295" width="28" height="42" rx="14" fill="#09090b"/>
+  <rect x="304" y="295" width="28" height="42" rx="14" fill="#09090b"/>
+  <circle cx="194" cy="307" r="6" fill="url(#catGrad)"/>
+  <circle cx="318" cy="307" r="6" fill="url(#catGrad)"/>
+  <path d="M 120 340 L 80 335 M 120 355 L 75 365" stroke="rgba(255,255,255,0.2)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 392 340 L 432 335 M 392 355 L 437 365" stroke="rgba(255,255,255,0.2)" stroke-width="6" stroke-linecap="round"/>
+</svg>

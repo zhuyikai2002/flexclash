@@ -6,6 +6,12 @@
  * - Active item has a sliding white background
  * - Optional badge per tab (counts)
  * - LanguageSwitcher + StatusBadge on the right
+ * - Brand logo = SVG cat (src/assets/navbar-logo.svg) used as a
+ *   `mask-image`, so a sky-500 → indigo-400 gradient is "cut into"
+ *   the cat silhouette.  This mirrors the gradient of the tray-active
+ *   icon and the main app-icon.svg at a small scale, keeping the
+ *   visual identity consistent across window title bar / tray /
+ *   navbar.
  */
 import { computed } from 'vue'
 import { LayoutDashboard, Activity, Layers, BarChart3 } from 'lucide-vue-next'
@@ -13,6 +19,7 @@ import { useI18n } from '@/composables/useI18n'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import StatusBadge from './StatusBadge.vue'
 import type { KernelState } from '@/types/clash'
+import navbarLogoUrl from '@/assets/navbar-logo.svg?url'
 
 const props = defineProps<{
   modelValue: 'dashboard' | 'connections' | 'profiles' | 'stats'
@@ -39,10 +46,10 @@ const tabs = computed(() => [
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
         <div
-          class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 font-bold text-white shadow-lg shadow-indigo-500/20"
-        >
-          F
-        </div>
+          class="brand-logo h-9 w-9 rounded-lg shadow-lg shadow-indigo-500/30 ring-1 ring-white/10"
+          :style="{ '--brand-mask': `url('${navbarLogoUrl}')` }"
+          aria-hidden="true"
+        ></div>
         <div>
           <h1 class="text-base font-semibold tracking-tight text-zinc-100">
             {{ t('app.name') }}
