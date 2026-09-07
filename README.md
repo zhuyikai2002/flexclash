@@ -39,10 +39,25 @@
 
 ---
 
+## 界面预览
+
+FlexClash 采用现代 Fluent 深色玻璃设计语言，所有面板共享一致的视觉体系（`bg-white/5` + `backdrop-blur-md`）：
+
+| 区域 | 视觉重点 |
+|------|----------|
+| **顶栏** | 品牌渐变图标 · running 状态脉动点 · 药丸导航（Dashboard / Connections / Profiles / Stats）· 实时计数药丸 · 语言切换下拉 |
+| **仪表盘** | 三个状态卡片（Mihomo 内核 / 控制端口 / API 探针）· 三个开关卡（系统代理 / 开机自启 / TUN）· 流量仪表板（上行 / 下行）· 代理组 + 节点卡（hover-lift · 延迟药丸分级染色）· 折叠内核日志 |
+| **连接页** | 虚拟列表 · 60 fps 滚动 · 速率聚合 · 关键字/策略过滤 · 可调轮询间隔 · 断开全部确认模态 |
+| **统计页** | Canvas 原生绘图（1h / 24h / 7d）· 60 / 24 / 28 个采样点零填充 · 路由规则表（类型徽章彩色 · 实时搜索 · 类型筛选） |
+
+**双语支持** — 默认中文，可一键切换到 English；选择持久化到 localStorage，刷新后保留。翻译表覆盖 8 个命名空间（common / nav / time / dashboard / proxies / connections / profiles / stats）+ 状态徽章（running / starting / stopped / crashed / unknown）。详见 `src/i18n.ts` 与 `src/locales/`。
+
 ## 核心特性
 
 ### 🎨 桌面深度融合
 - **Windows 11 Mica / Win10 Acrylic** 毛玻璃原生背景（`window-vibrancy 0.5`）
+- **现代 Fluent 深色玻璃** UI（`bg-white/5` + `backdrop-blur-md`，胶囊药丸导航，pulsing 状态灯）
+- **双语界面** 简体中文（默认）+ English，实时切换，本地持久化
 - **开机自启** 通过注册表 `HKCU\...\Run` 注入，附带 `--silent` 静默启动
 - **系统托盘常驻** 单击切换主窗口可见性，右键菜单控制核心启停
 - **单实例锁** 防止多开冲突（`tauri-plugin-single-instance` 等价实现）
