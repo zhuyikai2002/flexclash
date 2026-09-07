@@ -10,39 +10,57 @@
 //   backend `KernelState` is single-writer on the Rust side.
 //   The store here is read-mostly; it only writes when an event arrives or a
 //   local command (start/stop/restart) resolves.
+//
+// Type contract (per spec):
+//   `KernelStoreState` describes the *public* reactive state exposed by
+//   this store. The string-union type `KernelState` is the single source
+//   of truth for the kernel's lifecycle position and is imported from
+//   `@/types/clash` (where the frontend-wide types live).
+//   Internal-only fields (event teardown list, latest error) are kept
+//   outside the interface so the public contract is tight and small.
 // ============================================================================
 
 import { defineStore } from 'pinia'
+import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import { getVersion, MIHOMO_BASE_URL } from '@/services/clash'
 import type { KernelState } from '@/types/clash'
 
-export type { KernelState }
-export type KernelStateStr = KernelState
-
-export type ProbeStatus = 'idle' | 'probing' | 'alive' | 'unreachable'
-
 interface ConfigRefreshNotice {
   fromPort: number | null
   toPort: number
 }
 
-interface KernelStoreState {
+/**
+ * Public reactive state of the kernel store.
+ *
+ * The string-union field `state` is the only place that mirrors the
+ * Rust `KernelState` enum; everything else is presentation / health
+ * data derived from REST probes.
+ */
+export interface KernelStoreState {
   state: KernelState
   version: string | null
   endpoint: string
-  probeStatus: ProbeStatus
+  probeStatus: 'idle' | 'probing' | 'healthy' | 'error'
   probeLatencyMs: number | null
-  lastError: string | null
   recentLogs: string[]
   configRefresh: ConfigRefreshNotice | null
-  // Listeners kept so the store could be torn down if needed (e.g. HMR).
-  _unlisteners: UnlistenFn[]
 }
 
 const LOG_CAP = 120
+
+// ---------------------------------------------------------------------------
+// Internal (non-public) state.  Kept module-scoped because nothing in the
+// UI cares about them, and they avoid cluttering the public interface.
+// `_unlisteners` is a plain `let` because Tauri unlisten handles are
+// imperative, not reactive.  `lastErrorRef` IS reactive so the dashboard
+// toast / banner can render it via a getter on the store.
+// ---------------------------------------------------------------------------
+let _unlisteners: UnlistenFn[] = []
+const lastErrorRef = ref<string | null>(null)
 
 export const useKernelStore = defineStore('kernel', {
   state: (): KernelStoreState => ({
@@ -51,16 +69,16 @@ export const useKernelStore = defineStore('kernel', {
     endpoint: MIHOMO_BASE_URL,
     probeStatus: 'idle',
     probeLatencyMs: null,
-    lastError: null,
     recentLogs: [],
     configRefresh: null,
-    _unlisteners: [],
   }),
 
   getters: {
     isRunning: (s): boolean => s.state === 'running',
     isTransitioning: (s): boolean =>
       s.state === 'starting' || s.state === 'stopping',
+    /** Latest error message, or `null` when no error is pending. */
+    lastError: (): string | null => lastErrorRef.value,
   },
 
   actions: {
@@ -68,21 +86,21 @@ export const useKernelStore = defineStore('kernel', {
     async init(): Promise<void> {
       await this.subscribeEvents()
       try {
-        this.state = await invoke<KernelStateStr>('get_kernel_state')
+        this.state = await invoke<KernelState>('get_kernel_state')
         if (this.state === 'running') {
           await this.probe()
         }
       } catch (e) {
-        this.lastError = String(e)
+        lastErrorRef.value = String(e)
       }
     },
 
     async subscribeEvents(): Promise<void> {
       // Idempotent: if already subscribed, do nothing.
-      if (this._unlisteners.length > 0) return
+      if (_unlisteners.length > 0) return
 
-      this._unlisteners.push(
-        await listen<KernelStateStr>('kernel://state', (e) => {
+      _unlisteners.push(
+        await listen<KernelState>('kernel://state', (e) => {
           this.state = e.payload
           if (e.payload === 'running') {
             void this.probe()
@@ -93,7 +111,7 @@ export const useKernelStore = defineStore('kernel', {
         }),
       )
 
-      this._unlisteners.push(
+      _unlisteners.push(
         await listen<string>('kernel://log', (e) => {
           this.recentLogs.push(e.payload)
           if (this.recentLogs.length > LOG_CAP) {
@@ -102,7 +120,7 @@ export const useKernelStore = defineStore('kernel', {
         }),
       )
 
-      this._unlisteners.push(
+      _unlisteners.push(
         await listen<ConfigRefreshPayload>('kernel://config-refreshed', (e) => {
           if (e.payload.kind === 'port_changed') {
             this.configRefresh = {
@@ -113,7 +131,7 @@ export const useKernelStore = defineStore('kernel', {
         }),
       )
 
-      this._unlisteners.push(
+      _unlisteners.push(
         await listen<{ code: number | null; signal: number | null }>(
           'kernel://terminated',
           (e) => {
@@ -133,57 +151,57 @@ export const useKernelStore = defineStore('kernel', {
         const ver = await getVersion()
         this.version = ver.version
         this.probeLatencyMs = Math.round(performance.now() - t0)
-        this.probeStatus = 'alive'
-        this.lastError = null
+        this.probeStatus = 'healthy'
+        lastErrorRef.value = null
       } catch (e) {
-        this.probeStatus = 'unreachable'
+        this.probeStatus = 'error'
         this.probeLatencyMs = null
-        this.lastError = e instanceof Error ? e.message : String(e)
+        lastErrorRef.value = e instanceof Error ? e.message : String(e)
       }
     },
 
     async start(): Promise<void> {
-      this.lastError = null
+      lastErrorRef.value = null
       try {
-        this.state = await invoke<KernelStateStr>('start_kernel')
+        this.state = await invoke<KernelState>('start_kernel')
         // start() itself only flips state to Starting; Running arrives via event.
       } catch (e) {
-        this.lastError = String(e)
+        lastErrorRef.value = String(e)
         throw e
       }
     },
 
     async stop(): Promise<void> {
-      this.lastError = null
+      lastErrorRef.value = null
       try {
-        this.state = await invoke<KernelStateStr>('stop_kernel')
+        this.state = await invoke<KernelState>('stop_kernel')
       } catch (e) {
-        this.lastError = String(e)
+        lastErrorRef.value = String(e)
         throw e
       }
     },
 
     async restart(): Promise<void> {
-      this.lastError = null
+      lastErrorRef.value = null
       this.version = null
       this.probeLatencyMs = null
       try {
-        this.state = await invoke<KernelStateStr>('restart_kernel')
+        this.state = await invoke<KernelState>('restart_kernel')
         // Mihomo needs a moment to listen again after restart.
         await new Promise((r) => setTimeout(r, 700))
         await this.probe()
       } catch (e) {
-        this.lastError = String(e)
+        lastErrorRef.value = String(e)
         throw e
       }
     },
 
     /** Tear down all Tauri event listeners (used by HMR / tests). */
     dispose(): void {
-      for (const u of this._unlisteners) {
+      for (const u of _unlisteners) {
         try { u() } catch { /* noop */ }
       }
-      this._unlisteners = []
+      _unlisteners = []
     },
   },
 })

@@ -80,18 +80,18 @@ async function safeRun(fn: () => Promise<void>) {
 
 const probeLabel = computed(() => {
   switch (kernel.probeStatus) {
-    case 'alive':       return t('dashboard.probe.alive', { ms: kernel.probeLatencyMs ?? '?' })
-    case 'unreachable': return t('dashboard.probe.unreachable')
-    case 'probing':     return t('dashboard.probe.probing')
-    default:            return t('dashboard.probe.idle')
+    case 'healthy':    return t('dashboard.probe.alive', { ms: kernel.probeLatencyMs ?? '?' })
+    case 'error':      return t('dashboard.probe.unreachable')
+    case 'probing':    return t('dashboard.probe.probing')
+    default:           return t('dashboard.probe.idle')
   }
 })
 const probeColorClass = computed(() => {
   switch (kernel.probeStatus) {
-    case 'alive':       return 'text-emerald-400'
-    case 'unreachable': return 'text-rose-400'
-    case 'probing':     return 'text-amber-400'
-    default:            return 'text-zinc-500'
+    case 'healthy':    return 'text-emerald-400'
+    case 'error':      return 'text-rose-400'
+    case 'probing':    return 'text-amber-400'
+    default:           return 'text-zinc-500'
   }
 })
 </script>
@@ -151,9 +151,9 @@ const probeColorClass = computed(() => {
               {{ t('dashboard.probe.title') }}
             </div>
             <div :class="['mt-2 text-2xl font-semibold font-mono flex items-center gap-2', probeColorClass]">
-              <CheckCircle2 v-if="kernel.probeStatus === 'alive'" class="w-6 h-6" />
+              <CheckCircle2 v-if="kernel.probeStatus === 'healthy'" class="w-6 h-6" />
               <Loader2 v-else-if="kernel.probeStatus === 'probing'" class="w-6 h-6 animate-spin" />
-              <AlertCircle v-else-if="kernel.probeStatus === 'unreachable'" class="w-6 h-6" />
+              <AlertCircle v-else-if="kernel.probeStatus === 'error'" class="w-6 h-6" />
               <span>{{ probeLabel }}</span>
             </div>
           </section>
