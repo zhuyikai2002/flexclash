@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------------
+ * M7: transparent body so the Win11 Mica / Win10 Acrylic backdrop applied
+ * in Rust (`core::startup::apply_native_backdrop`) shows through. Tailwind
+ * utility classes for cards (`bg-zinc-900`) keep their own backgrounds;
+ * only the top-level surface is left clear.
+ * ------------------------------------------------------------------------ */
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  color: #e5e7eb;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Slightly darker than pure transparent so the dark theme reads well on
+ * machines where the backdrop (Mica) defaults to a light tint. */
+main {
+  background: rgba(9, 9, 11, 0.62);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}

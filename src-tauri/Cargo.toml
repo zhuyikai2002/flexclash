@@ -1,0 +1,53 @@
+[package]
+name = "flexclash"
+version = "0.1.0"
+description = "FlexClash - lightweight Mihomo (Clash Meta) proxy client"
+authors = ["FlexClash Contributors"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "flexclash_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell    = "2"
+tauri-plugin-fs       = "2"
+tauri-plugin-http     = "2"
+tauri-plugin-process  = "2"
+tauri-plugin-dialog   = "2"
+tauri-plugin-autostart = "2"
+window-vibrancy       = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+[dev-dependencies]
+serial_test = "3"
+
+# Windows-only: registry + WinINET refresh
+[target."cfg(windows)".dependencies]
+winreg = "0.52"
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Networking_WinInet",
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
+] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

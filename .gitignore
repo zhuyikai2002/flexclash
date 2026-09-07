@@ -1,0 +1,85 @@
+# ============================================================================
+# FlexClash .gitignore
+# ----------------------------------------------------------------------------
+# This is the source of truth for what NOT to commit. Keep it tight; anything
+# that ends up in `git push` will live in the repo forever.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Node / Vite frontend
+# ----------------------------------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.npm/
+.eslintcache
+.stylelintcache
+
+# ----------------------------------------------------------------------------
+# Rust / Cargo / Tauri
+# ----------------------------------------------------------------------------
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/gen/
+src-tauri/WixTools/
+
+# Sidecar binaries (DO NOT commit the 50MB mihomo.exe — it's a redistributable
+# downloaded from https://github.com/MetaCubeX/mihomo/releases; the .gitkeep
+# preserves the folder for local builds).
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+
+# ----------------------------------------------------------------------------
+# Editors / OS junk
+# ----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+.vscode-test/
+*.swp
+*.swo
+*~
+
+# ----------------------------------------------------------------------------
+# Runtime data (created at first launch under %LOCALAPPDATA%\com.flexclash.app\)
+# ----------------------------------------------------------------------------
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ----------------------------------------------------------------------------
+# Logs & temporary test artifacts
+# ----------------------------------------------------------------------------
+*.log
+verify-m*.log
+mihomo-stdout.log
+mihomo-stderr.log
+cargo-check.log
+npm-install.log
+build.log
+
+# Stale verify-script probe helpers (left in repo root from past test runs)
+m3-traffic-probe.cjs
+m8-traffic-gen.cjs
+configs.raw.json
+verify-m1.v2.ps1
+
+# PowerShell transient files
+*.tmp
+
+# ----------------------------------------------------------------------------
+# Secrets & local config
+# ----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+secrets/
+*.key
+*.pem
+*.pfx
+*.p12
