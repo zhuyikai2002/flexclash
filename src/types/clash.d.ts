@@ -12,6 +12,19 @@ export interface MihomoVersion {
   version: string
 }
 
+// ----- Kernel lifecycle state (mirror of Rust `KernelState` enum) ----------
+// Re-exported from stores/kernel.ts; defined there because it travels with
+// the Pinia store. We surface it from here so components don't need to
+// pull in the whole store just to type a prop.
+
+export type KernelState =
+  | 'unknown'
+  | 'stopped'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'crashed'
+
 // ----- /traffic  (WebSocket only — pushed messages) -------------------------
 
 export interface TrafficSample {

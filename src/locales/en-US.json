@@ -1,0 +1,230 @@
+{
+  "app": {
+    "name": "FlexClash",
+    "tagline": "Mihomo (Clash Meta) desktop client",
+    "version": "v{version}"
+  },
+  "common": {
+    "start": "Start",
+    "stop": "Stop",
+    "restart": "Restart",
+    "refresh": "Refresh",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "copy": "Copy",
+    "copied": "Copied",
+    "clear": "Clear",
+    "close": "Close",
+    "open": "Open",
+    "add": "Add",
+    "import": "Import",
+    "export": "Export",
+    "search": "Search",
+    "filter": "Filter",
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "success": "Success",
+    "failed": "Failed",
+    "error": "Error",
+    "warning": "Warning",
+    "yes": "Yes",
+    "no": "No",
+    "on": "On",
+    "off": "Off",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "active": "Active",
+    "inactive": "Inactive",
+    "never": "Never",
+    "unknown": "Unknown",
+    "all": "All",
+    "none": "None",
+    "more": "More",
+    "less": "Less",
+    "back": "Back"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "connections": "Connections",
+    "profiles": "Profiles",
+    "stats": "Stats",
+    "language": "Language"
+  },
+  "time": {
+    "just_now": "just now",
+    "seconds_ago": "{n}s ago",
+    "minutes_ago": "{n}m ago",
+    "hours_ago": "{n}h ago",
+    "days_ago": "{n}d ago",
+    "never": "never"
+  },
+  "dashboard": {
+    "core": {
+      "title": "Mihomo Core",
+      "version_label": "Version",
+      "status_label": "Status"
+    },
+    "endpoint": {
+      "title": "Control Endpoint",
+      "label": "RESTful API"
+    },
+    "probe": {
+      "title": "API Probe",
+      "alive": "{ms} ms",
+      "unreachable": "Unreachable",
+      "probing": "Probing…",
+      "idle": "Idle"
+    },
+    "traffic": {
+      "title": "Live Traffic",
+      "upload": "Upload",
+      "download": "Download",
+      "per_second": "/s"
+    },
+    "state": {
+      "running": "Running",
+      "stopped": "Stopped",
+      "starting": "Starting",
+      "stopping": "Stopping",
+      "crashed": "Crashed",
+      "unknown": "Unknown"
+    },
+    "actions": {
+      "start": "Start kernel",
+      "stop": "Stop kernel",
+      "restart": "Restart kernel",
+      "start_subtitle": "Spawn mihomo sidecar and init TUN",
+      "stop_subtitle": "Gracefully stop mihomo (SIGTERM)",
+      "restart_subtitle": "Stop then start"
+    },
+    "notice": {
+      "config_refreshed": "Default config rewritten — external-controller port auto-refreshed from {from} to {to}"
+    },
+    "toggles": {
+      "system_proxy": {
+        "title": "System Proxy",
+        "description": "Route all apps through FlexClash",
+        "current": "Current: {value}"
+      },
+      "autostart": {
+        "title": "Auto-start",
+        "description": "Launch FlexClash silently on Windows login"
+      },
+      "tun": {
+        "title": "TUN Mode",
+        "description": "Capture all traffic via the Wintun kernel driver"
+      }
+    }
+  },
+  "proxies": {
+    "title": "Proxy Groups",
+    "empty": "No proxy groups",
+    "select": "Select",
+    "selected": "Selected",
+    "test": "Test",
+    "testing": "Testing",
+    "test_all": "Test all",
+    "latency": {
+      "label": "Latency",
+      "ms": "{n} ms",
+      "timeout": "Timeout",
+      "failed": "Failed"
+    },
+    "type": {
+      "DIRECT": "Direct",
+      "REJECT": "Reject",
+      "GLOBAL": "Global",
+      "Selector": "Selector",
+      "Fallback": "Fallback",
+      "URLTest": "URL Test",
+      "LoadBalance": "Load Balance",
+      "Relay": "Relay"
+    }
+  },
+  "connections": {
+    "title": "Active Connections",
+    "empty": "No active connections",
+    "disconnect_all": "Disconnect all",
+    "disconnect_confirm_title": "Disconnect all connections?",
+    "disconnect_confirm_body": "This will immediately close all {n} connections currently routed through FlexClash.",
+    "disconnect_confirm_ok": "Disconnect all",
+    "filter": {
+      "all": "All",
+      "active": "Active",
+      "closed": "Closed"
+    },
+    "columns": {
+      "host": "Host",
+      "process": "Process",
+      "network": "Network",
+      "type": "Type",
+      "rule": "Rule",
+      "time": "Time",
+      "upload": "Upload",
+      "download": "Download",
+      "action": "Action"
+    }
+  },
+  "profiles": {
+    "title": "Profile Manager",
+    "empty": "No profiles yet",
+    "active": "Active",
+    "add_url": "Import from URL",
+    "add_file": "Import from file",
+    "edit_url": "Edit URL",
+    "delete_confirm_title": "Delete profile?",
+    "delete_confirm_body": "This will delete profile \"{name}\" and its local cache. Continue?",
+    "subscription": {
+      "url": "Subscription URL",
+      "url_placeholder": "https://example.com/sub?token=xxx",
+      "user_agent": "User-Agent (optional)",
+      "traffic_used": "Used",
+      "traffic_total": "Total",
+      "traffic_remaining": "Remaining",
+      "expires_in": "expires in {n}d",
+      "expired": "expired",
+      "last_update": "Last update: {time}",
+      "update_now": "Update now"
+    }
+  },
+  "stats": {
+    "title": "Traffic Stats",
+    "range": {
+      "1h": "Last 1 hour",
+      "24h": "Last 24 hours",
+      "7d": "Last 7 days"
+    },
+    "total": {
+      "upload": "Total Upload",
+      "download": "Total Download"
+    },
+    "chart": {
+      "no_data": "No data",
+      "loading": "Loading…"
+    },
+    "rules": {
+      "title": "Routing Rules",
+      "search_placeholder": "Search rule, target or proxy",
+      "type_filter": "Type",
+      "all_types": "All",
+      "no_results": "No matching rules"
+    }
+  },
+  "errors": {
+    "elevation_cancelled": "User cancelled UAC prompt",
+    "elevation_failed": "Elevation failed: {msg}",
+    "tun_failed": "Failed to start TUN mode",
+    "kernel_start_failed": "Failed to start kernel: {msg}",
+    "kernel_stop_failed": "Failed to stop kernel: {msg}",
+    "network_error": "Network error",
+    "unknown": "Unknown error: {msg}"
+  },
+  "language": {
+    "label": "Interface language",
+    "zh-CN": "简体中文",
+    "en-US": "English"
+  }
+}

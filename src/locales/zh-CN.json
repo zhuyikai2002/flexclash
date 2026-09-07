@@ -1,0 +1,230 @@
+{
+  "app": {
+    "name": "FlexClash",
+    "tagline": "Mihomo (Clash Meta) 桌面客户端",
+    "version": "v{version}"
+  },
+  "common": {
+    "start": "启动",
+    "stop": "停止",
+    "restart": "重启",
+    "refresh": "刷新",
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "edit": "编辑",
+    "copy": "复制",
+    "copied": "已复制",
+    "clear": "清除",
+    "close": "关闭",
+    "open": "打开",
+    "add": "添加",
+    "import": "导入",
+    "export": "导出",
+    "search": "搜索",
+    "filter": "筛选",
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "success": "成功",
+    "failed": "失败",
+    "error": "错误",
+    "warning": "警告",
+    "yes": "是",
+    "no": "否",
+    "on": "已开启",
+    "off": "已关闭",
+    "enabled": "启用",
+    "disabled": "禁用",
+    "active": "活跃",
+    "inactive": "停用",
+    "never": "从未",
+    "unknown": "未知",
+    "all": "全部",
+    "none": "无",
+    "more": "更多",
+    "less": "收起",
+    "back": "返回"
+  },
+  "nav": {
+    "dashboard": "仪表盘",
+    "connections": "连接",
+    "profiles": "配置",
+    "stats": "统计",
+    "language": "语言"
+  },
+  "time": {
+    "just_now": "刚刚",
+    "seconds_ago": "{n} 秒前",
+    "minutes_ago": "{n} 分钟前",
+    "hours_ago": "{n} 小时前",
+    "days_ago": "{n} 天前",
+    "never": "从未"
+  },
+  "dashboard": {
+    "core": {
+      "title": "Mihomo 内核",
+      "version_label": "版本",
+      "status_label": "运行状态"
+    },
+    "endpoint": {
+      "title": "控制端口",
+      "label": "RESTful API"
+    },
+    "probe": {
+      "title": "健康探针",
+      "alive": "{ms} 毫秒",
+      "unreachable": "无法连通",
+      "probing": "探测中…",
+      "idle": "空闲"
+    },
+    "traffic": {
+      "title": "实时流量",
+      "upload": "上行",
+      "download": "下行",
+      "per_second": "/ 秒"
+    },
+    "state": {
+      "running": "运行中",
+      "stopped": "已停止",
+      "starting": "启动中",
+      "stopping": "停止中",
+      "crashed": "已崩溃",
+      "unknown": "未知"
+    },
+    "actions": {
+      "start": "启动内核",
+      "stop": "停止内核",
+      "restart": "重启内核",
+      "start_subtitle": "拉起 mihomo 子进程并初始化 TUN",
+      "stop_subtitle": "优雅停止 mihomo (SIGTERM)",
+      "restart_subtitle": "停止后重新启动"
+    },
+    "notice": {
+      "config_refreshed": "默认配置已重写，external-controller 端口已自动从 {from} 刷新为 {to}"
+    },
+    "toggles": {
+      "system_proxy": {
+        "title": "系统代理",
+        "description": "让所有应用通过 FlexClash 走代理",
+        "current": "当前: {value}"
+      },
+      "autostart": {
+        "title": "开机自启",
+        "description": "登录 Windows 时静默启动 FlexClash"
+      },
+      "tun": {
+        "title": "TUN 透明代理",
+        "description": "通过 Wintun 内核驱动接管全部流量"
+      }
+    }
+  },
+  "proxies": {
+    "title": "策略组",
+    "empty": "暂无策略组",
+    "select": "选择",
+    "selected": "已选",
+    "test": "测速",
+    "testing": "测速中",
+    "test_all": "全部测速",
+    "latency": {
+      "label": "延迟",
+      "ms": "{n} ms",
+      "timeout": "超时",
+      "failed": "失败"
+    },
+    "type": {
+      "DIRECT": "直连",
+      "REJECT": "拒绝",
+      "GLOBAL": "全局",
+      "Selector": "手动选择",
+      "Fallback": "故障转移",
+      "URLTest": "URL 测试",
+      "LoadBalance": "负载均衡",
+      "Relay": "中转"
+    }
+  },
+  "connections": {
+    "title": "活跃连接",
+    "empty": "暂无活跃连接",
+    "disconnect_all": "断开全部",
+    "disconnect_confirm_title": "断开所有连接？",
+    "disconnect_confirm_body": "这将立即关闭当前通过 FlexClash 转发的所有连接（{n} 条）。",
+    "disconnect_confirm_ok": "全部断开",
+    "filter": {
+      "all": "全部",
+      "active": "活跃",
+      "closed": "已关闭"
+    },
+    "columns": {
+      "host": "目标地址",
+      "process": "进程",
+      "network": "网络",
+      "type": "类型",
+      "rule": "匹配规则",
+      "time": "存活时间",
+      "upload": "上行",
+      "download": "下行",
+      "action": "操作"
+    }
+  },
+  "profiles": {
+    "title": "订阅配置",
+    "empty": "暂无配置文件",
+    "active": "使用中",
+    "add_url": "从 URL 导入",
+    "add_file": "从文件导入",
+    "edit_url": "更新 URL",
+    "delete_confirm_title": "删除配置？",
+    "delete_confirm_body": "将删除配置 \"{name}\" 及其本地缓存，确认操作？",
+    "subscription": {
+      "url": "订阅链接",
+      "url_placeholder": "https://example.com/sub?token=xxx",
+      "user_agent": "User-Agent（可选）",
+      "traffic_used": "已用流量",
+      "traffic_total": "总流量",
+      "traffic_remaining": "剩余流量",
+      "expires_in": "{n} 天后到期",
+      "expired": "已过期",
+      "last_update": "上次更新: {time}",
+      "update_now": "立即更新"
+    }
+  },
+  "stats": {
+    "title": "流量统计",
+    "range": {
+      "1h": "最近 1 小时",
+      "24h": "最近 24 小时",
+      "7d": "最近 7 天"
+    },
+    "total": {
+      "upload": "累计上行",
+      "download": "累计下行"
+    },
+    "chart": {
+      "no_data": "暂无数据",
+      "loading": "加载中…"
+    },
+    "rules": {
+      "title": "分流规则",
+      "search_placeholder": "搜索规则、目标或代理",
+      "type_filter": "类型",
+      "all_types": "全部",
+      "no_results": "无匹配规则"
+    }
+  },
+  "errors": {
+    "elevation_cancelled": "用户取消了 UAC 授权",
+    "elevation_failed": "提权失败: {msg}",
+    "tun_failed": "TUN 模式启动失败",
+    "kernel_start_failed": "内核启动失败: {msg}",
+    "kernel_stop_failed": "内核停止失败: {msg}",
+    "network_error": "网络错误",
+    "unknown": "未知错误: {msg}"
+  },
+  "language": {
+    "label": "界面语言",
+    "zh-CN": "简体中文",
+    "en-US": "English"
+  }
+}

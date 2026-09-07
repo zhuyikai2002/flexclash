@@ -17,14 +17,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import { getVersion, MIHOMO_BASE_URL } from '@/services/clash'
+import type { KernelState } from '@/types/clash'
 
-export type KernelStateStr =
-  | 'stopped'
-  | 'starting'
-  | 'running'
-  | 'stopping'
-  | 'crashed'
-  | 'unknown'
+export type { KernelState }
+export type KernelStateStr = KernelState
 
 export type ProbeStatus = 'idle' | 'probing' | 'alive' | 'unreachable'
 
@@ -33,8 +29,8 @@ interface ConfigRefreshNotice {
   toPort: number
 }
 
-interface KernelState {
-  state: KernelStateStr
+interface KernelStoreState {
+  state: KernelState
   version: string | null
   endpoint: string
   probeStatus: ProbeStatus
@@ -49,7 +45,7 @@ interface KernelState {
 const LOG_CAP = 120
 
 export const useKernelStore = defineStore('kernel', {
-  state: (): KernelState => ({
+  state: (): KernelStoreState => ({
     state: 'unknown',
     version: null,
     endpoint: MIHOMO_BASE_URL,

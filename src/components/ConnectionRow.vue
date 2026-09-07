@@ -60,7 +60,7 @@ function close() {
 
 <template>
   <div
-    class="flex items-center gap-3 px-3 text-xs text-zinc-200 border-b border-zinc-800/60 hover:bg-zinc-900/60 transition-colors"
+    class="flex items-center gap-3 px-3 text-xs text-zinc-200 border-b border-white/5 hover:bg-white/[0.04] transition-colors"
     :class="row.closing ? 'opacity-50' : ''"
     style="height: 40px"
     :data-conn-id="row.id"
@@ -108,7 +108,7 @@ function close() {
     <div class="w-24 shrink-0 flex items-center gap-1">
       <Shield class="h-3 w-3 text-zinc-500 shrink-0" />
       <span
-        class="rounded-full bg-indigo-950/60 border border-indigo-800 px-2 py-0.5 text-[10px] text-indigo-200 truncate"
+        class="rounded-full bg-indigo-500/15 border border-indigo-400/30 px-2 py-0.5 text-[10px] text-indigo-200 truncate"
         :title="policy"
       >{{ policy }}</span>
     </div>
@@ -118,7 +118,7 @@ function close() {
       <button
         v-if="!row.closing"
         type="button"
-        class="rounded p-1 text-zinc-500 hover:text-rose-300 hover:bg-rose-950/40"
+        class="rounded p-1 text-zinc-500 hover:text-rose-300 hover:bg-rose-500/10"
         title="Close this connection"
         @click="close"
       >

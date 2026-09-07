@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+/**
+ * SubscribeDialog — Add a profile (URL / file / paste YAML).
+ * Modal restyle only; submit flow preserved.
+ */
+import { ref } from 'vue'
 import { X, Link, FileCode2, ClipboardPaste, Loader2 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProfilesStore } from '@/stores/profiles'
+import { useI18n } from '@/composables/useI18n'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const store = useProfilesStore()
+const { t } = useI18n()
 
 type Tab = 'url' | 'file' | 'paste'
 const tab = ref<Tab>('url')
@@ -21,31 +27,20 @@ const pastedYaml = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
 
-onMounted(() => { /* nothing to load */ })
-
 function reset() {
-  url.value = ''
-  name.value = ''
-  filePath.value = ''
-  pastedName.value = ''
-  pastedYaml.value = ''
-  error.value = null
-  busy.value = false
+  url.value = ''; name.value = ''; filePath.value = ''
+  pastedName.value = ''; pastedYaml.value = ''
+  error.value = null; busy.value = false
 }
-
-function close() {
-  reset()
-  emit('close')
-}
+function close() { reset(); emit('close') }
 
 async function pickFile() {
   try {
     const sel = await open({
-      multiple: false,
-      directory: false,
+      multiple: false, directory: false,
       filters: [
         { name: 'YAML / text', extensions: ['yaml', 'yml', 'txt', 'conf'] },
-        { name: 'All files', extensions: ['*'] },
+        { name: 'All files',  extensions: ['*'] },
       ],
     })
     if (typeof sel === 'string') filePath.value = sel
@@ -55,8 +50,7 @@ async function pickFile() {
 }
 
 async function submit() {
-  busy.value = true
-  error.value = null
+  busy.value = true; error.value = null
   try {
     if (tab.value === 'url') {
       if (!url.value.trim()) throw new Error('URL is required')
@@ -78,38 +72,42 @@ async function submit() {
     busy.value = false
   }
 }
+
+const tabs = [
+  { id: 'url'   as const, label: t('profiles.add_url'),  icon: Link },
+  { id: 'file'  as const, label: t('profiles.add_file'), icon: FileCode2 },
+  { id: 'paste' as const, label: 'Paste YAML',           icon: ClipboardPaste },
+]
 </script>
 
 <template>
   <Teleport to="body">
     <div
       v-if="props.open"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 p-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="close"
     >
-      <div class="w-full max-w-xl rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl">
+      <div class="w-full max-w-xl rounded-2xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-5 shadow-2xl">
         <header class="mb-4 flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-slate-100">Add a profile</h2>
+          <h2 class="text-base font-semibold tracking-tight text-zinc-100">
+            {{ t('common.import') }} profile
+          </h2>
           <button
-            class="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+            class="rounded-lg p-1 text-zinc-400 hover:bg-white/5 hover:text-zinc-200 transition-colors"
             @click="close"
           >
             <X class="h-4 w-4" />
           </button>
         </header>
 
-        <nav class="mb-4 flex gap-1 rounded-md bg-slate-800/60 p-1 text-xs">
+        <nav class="mb-4 inline-flex items-center gap-0.5 rounded-xl border border-white/5 bg-white/[0.04] p-1 text-xs w-full">
           <button
-            v-for="t in [
-              { id: 'url',   label: 'Subscription URL', icon: Link },
-              { id: 'file',  label: 'From file',        icon: FileCode2 },
-              { id: 'paste', label: 'Paste YAML',       icon: ClipboardPaste },
-            ] as const"
+            v-for="t in tabs"
             :key="t.id"
-            class="flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 transition"
+            class="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors"
             :class="tab === t.id
-              ? 'bg-sky-600 text-white'
-              : 'text-slate-300 hover:bg-slate-700/60'"
+              ? 'bg-white/10 text-zinc-100'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'"
             @click="tab = t.id"
           >
             <component :is="t.icon" class="h-3.5 w-3.5" />
@@ -120,42 +118,42 @@ async function submit() {
         <form class="space-y-3" @submit.prevent="submit">
           <div v-if="tab === 'url'" class="space-y-2">
             <label class="block">
-              <span class="text-xs text-slate-400">Subscription URL</span>
+              <span class="text-xs text-zinc-400">{{ t('profiles.subscription.url') }}</span>
               <input
                 v-model="url"
                 type="url"
-                placeholder="https://example.com/link?clash=1"
-                class="mt-1 block w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                :placeholder="t('profiles.subscription.url_placeholder')"
+                class="mt-1 block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
                 required
               />
             </label>
             <label class="block">
-              <span class="text-xs text-slate-400">Display name (optional)</span>
+              <span class="text-xs text-zinc-400">Display name (optional)</span>
               <input
                 v-model="name"
                 type="text"
                 placeholder="My provider"
-                class="mt-1 block w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                class="mt-1 block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
               />
             </label>
-            <p class="text-[11px] text-slate-500">
-              User-Agent is set to <code class="text-slate-300">mihomo/1.19.30</code> automatically.
+            <p class="text-[11px] text-zinc-500">
+              User-Agent: <code class="text-zinc-300 font-mono">mihomo/1.19.30</code>
             </p>
           </div>
 
           <div v-else-if="tab === 'file'" class="space-y-2">
             <label class="block">
-              <span class="text-xs text-slate-400">File path</span>
+              <span class="text-xs text-zinc-400">File path</span>
               <div class="mt-1 flex gap-2">
                 <input
                   v-model="filePath"
                   type="text"
                   placeholder="C:\path\to\config.yaml"
-                  class="block w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  class="block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
                 />
                 <button
                   type="button"
-                  class="shrink-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+                  class="shrink-0 rounded-lg border border-white/5 bg-white/[0.04] px-3 py-1.5 text-xs text-zinc-200 hover:bg-white/[0.08] hover:border-white/10 transition-colors"
                   @click="pickFile"
                 >
                   Browse…
@@ -163,56 +161,56 @@ async function submit() {
               </div>
             </label>
             <label class="block">
-              <span class="text-xs text-slate-400">Display name (optional)</span>
+              <span class="text-xs text-zinc-400">Display name (optional)</span>
               <input
                 v-model="name"
                 type="text"
                 placeholder="My profile"
-                class="mt-1 block w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                class="mt-1 block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
               />
             </label>
           </div>
 
           <div v-else class="space-y-2">
             <label class="block">
-              <span class="text-xs text-slate-400">Display name</span>
+              <span class="text-xs text-zinc-400">Display name</span>
               <input
                 v-model="pastedName"
                 type="text"
                 placeholder="Pasted profile"
-                class="mt-1 block w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                class="mt-1 block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
               />
             </label>
             <label class="block">
-              <span class="text-xs text-slate-400">YAML</span>
+              <span class="text-xs text-zinc-400">YAML</span>
               <textarea
                 v-model="pastedYaml"
                 rows="10"
                 placeholder="mixed-port: 7890&#10;proxies:&#10;  - { name: 'ss1', type: ss, server: 1.2.3.4, port: 8388 }"
-                class="mt-1 block w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                class="mt-1 block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
               />
             </label>
           </div>
 
-          <p v-if="error" class="rounded-md border border-rose-700/50 bg-rose-900/20 px-3 py-2 text-xs text-rose-200">
+          <p v-if="error" class="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
             {{ error }}
           </p>
 
           <footer class="flex items-center justify-end gap-2 pt-2">
             <button
               type="button"
-              class="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+              class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/[0.08] hover:border-white/10 transition-colors"
               @click="close"
             >
-              Cancel
+              {{ t('common.cancel') }}
             </button>
             <button
               type="submit"
-              class="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-60"
+              class="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-400 disabled:opacity-60 transition-colors"
               :disabled="busy"
             >
               <Loader2 v-if="busy" class="h-3.5 w-3.5 animate-spin" />
-              {{ busy ? 'Importing…' : 'Import' }}
+              {{ busy ? t('common.loading') : t('common.import') }}
             </button>
           </footer>
         </form>
