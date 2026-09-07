@@ -242,16 +242,22 @@ npm install
 npm run tauri:dev
 ```
 
-### 端到端验证脚本
+### 端到端验证
 
-`verify-m1.ps1` ~ `verify-m10.ps1` 是分阶段验收脚本，每个里程碑一个。开发完成后跑一遍：
+FlexClash 采用分层测试策略（详见 [CONTRIBUTING.md](./CONTRIBUTING.md)）：
 
 ```powershell
-# 验证当前里程碑
-powershell -ExecutionPolicy Bypass -File .\verify-m10.ps1
-```
+# Layer 1: Rust 单测 (21 项) + 集成测试
+cd src-tauri
+cargo test
 
-最近一次结果：**M9 + M10 全部 10/10 PASS**（详见 `verify-m*.ps1` 顶部注释）。
+# Layer 2 + 3: TypeScript 类型检查 + Vite 打包
+cd ..
+npm run build
+
+# Layer 4 (可选): Tauri 生产构建 (~8-10min)
+npm run tauri:build
+```
 
 ---
 
@@ -308,9 +314,9 @@ Phase 1 与 Phase 2 已在 Windows 上高分闭环（21 个 Rust 单测 + 30 个
 ```
 flexclash/
 ├── src/                          # Vue 3 前端
-│   ├── components/               # 12 个 .vue 组件
+│   ├── components/               # 13 个 .vue 组件
 │   ├── stores/                   # 9 个 Pinia store
-│   ├── services/                 # 7 个 Tauri 包装层
+│   ├── services/                 # 8 个 Tauri 包装层
 │   ├── composables/              # useTrafficStream / useConnectionMonitor
 │   ├── types/                    # clash.d.ts (Mihomo API 类型)
 │   ├── utils/                    # format.ts (字节/时间格式化)
@@ -354,10 +360,11 @@ flexclash/
 │   ├── capabilities/default.json
 │   ├── icons/                    # 多尺寸 PNG / ICO
 │   ├── build.rs
-│   ├── tauri.conf.json
-│   └── Cargo.toml
+│   ├── Cargo.toml
+│   ├── Cargo.lock                # 已提交 (Tauri binary crate 可复现构建)
+│   └── tauri.conf.json
 │
-├── verify-m1.ps1 ~ verify-m10.ps1  # 分阶段验收脚本
+├── CONTRIBUTING.md                 # 贡献指南 + 测试策略
 ├── package.json                  # 前端依赖
 ├── vite.config.ts
 ├── tailwind.config.js

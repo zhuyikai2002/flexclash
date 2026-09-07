@@ -21,7 +21,6 @@ dist-ssr/
 # Rust / Cargo / Tauri
 # ----------------------------------------------------------------------------
 src-tauri/target/
-src-tauri/Cargo.lock
 src-tauri/gen/
 src-tauri/WixTools/
 
@@ -63,11 +62,18 @@ release-artifacts/
 # ----------------------------------------------------------------------------
 *.log
 verify-m*.log
+verify-m*.ps1
+verify-m*.txt
 mihomo-stdout.log
 mihomo-stderr.log
 cargo-check.log
 npm-install.log
 build.log
+
+# Maintainer-only documents (kept locally, not for contributors)
+ENGINEERING-CLOSEOUT.md
+PUBLISH-TO-GITHUB.md
+RELEASE-NOTES-*.md
 
 # Stale verify-script probe helpers (left in repo root from past test runs)
 m3-traffic-probe.cjs
