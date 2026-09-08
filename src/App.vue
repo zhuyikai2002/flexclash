@@ -22,7 +22,7 @@
  *     so context is local to the page, not a global Navbar
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { Power, RefreshCw, Terminal, AlertCircle, CheckCircle2, Loader2 } from 'lucide-vue-next'
 
 import { useKernelStore } from '@/stores/kernel'
@@ -77,7 +77,7 @@ onMounted(async () => {
   void sysproxy.init()
   void desktop.init()
   await tun.init()
-  unlistenTun = await listen('tun://state-changed', (e) => {
+  unlistenTun = await safeListen('tun://state-changed', (e) => {
     tun.onStateChanged(e.payload as Parameters<typeof tun.onStateChanged>[0])
   })
   void history.init()

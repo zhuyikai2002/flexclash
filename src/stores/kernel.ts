@@ -22,8 +22,7 @@
 
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { safeInvoke, safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 
 import { getVersion, MIHOMO_BASE_URL, pollUntil, isAlive } from '@/services/clash'
 import type { KernelState } from '@/types/clash'
@@ -86,7 +85,7 @@ export const useKernelStore = defineStore('kernel', {
     async init(): Promise<void> {
       await this.subscribeEvents()
       try {
-        this.state = await invoke<KernelState>('get_kernel_state')
+        this.state = await safeInvokeOr<KernelState>('get_kernel_state', 'unknown')
       } catch (e) {
         lastErrorRef.value = String(e)
       }
@@ -112,7 +111,7 @@ export const useKernelStore = defineStore('kernel', {
       if (_unlisteners.length > 0) return
 
       _unlisteners.push(
-        await listen<KernelState>('kernel://state', (e) => {
+        await safeListen<KernelState>('kernel://state', (e) => {
           this.state = e.payload
           if (e.payload === 'running') {
             void this.probe()
@@ -124,7 +123,7 @@ export const useKernelStore = defineStore('kernel', {
       )
 
       _unlisteners.push(
-        await listen<string>('kernel://log', (e) => {
+        await safeListen<string>('kernel://log', (e) => {
           this.recentLogs.push(e.payload)
           if (this.recentLogs.length > LOG_CAP) {
             this.recentLogs.splice(0, this.recentLogs.length - LOG_CAP)
@@ -133,7 +132,7 @@ export const useKernelStore = defineStore('kernel', {
       )
 
       _unlisteners.push(
-        await listen<ConfigRefreshPayload>('kernel://config-refreshed', (e) => {
+        await safeListen<ConfigRefreshPayload>('kernel://config-refreshed', (e) => {
           if (e.payload.kind === 'port_changed') {
             this.configRefresh = {
               fromPort: e.payload.from_port ?? null,
@@ -144,7 +143,7 @@ export const useKernelStore = defineStore('kernel', {
       )
 
       _unlisteners.push(
-        await listen<{ code: number | null; signal: number | null }>(
+        await safeListen<{ code: number | null; signal: number | null }>(
           'kernel://terminated',
           (e) => {
             this.recentLogs.push(
@@ -217,7 +216,7 @@ export const useKernelStore = defineStore('kernel', {
     async start(): Promise<void> {
       lastErrorRef.value = null
       try {
-        this.state = await invoke<KernelState>('start_kernel')
+        this.state = await safeInvoke<KernelState>('start_kernel')
         // start() itself only flips state to Starting; Running arrives via event.
       } catch (e) {
         lastErrorRef.value = String(e)
@@ -228,7 +227,7 @@ export const useKernelStore = defineStore('kernel', {
     async stop(): Promise<void> {
       lastErrorRef.value = null
       try {
-        this.state = await invoke<KernelState>('stop_kernel')
+        this.state = await safeInvoke<KernelState>('stop_kernel')
       } catch (e) {
         lastErrorRef.value = String(e)
         throw e
@@ -240,7 +239,7 @@ export const useKernelStore = defineStore('kernel', {
       this.version = null
       this.probeLatencyMs = null
       try {
-        this.state = await invoke<KernelState>('restart_kernel')
+        this.state = await safeInvoke<KernelState>('restart_kernel')
         // Mihomo needs ~1-2s to rebind 9091. Use the full backoff window
         // instead of a fixed 700ms sleep so MMDB download / Wintun init
         // don't trip a false "unreachable".

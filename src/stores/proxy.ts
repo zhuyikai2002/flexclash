@@ -10,10 +10,11 @@
 // ============================================================================
 
 import { defineStore } from 'pinia'
-import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 
 import {
+  enableSystemProxy,
+  disableSystemProxy,
   getSystemProxyStatus,
   SYSTEM_PROXY_CHANGED_EVENT,
   type ProxyStatus,
@@ -63,7 +64,7 @@ export const useProxyStore = defineStore('proxy', {
     async subscribeEvents(): Promise<void> {
       if (this._unlisteners.length > 0) return
       this._unlisteners.push(
-        await listen<{ enabled: boolean; port: number | null; source: string }>(
+        await safeListen<{ enabled: boolean; port: number | null; source: string }>(
           SYSTEM_PROXY_CHANGED_EVENT,
           () => {
             // Re-read from registry (single source of truth).
@@ -77,7 +78,7 @@ export const useProxyStore = defineStore('proxy', {
       this.toggling = true
       this.lastError = null
       try {
-        const res = await invoke<ProxyToggleResult>('enable_system_proxy', { port })
+        const res = await enableSystemProxy(port)
         await this.refresh()
         return res
       } catch (e) {
@@ -92,7 +93,7 @@ export const useProxyStore = defineStore('proxy', {
       this.toggling = true
       this.lastError = null
       try {
-        const res = await invoke<ProxyToggleResult>('disable_system_proxy')
+        const res = await disableSystemProxy()
         await this.refresh()
         return res
       } catch (e) {

@@ -9,7 +9,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import {
   deleteProfile as delProfile,
   getActiveProfile as fetchActive,
@@ -134,12 +134,12 @@ export const useProfilesStore = defineStore('profiles', () => {
   // ---- event subscription -------------------------------------------------
   function attach(): void {
     if (unlistens.length) return
-    void listen<ProfileMeta | string>(EVT_PROFILE_LIST_CHANGED, () => {
+    void safeListen<ProfileMeta | string>(EVT_PROFILE_LIST_CHANGED, () => {
       void refresh()
     })
       .then((u) => unlistens.push(u))
       .catch(() => {})
-    void listen<ProfileMeta>(EVT_PROFILE_RELOADED, (e) => {
+    void safeListen<ProfileMeta>(EVT_PROFILE_RELOADED, (e) => {
       const p = e.payload
       if (p && typeof p === 'object' && 'id' in p) {
         activeId.value = p.id

@@ -3,10 +3,10 @@
 //
 // All real work happens in Rust (commands/tun.rs → core::tun::TunManager).
 // The store + UI are kept off the raw invoke() calls so swap-outs stay
-// local.
+// local.  `safeInvoke` is used so browser preview doesn't throw.
 // ============================================================================
 
-import { invoke } from '@tauri-apps/api/core'
+import { safeInvoke, safeInvokeOr } from '@/utils/tauri-bridge'
 
 export type TunState = 'off' | 'enabling' | 'on' | 'disabling' | 'failed'
 
@@ -26,18 +26,27 @@ export interface SweepResultFull {
   message: string
 }
 
+const DEFAULT_STATUS: TunStatus = {
+  state: 'off',
+  enabled: false,
+  device: 'flexclash-tun',
+  last_error: null,
+  last_changed_at_ms: 0,
+  last_sweep: null,
+}
+
 export async function getTunState(): Promise<TunStatus> {
-  return await invoke<TunStatus>('get_tun_state')
+  return await safeInvokeOr<TunStatus>('get_tun_state', DEFAULT_STATUS)
 }
 
 export async function enableTun(): Promise<TunStatus> {
-  return await invoke<TunStatus>('enable_tun')
+  return await safeInvoke<TunStatus>('enable_tun')
 }
 
 export async function disableTun(): Promise<TunStatus> {
-  return await invoke<TunStatus>('disable_tun')
+  return await safeInvoke<TunStatus>('disable_tun')
 }
 
 export async function sweepTunRoutes(): Promise<SweepResultFull> {
-  return await invoke<SweepResultFull>('sweep_tun_routes')
+  return await safeInvoke<SweepResultFull>('sweep_tun_routes')
 }
