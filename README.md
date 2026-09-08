@@ -73,6 +73,12 @@ FlexClash 采用现代深色 Fluent 玻璃设计语言，所有面板共享一�
 - **Specta 强类型契约**：Rust 结构体自动生成 `src/bindings.ts`，杜绝运行时未定义与空指针崩溃
 - **单向推模式状态流**：Rust 后台异步循环聚合内核健康、系统代理与实时速率，每秒广播快照，前端彻底告别 `setInterval`
 
+### 🔄 运维与健壮性
+- **应用内自动更新**：集成 tauri-plugin-updater，一键检查版本、显示 Release Notes、静默下载与自动重启安装（启用自签名更新通道）
+- **TUN 无感静默提权**：`ShellExecuteExW`(SW_HIDE) + 全子进程 `CREATE_NO_WINDOW`，彻底消除 CMD 黑框闪烁
+- **配置防冲刷保护**：用户订阅配置永不被冷启动默认值覆盖，节点完整留存
+- **崩溃取证落盘**：`runtime.log` 持久化 + sidecar 退出码追踪，长期挂机可诊断
+
 ---
 
 ## 架构拓扑
