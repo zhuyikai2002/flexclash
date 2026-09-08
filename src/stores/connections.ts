@@ -20,7 +20,7 @@ import {
   hashConnections,
   projectConnection,
 } from '@/services/connections'
-import type { ConnectionRow } from '@/types/clash'
+import type { Connection, ConnectionRow } from '@/types/clash'
 
 export type PollIntervalMs = 1000 | 2000 | 5000
 
@@ -72,7 +72,7 @@ export const useConnectionsStore = defineStore('connections', {
     filteredRows(state): ConnectionRow[] {
       const kw = state.searchKeyword.trim().toLowerCase()
       const pol = state.selectedPolicyFilter
-      const base = state.rows
+      const base = Array.isArray(state.rows) ? state.rows : []
       if (!kw && !pol) return base
       const out: ConnectionRow[] = []
       for (const r of base) {
@@ -90,7 +90,8 @@ export const useConnectionsStore = defineStore('connections', {
     /** Distinct policies for the dropdown filter. */
     distinctPolicies(state): string[] {
       const set = new Set<string>()
-      for (const r of state.rows) {
+      const rows = Array.isArray(state.rows) ? state.rows : []
+      for (const r of rows) {
         if (r.policy) set.add(r.policy)
       }
       return Array.from(set).sort()
@@ -109,9 +110,16 @@ export const useConnectionsStore = defineStore('connections', {
         this.lastSnapshotAt = now
         this.lastFetchAt = now
 
+        // 空值安全：Mihomo 在冷启动/异常时可能返回 null / undefined
+        // 的 `connections` 字段，严禁假定它总是可迭代。
+        const raw = (snap as { connections?: unknown } | null)?.connections
+        const connections: Connection[] = Array.isArray(raw)
+          ? (raw as Connection[])
+          : []
+
         // Project and derive per-row speed in place.
         const projected: ConnectionRow[] = []
-        for (const c of snap.connections) {
+        for (const c of connections) {
           projected.push(projectConnection(c))
         }
         deriveSpeeds(projected, this.previousCounters, dt)
@@ -130,7 +138,7 @@ export const useConnectionsStore = defineStore('connections', {
           this.lastContentHash = h
         }
 
-        this.totalConnections = snap.connections.length
+        this.totalConnections = connections.length
         this.uploadTotal = snap.uploadTotal || 0
         this.downloadTotal = snap.downloadTotal || 0
         this.lastError = null

@@ -6,7 +6,7 @@
 import { computed, ref, toRef, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
-  Filter, Loader2, Pause, Play, RefreshCw, Search, Trash2, XCircle,
+  Filter, Loader2, Pause, Play, Plug, RefreshCw, Search, Trash2, XCircle,
 } from 'lucide-vue-next'
 
 import { useConnectionsStore, type PollIntervalMs } from '@/stores/connections'
@@ -174,7 +174,10 @@ function onCloseRow(id: string) {
       </button>
     </div>
 
-    <div class="flex items-center gap-3 px-3 py-1.5 bg-white/[0.02] border-b border-white/5 text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">
+    <div
+      v-if="total > 0"
+      class="flex items-center gap-3 px-3 py-1.5 bg-white/[0.02] border-b border-white/5 text-[10px] text-zinc-500 uppercase tracking-wider font-semibold"
+    >
       <div class="flex-1 min-w-0">{{ t('connections.columns.host') }}</div>
       <div class="w-28 shrink-0">{{ t('connections.columns.process') }}</div>
       <div class="w-24 shrink-0">{{ t('connections.columns.network') }} · {{ t('connections.columns.type') }}</div>
@@ -193,8 +196,17 @@ function onCloseRow(id: string) {
       >
         Start the kernel to see live connections.
       </div>
+      <!-- 已初始化但无连接：标准空状态 -->
       <div
-        v-else-if="total === 0 && !store.lastError"
+        v-else-if="store.initialised && total === 0 && !store.lastError"
+        class="flex flex-col items-center justify-center h-full gap-2 text-zinc-500 text-sm px-6 text-center"
+      >
+        <Plug class="h-6 w-6 text-zinc-600" />
+        <span>{{ t('connections.empty') }}</span>
+      </div>
+      <!-- 首次加载中 -->
+      <div
+        v-else-if="!store.initialised && total === 0 && !store.lastError"
         class="flex items-center justify-center h-full text-zinc-500 text-sm"
       >
         <Loader2 class="h-4 w-4 animate-spin mr-2" />

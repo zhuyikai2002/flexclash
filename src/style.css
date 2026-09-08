@@ -162,48 +162,6 @@ aside.app-sidebar {
 }
 
 /* ============================================================================
- * BRAND LOGO
- * ============================================================================
- *  - `.brand-logo`         : the actual cat silhouette, filled with
- *                            sky-500 → indigo-400 gradient.
- *  - `.brand-logo-breathe` : static neon glow (sky-400 + indigo-400
- *                            drop-shadows).  The previous animated
- *                            keyframe was dropped because the
- *                            per-frame filter repaint looked "twitchy"
- *                            on a masked path; the static glow below
- *                            reads cleaner against the dark rail.
- * ============================================================================ */
-.brand-logo {
-  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
-  -webkit-mask-image: var(--brand-mask);
-  mask-image: var(--brand-mask);
-  -webkit-mask-size: 70% auto;
-  mask-size: 70% auto;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  display: inline-block;
-}
-
-.brand-logo-breathe {
-  /* Static neon glow (no animation). Two stacked drop-shadows give
-     the cat a tight sky-400 inner halo and a wider indigo-400
-     ambient bloom. The intensity is fixed at the "high" keyframe
-     from the previous animation so it still feels alive without
-     the per-frame repaint cost. */
-  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.75))
-          drop-shadow(0 0 24px rgba(129, 140, 248, 0.55));
-}
-
-/* Backwards-compat alias — kept so any future call-site that
-   references `.brand-logo-active` still gets the same glow. */
-.brand-logo-active {
-  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.75))
-          drop-shadow(0 0 24px rgba(129, 140, 248, 0.55));
-}
-
-/* ============================================================================
  * SELECTABLE TEXT (opt-in)
  * ============================================================================
  * The inline `selectstart` block in `index.html` blocks text selection

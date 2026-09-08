@@ -29,7 +29,6 @@ import { useI18n } from '@/composables/useI18n'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import StatusBadge from './StatusBadge.vue'
 import type { KernelState } from '@/types/clash'
-import navbarLogoUrl from '@/assets/navbar-logo.svg?url'
 
 type TabId = 'dashboard' | 'proxies' | 'connections' | 'profiles' | 'stats' | 'settings'
 
@@ -71,13 +70,29 @@ function pick(id: TabId) {
 
 <template>
   <div class="flex h-full w-full flex-col items-center py-4">
-    <!-- Top: brand logo (breathing) -->
+    <!-- Top: brand logo (static inline SVG, no mask dependency) -->
     <div
-      class="brand-logo brand-logo-breathe h-10 w-10 rounded-xl shadow-lg shadow-indigo-500/30 ring-1 ring-white/10"
-      :style="{ '--brand-mask': `url('${navbarLogoUrl}')` }"
+      class="relative flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/10 border border-sky-500/20 shadow-[0_0_15px_rgba(56,189,248,0.2)]"
       :title="t('app.name')"
       aria-hidden="true"
-    ></div>
+    >
+      <svg
+        viewBox="0 0 32 32"
+        class="h-6 w-6 text-sky-400"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path
+          d="M 8 7 L 11 14 C 13 13.5, 19 13.5, 21 14 L 24 7 C 26 10, 26 15, 25 19 C 24 25, 20 27, 16 27 C 12 27, 8 25, 7 19 C 6 15, 6 10, 8 7 Z"
+          fill="rgba(255,255,255,0.06)"
+        />
+        <circle cx="12" cy="18" r="1.5" fill="currentColor" />
+        <circle cx="20" cy="18" r="1.5" fill="currentColor" />
+      </svg>
+    </div>
 
     <!-- Middle: vertical capsule nav (data views) -->
     <nav class="mt-6 flex flex-col items-center gap-1">
