@@ -32,6 +32,20 @@ export const commands = {
 /* Types */
 export type AppError = ({ Io: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Path: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Shell: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Config: string }) & { Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Subscription: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Tray?: never; Tun?: never } | ({ Proxy: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Tray: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tun?: never } | ({ Desktop: string }) & { Config?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Tun: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never } | ({ Elevation: string }) & { Config?: never; Desktop?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Storage: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Http: string }) & { Config?: never; Desktop?: never; Elevation?: never; Io?: never; Mihomo?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | ({ Mihomo: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Other?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never } | "AlreadyRunning" | "NotRunning" | ({ Other: string }) & { Config?: never; Desktop?: never; Elevation?: never; Http?: never; Io?: never; Mihomo?: never; Path?: never; Proxy?: never; Shell?: never; Storage?: never; Subscription?: never; Tray?: never; Tun?: never };
 
+/**  Lightweight snapshot broadcast to the renderer each tick. */
+export type AppStateSnapshot = {
+	/**  Mihomo sidecar is up (Running state — no network probe needed). */
+	kernelOnline: boolean,
+	/**  System proxy currently active (platform query). */
+	systemProxyActive: boolean,
+	/**  Instantaneous egress bytes/sec (derived from /connections totals). */
+	uploadSpeed: number,
+	/**  Instantaneous ingress bytes/sec. */
+	downloadSpeed: number,
+	/**  Outbound mode: rule / global / direct. */
+	currentMode: string,
+};
+
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
     try {

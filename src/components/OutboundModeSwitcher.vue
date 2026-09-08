@@ -26,11 +26,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { setMode, getConfigs } from '@/services/clash'
 import { useI18n } from '@/composables/useI18n'
 import { useKernelStore } from '@/stores/kernel'
+import { useAppStateStore } from '@/stores/appstate'
 
 type Mode = 'rule' | 'global' | 'direct'
 
 const { t } = useI18n()
 const kernel = useKernelStore()
+const appstate = useAppStateStore()
 
 const current = ref<Mode>('rule')
 const lastError = ref<string | null>(null)
@@ -70,6 +72,17 @@ onMounted(refresh)
 watch(() => kernel.isRunning, (running) => {
   if (running) void refresh()
 })
+// Phase R3: the Rust state watcher is authoritative for outbound mode —
+// any external change (another client, config reload) reflects here within
+// one second, without polling.
+watch(
+  () => appstate.mode,
+  (m) => {
+    if (m === 'rule' || m === 'global' || m === 'direct') {
+      if (m !== current.value) current.value = m
+    }
+  },
+)
 
 async function pick(m: Mode) {
   if (m === current.value) return

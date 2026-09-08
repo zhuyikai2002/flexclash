@@ -32,6 +32,8 @@ import { useDesktopStore } from '@/stores/desktop'
 import { useConnectionsStore } from '@/stores/connections'
 import { useTunStore } from '@/stores/tun'
 import { useHistoryStore } from '@/stores/history'
+import { useAppStateStore } from '@/stores/appstate'
+import type { AppStateSnapshot } from '@/bindings'
 
 import Sidebar from '@/components/Sidebar.vue'
 import TrafficCard from '@/components/TrafficCard.vue'
@@ -56,6 +58,7 @@ const desktop = useDesktopStore()
 const conns = useConnectionsStore()
 const tun = useTunStore()
 const history = useHistoryStore()
+const appstate = useAppStateStore()
 
 type TabId = 'dashboard' | 'proxies' | 'connections' | 'profiles' | 'stats' | 'settings'
 const tab = ref<TabId>('dashboard')
@@ -71,6 +74,14 @@ onMounted(async () => {
   await kernel.init()
   void kernel.ensureRunning()
 
+  // Phase R3: single point of truth — Rust pushes a 1s state snapshot;
+  // we project it straight into the appstate store.
+  const unlistenState = await safeListen<AppStateSnapshot>(
+    'app-state://sync',
+    (e) => appstate.apply(e.payload),
+  )
+  appstate.addListener(unlistenState)
+
   profiles.attach()
   void profiles.refresh()
   void sysproxy.init()
@@ -84,6 +95,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (unlistenTun) unlistenTun()
+  appstate.release()
   history.dispose()
   kernel.dispose()
 })

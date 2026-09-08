@@ -53,7 +53,8 @@ pub fn run() {
                 commands::mihomo::close_mihomo_connection,
                 commands::mihomo::close_all_mihomo_connections,
                 commands::mihomo::get_mihomo_rules,
-            ]);
+            ])
+            .typ::<crate::core::watcher::AppStateSnapshot>();
 
         // Export TypeScript bindings to the frontend source tree.
         let out_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/bindings.ts");
@@ -90,6 +91,12 @@ pub fn run() {
             // M9: hand the AppHandle to the elevate module so the
             // TUN manager can resolve the mihomo work dir at any time.
             crate::core::elevate::install(handle.clone());
+
+            // Phase R3: spawn the once-per-second state broadcaster.
+            crate::core::watcher::spawn_state_watcher(
+                &handle,
+                app.state::<SidecarHandle>().inner().clone(),
+            );
 
             // M10: open the history DB at
             //   %LOCALAPPDATA%\com.flexclash.app\history.db
