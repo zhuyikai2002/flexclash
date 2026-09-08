@@ -85,6 +85,17 @@ pub fn run() {
             if let Some(win) = handle.get_webview_window("main") {
                 crate::core::startup::apply_native_backdrop(&win);
 
+                // UIPI: relax drag-and-drop / OLE data-transfer message
+                // filters on the top-level HWND so that a non-elevated
+                // Explorer (which is the common case for end users) can
+                // still drop files onto us when we are running elevated
+                // (TUN mode / dev as admin).  This is a no-op when the
+                // process integrity level is already the same as the
+                // source.
+                if let Ok(hwnd) = win.hwnd() {
+                    crate::core::uipi::relax_drag_drop_for_window(hwnd.0 as isize);
+                }
+
                 // Silent boot: keep window hidden, only tray is visible.
                 if silent {
                     eprintln!("[startup] --silent detected, hiding main window");

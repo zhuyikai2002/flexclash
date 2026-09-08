@@ -4,3 +4,4 @@ pub mod shutdown;
 pub mod sidecar;
 pub mod startup;
 pub mod tun;
+pub mod uipi;
