@@ -40,6 +40,9 @@ pub enum AppError {
     #[error("http error: {0}")]
     Http(String),
 
+    #[error("mihomo api error: {0}")]
+    Mihomo(String),
+
     #[error("kernel already running")]
     AlreadyRunning,
 

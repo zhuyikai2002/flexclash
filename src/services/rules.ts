@@ -1,19 +1,18 @@
 // ============================================================================
-// services/rules.ts — frontend wrapper around Mihomo `GET /rules`.
+// services/rules.ts — wrapper around Mihomo `GET /rules`.
 //
-// Per the M10 brief: "前端直连 Mihomo REST/WS" for rules. Rust does not
-// proxy rules; the UI talks straight to 127.0.0.1:9091 like the
-// connections / proxies panels do.
+// Phase R1: rules now come from the Rust façade command
+// `get_mihomo_rules` instead of a renderer-side axios GET.
 // ============================================================================
 
-import { axios } from './clash'
-import type { RulesResponse, Rule, RuleType } from '@/types/clash'
+import { getRules } from './clash'
+import type { Rule, RuleType } from '@/types/clash'
 
-export type { Rule, RuleType, RulesResponse }
+export type { Rule, RuleType }
 
 export async function fetchRules(): Promise<Rule[]> {
-  const r = await axios.get<RulesResponse>('/rules')
-  return r.data.rules ?? []
+  const res = await getRules()
+  return res.rules ?? []
 }
 
 /** Group rule types by category for the filter chip strip. */
