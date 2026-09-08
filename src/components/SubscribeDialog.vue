@@ -22,6 +22,7 @@
 import { ref, watch } from 'vue'
 import { X, Link, FileCode2, ClipboardPaste, Loader2 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-dialog'
+import { readText } from '@tauri-apps/plugin-clipboard-manager'
 import { useProfilesStore } from '@/stores/profiles'
 import { useI18n } from '@/composables/useI18n'
 
@@ -54,12 +55,20 @@ function close() { reset(); emit('close') }
 // ============================================================================
 // Clipboard auto-detect
 // ============================================================================
-// We mark the request so a user-gesture denial is silent (we just
-// fall through to the URL tab without nagging the user).
+// We use `tauri-plugin-clipboard-manager`'s `readText()` instead of
+// `navigator.clipboard.readText()`.  The browser API requires a
+// Chromium-level permission grant (which pops the "allow clipboard"
+// dialog) and is blocked in some WebView2 sandboxes.  The Tauri
+// plugin calls `arboard` / Win32 `GetClipboardData` directly and
+// needs no JS-side prompt at all.
+//
+// Failure is silent: an empty clipboard, a non-text format, or a
+// transient OS error all return `null` and we fall through to the
+// URL tab without any intrusive UI.
+// ============================================================================
 async function readClipboard(): Promise<string | null> {
   try {
-    if (!navigator.clipboard || !navigator.clipboard.readText) return null
-    return await navigator.clipboard.readText()
+    return await readText()
   } catch {
     return null
   }

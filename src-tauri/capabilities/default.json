@@ -36,6 +36,9 @@
     "http:default",
     "dialog:default",
 
-    "autostart:default"
+    "autostart:default",
+
+    "clipboard-manager:default",
+    "clipboard-manager:allow-read-text"
   ]
 }
