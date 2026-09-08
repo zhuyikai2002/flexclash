@@ -4,9 +4,47 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FlexClash</title>
+    <script>
+      // Resolve the persisted theme synchronously, before the bundle
+      // even starts loading — otherwise dark-mode users see a single
+      // frame of light palette.  Kept in lockstep with
+      // `src/stores/theme.ts`.
+      (function () {
+        try {
+          var t = localStorage.getItem('flexclash.theme');
+          if (t !== 'dark' && t !== 'light') t = 'dark';
+          document.documentElement.classList.add(t);
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = 'dark';
+        }
+      })();
+    </script>
   </head>
-  <body>
+  <body class="select-none">
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
+    <script>
+      // Block the WebView's default context menu (right-click), drag
+      // start, and text selection.  This kills the "I'm a website"
+      // feel of the desktop app.  Components that need to expose
+      // selectable text (e.g. the controller port, a copy-able
+      // subscription URL) opt in via the `.selectable` class on a
+      // child element — see `style.css`.
+      (function () {
+        document.addEventListener('contextmenu', (e) => e.preventDefault());
+        document.addEventListener('dragstart', (e) => e.preventDefault());
+        document.addEventListener('selectstart', (e) => {
+          // Only allow if the user explicitly clicked inside a
+          // `.selectable` (or input/textarea/contenteditable) element.
+          const t = e.target;
+          if (t && t.closest && t.closest('.selectable, input, textarea, [contenteditable="true"]')) {
+            return;
+          }
+          e.preventDefault();
+        });
+      })();
+    </script>
   </body>
 </html>

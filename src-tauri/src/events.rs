@@ -15,3 +15,9 @@ pub const SYSTEM_PROXY_CHANGED: &str = "system-proxy://changed";
 /// notifications on elevation success / failure / cancellation.
 pub const TUN_STATE_CHANGED: &str = "tun://state-changed";
 
+/// Phase 8: "Reset Application" finished. Payload = `ResetReport`.
+/// The frontend reacts by clearing localStorage, showing a
+/// "Reset complete" modal, and (1s later) calling `app.exit(0)`
+/// to trigger a clean restart.
+pub const APP_RESET_COMPLETED: &str = "app://reset-completed";
+

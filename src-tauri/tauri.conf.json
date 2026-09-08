@@ -15,17 +15,17 @@
         "title": "FlexClash",
         "width": 1100,
         "height": 720,
-        "label": "main"
+        "label": "main",
+        "transparent": true,
+        "decorations": true,
+        "shadow": true,
+        "center": true,
+        "minWidth": 880,
+        "minHeight": 560
       }
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "id": "main",
-      "iconPath": "icons/32x32.png",
-      "iconAsTemplate": false,
-      "tooltip": "FlexClash"
     }
   },
   "bundle": {

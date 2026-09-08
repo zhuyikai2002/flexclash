@@ -2,6 +2,14 @@
 # DO NOT edit unless you know what you are doing — if this file is missing,
 # Rust will recreate it on the next start. Real profiles live under
 # <app_local_data_dir>/mihomo/profiles/<id>/config.yaml (added in M4).
+#
+# Bump `flexclash-config-version` whenever the bundled default changes
+# in a backwards-incompatible way (e.g. adding new bypass rules).  The
+# `ensure_default_config` helper in core/sidecar.rs checks for this
+# line; if it's missing or older than the bundled version, the file
+# is rewritten and `kernel://config-refreshed` is emitted so the UI
+# can prompt the user to restart.
+# flexclash-config-version: 2
 
 mixed-port: 7890
 allow-lan: false
@@ -51,3 +59,41 @@ proxy-groups:
     proxies:
       - DIRECT
       - REJECT
+
+# ----------------------------------------------------------------------------
+# Routing rules.
+#
+# Critical for TUN mode:  when `tun.enable=true`, the Wintun adapter
+# hijacks EVERY packet on the host, including the loopback traffic
+# the frontend uses to talk to the controller (`127.0.0.1:9091`) and
+# private-network endpoints (LAN, Docker, WSL2).  Without explicit
+# bypass rules mihomo would route its own REST API through the proxy
+# group, which either loops (infinite recursion) or times out.
+#
+# These rules MUST stay at the top so they win over the catch-all
+# MATCH rule below.  `no-resolve` is important: when the host is a
+# pure IP literal we want a fast path, not a DNS round-trip.
+#
+# Order matters: more-specific CIDRs come first (loopback before
+# 10/8) so the lookup is deterministic.
+# ----------------------------------------------------------------------------
+rules:
+  # 1. Loopback — own controller, own IPC.  NEVER proxy 127.0.0.0/8.
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR6,::1/128,DIRECT,no-resolve
+
+  # 2. Private / link-local / multicast / broadcast ranges.  These
+  #    are LAN, Docker bridge, WSL2 vNIC, mDNS, etc.  None of them
+  #    should ever leave the host.
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+  - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
+
+  # 3. Catch-all — everything that wasn't matched above flows
+  #    through the PROXY selector group.  Real subscription
+  #    profiles (M4) will replace this with country/region rules
+  #    and a fallback chain.
+  - MATCH,PROXY

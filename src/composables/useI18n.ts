@@ -8,7 +8,12 @@
  */
 import { ref, watch } from 'vue'
 import { useI18n as useVueI18n } from 'vue-i18n'
-import { getLocale, setLocale, type Locale } from '../i18n'
+import {
+  getLocale,
+  setLocale,
+  SUPPORTED_LOCALES,
+  type Locale,
+} from '../i18n'
 
 const localeRef = ref<Locale>(getLocale())
 
@@ -26,6 +31,10 @@ export function useI18n() {
   return {
     ...i18n,
     locale: localeRef,
+    /** Frozen list of locales the app currently ships translations
+     *  for.  Exposed for UI pickers (e.g. the Settings → Language
+     *  button group) so they don't hard-code the locale codes. */
+    supportedLocales: SUPPORTED_LOCALES,
     setLocale: (next: Locale) => setLocale(next),
   }
 }

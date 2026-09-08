@@ -135,6 +135,8 @@ pub fn run() {
             commands::history::get_traffic_history,
             commands::history::get_history_db_path,
             commands::history::get_history_sample_count,
+            // Phase 8: outbound mode switcher + application reset
+            commands::reset::reset_application,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlexClash");

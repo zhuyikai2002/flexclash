@@ -150,6 +150,21 @@ export async function patchConfigs(patch: Partial<Config>): Promise<void> {
   await client.patch('/configs', patch)
 }
 
+/**
+ * Outbound mode switcher.  Phase 8 dashboard capsule.
+ *
+ * mihomo's `mode` is one of `rule` (default) / `global` / `direct`.
+ * The PATCH /configs body shape is `{ "mode": "rule" | "global" | "direct" }`.
+ * Throws if the kernel is not reachable; the caller is expected to gate
+ * the call behind a `kernel.isRunning` check so the user never sees a
+ * raw ECONNREFUSED toast.
+ */
+export async function setMode(
+  mode: 'rule' | 'global' | 'direct',
+): Promise<void> {
+  await client.patch('/configs', { mode })
+}
+
 // ============================================================================
 // Proxies
 // ============================================================================

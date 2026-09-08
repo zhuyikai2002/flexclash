@@ -52,7 +52,11 @@
     "connections": "Connections",
     "profiles": "Profiles",
     "stats": "Stats",
-    "language": "Language"
+    "language": "Language",
+    "settings": "Settings",
+    "theme": "Theme",
+    "theme_dark": "Dark",
+    "theme_light": "Light"
   },
   "time": {
     "just_now": "just now",
@@ -102,7 +106,10 @@
       "restart_subtitle": "Stop then start"
     },
     "notice": {
-      "config_refreshed": "Default config rewritten — external-controller port auto-refreshed from {from} to {to}"
+      "config_refreshed": "Default config rewritten — external-controller port auto-refreshed from {from} to {to}",
+      "schema_bumped_title": "Default config upgraded",
+      "schema_bumped_body": "v{from} → v{to}: added TUN loopback bypass rules, etc. Please restart the kernel to apply the new rules.",
+      "schema_bumped_action": "Restart now"
     },
     "toggles": {
       "system_proxy": {
@@ -118,6 +125,38 @@
         "title": "TUN Mode",
         "description": "Capture all traffic via the Wintun kernel driver"
       }
+    },
+    "outbound_mode": {
+      "title": "Outbound Mode",
+      "rule": "Rule",
+      "global": "Global",
+      "direct": "Direct",
+      "hint": "How unmatched traffic is handled",
+      "switching": "Switching…",
+      "switch_failed": "Switch failed: {msg}"
+    },
+    "active_profile": {
+      "title": "Active Profile",
+      "no_active": "No active profile",
+      "no_active_desc": "Import a subscription under the Profiles tab",
+      "traffic": "Traffic usage",
+      "used": "used",
+      "total": "of",
+      "remaining": "remaining",
+      "unlimited": "No quota cap",
+      "expires": "expires {date}",
+      "expired": "expired on {date}",
+      "no_expiry": "no expiry",
+      "updated_at": "updated {time}",
+      "update_now": "Update",
+      "updating": "Updating…"
+    },
+    "network_stats": {
+      "title": "Network Connections",
+      "active_connections": "Active",
+      "total_upload": "Total Up",
+      "total_download": "Total Down",
+      "view_connections": "View all →"
     }
   },
   "proxies": {
@@ -212,6 +251,67 @@
       "type_filter": "Type",
       "all_types": "All",
       "no_results": "No matching rules"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Core control, advanced config and client info",
+    "core": {
+      "title": "Core & Network",
+      "version": "Kernel Version",
+      "status": "Status",
+      "auto_managed": "Auto-managed by background daemon — no manual action needed",
+      "restart": "Restart Kernel",
+      "reprobe": "Re-probe",
+      "ports": "Port Configuration",
+      "ports_hint": "Ports are read from the active mihomo config. Live editing ships in Phase 8.",
+      "log_level": "Log Level",
+      "log_level_hint": "Changes apply on next kernel start"
+    },
+    "tun": {
+      "title": "TUN Advanced",
+      "stack": "Driver Stack",
+      "strict_route": "Strict Route",
+      "strict_route_desc": "Restrict TUN to specific UIDs to avoid interference from other host processes",
+      "dns_hijack": "DNS Hijack",
+      "dns_hijack_desc": "Hijack the system DNS port (53) to prevent DNS leaks",
+      "coming_soon": "Coming soon"
+    },
+    "general": {
+      "title": "General & Desktop",
+      "language": "Interface Language",
+      "close_behavior": "On Window Close",
+      "close_minimize": "Minimize to tray",
+      "close_minimize_desc": "Keep running in the background; click the tray icon to re-open",
+      "close_exit": "Exit the app",
+      "close_exit_desc": "Fully quit, also stops the mihomo kernel",
+      "route_cleanup": "Sweep Residual Routes",
+      "route_cleanup_desc": "After a mihomo crash, manually scan and remove leftover 0.0.0.0/1 routes from the routing table",
+      "route_cleanup_action": "Scan now",
+      "sweep_done": "Sweep complete"
+    },
+    "about": {
+      "title": "About FlexClash",
+      "client_version": "Client Version",
+      "update_check": "Check for Updates",
+      "update_action": "Check GitHub Releases",
+      "open_repo": "Open repository"
+    },
+    "danger_zone": {
+      "title": "Reset & Maintenance",
+      "subtitle": "Irreversible — read carefully",
+      "reset_app": "Reset Application",
+      "reset_app_desc": "Disable system proxy, stop mihomo + TUN, wipe all profiles and history, restore default config, then restart",
+      "reset_app_action": "Reset Application…",
+      "confirm_title": "Reset FlexClash?",
+      "confirm_body": "This will:\n• Disable system proxy and stop the mihomo child\n• Turn off TUN mode and sweep residual routes\n• Delete all subscription profiles, traffic history, and logs\n• Restore factory-default mihomo config\n• Restart FlexClash\n\nAfter restart you will need to re-import your subscription.",
+      "confirm_input_label": "Type RESET to confirm",
+      "confirm_input_placeholder": "RESET",
+      "confirm_action": "I understand — reset now",
+      "in_progress": "Resetting…",
+      "in_progress_desc": "Cleaning state and restoring defaults. Please do not close the window.",
+      "result_title": "Reset complete",
+      "result_desc": "Default config restored. The application will restart shortly."
     }
   },
   "errors": {

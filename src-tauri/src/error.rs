@@ -37,6 +37,9 @@ pub enum AppError {
     #[error("storage error: {0}")]
     Storage(String),
 
+    #[error("http error: {0}")]
+    Http(String),
+
     #[error("kernel already running")]
     AlreadyRunning,
 

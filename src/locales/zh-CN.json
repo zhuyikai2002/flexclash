@@ -52,7 +52,11 @@
     "connections": "连接",
     "profiles": "配置",
     "stats": "统计",
-    "language": "语言"
+    "language": "语言",
+    "settings": "设置",
+    "theme": "主题",
+    "theme_dark": "深色",
+    "theme_light": "浅色"
   },
   "time": {
     "just_now": "刚刚",
@@ -102,7 +106,10 @@
       "restart_subtitle": "停止后重新启动"
     },
     "notice": {
-      "config_refreshed": "默认配置已重写，external-controller 端口已自动从 {from} 刷新为 {to}"
+      "config_refreshed": "默认配置已重写，external-controller 端口已自动从 {from} 刷新为 {to}",
+      "schema_bumped_title": "默认配置已升级",
+      "schema_bumped_body": "v{from} → v{to}：新增 TUN 回环旁路规则等，请重启内核使新规则生效。",
+      "schema_bumped_action": "立即重启"
     },
     "toggles": {
       "system_proxy": {
@@ -118,6 +125,38 @@
         "title": "TUN 透明代理",
         "description": "通过 Wintun 内核驱动接管全部流量"
       }
+    },
+    "outbound_mode": {
+      "title": "出站模式",
+      "rule": "规则",
+      "global": "全局",
+      "direct": "直连",
+      "hint": "决定未被规则命中的流量如何处理",
+      "switching": "切换中…",
+      "switch_failed": "切换失败: {msg}"
+    },
+    "active_profile": {
+      "title": "当前配置",
+      "no_active": "尚未选择配置",
+      "no_active_desc": "请前往「配置」标签页导入订阅",
+      "traffic": "流量用量",
+      "used": "已用",
+      "total": "共",
+      "remaining": "剩余",
+      "unlimited": "无总量限制",
+      "expires": "{date} 到期",
+      "expired": "已于 {date} 到期",
+      "no_expiry": "无到期时间",
+      "updated_at": "更新于 {time}",
+      "update_now": "立即更新",
+      "updating": "更新中…"
+    },
+    "network_stats": {
+      "title": "网络连接",
+      "active_connections": "活跃连接",
+      "total_upload": "累计上行",
+      "total_download": "累计下行",
+      "view_connections": "查看连接 →"
     }
   },
   "proxies": {
@@ -212,6 +251,67 @@
       "type_filter": "类型",
       "all_types": "全部",
       "no_results": "无匹配规则"
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "subtitle": "核心控制、专业配置与客户端信息",
+    "core": {
+      "title": "核心与网络",
+      "version": "内核版本",
+      "status": "运行状态",
+      "auto_managed": "由后台静默守护，无需手动操作",
+      "restart": "重启核心",
+      "reprobe": "重新探针",
+      "ports": "端口配置",
+      "ports_hint": "端口来自当前激活的 mihomo 配置文件，Phase 8 将支持在线编辑",
+      "log_level": "日志级别",
+      "log_level_hint": "更改将在下次内核启动时生效"
+    },
+    "tun": {
+      "title": "TUN 进阶",
+      "stack": "驱动栈",
+      "strict_route": "严格路由",
+      "strict_route_desc": "仅允许指定 UID 走 TUN，避免被本机其他进程干扰",
+      "dns_hijack": "DNS 劫持",
+      "dns_hijack_desc": "劫持系统 DNS 53 端口以避免 DNS 泄露",
+      "coming_soon": "即将推出"
+    },
+    "general": {
+      "title": "常规与桌面行为",
+      "language": "界面语言",
+      "close_behavior": "关闭主窗口",
+      "close_minimize": "最小化到托盘",
+      "close_minimize_desc": "后台继续运行，点击托盘图标可重新打开",
+      "close_exit": "退出程序",
+      "close_exit_desc": "完全退出，同时停止 mihomo 内核",
+      "route_cleanup": "清理残余路由",
+      "route_cleanup_desc": "在 mihomo 崩溃后，手动扫描并删除系统中残留的 0.0.0.0/1 路由",
+      "route_cleanup_action": "立即扫描",
+      "sweep_done": "扫描完成"
+    },
+    "about": {
+      "title": "关于 FlexClash",
+      "client_version": "客户端版本",
+      "update_check": "检查更新",
+      "update_action": "检查 GitHub Releases",
+      "open_repo": "打开仓库"
+    },
+    "danger_zone": {
+      "title": "重置与维护",
+      "subtitle": "不可逆操作，请仔细阅读说明",
+      "reset_app": "重置应用",
+      "reset_app_desc": "禁用系统代理、停止 mihomo 与 TUN、删除所有配置与历史记录、恢复默认配置并重启应用",
+      "reset_app_action": "重置应用…",
+      "confirm_title": "确认重置应用？",
+      "confirm_body": "此操作将：\n• 禁用系统代理并停止 mihomo 子进程\n• 关闭 TUN 模式并清理残余路由\n• 删除所有订阅配置、流量历史和日志\n• 恢复出厂默认 mihomo 配置\n• 重启 FlexClash 进程\n\n应用重启后，您需要重新导入订阅才能使用。",
+      "confirm_input_label": "请输入 RESET 确认操作",
+      "confirm_input_placeholder": "RESET",
+      "confirm_action": "我已了解风险，立即重置",
+      "in_progress": "正在重置…",
+      "in_progress_desc": "正在清理状态并恢复默认配置，请勿关闭窗口。",
+      "result_title": "重置完成",
+      "result_desc": "默认配置已恢复，应用即将重启。"
     }
   },
   "errors": {

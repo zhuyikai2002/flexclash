@@ -75,7 +75,7 @@ fn registry() -> &'static Mutex<Option<ElevatedChild>> {
 mod platform {
     use super::*;
     use std::os::windows::process::CommandExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
     use windows::core::PCWSTR;
@@ -85,29 +85,105 @@ mod platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    /// Build the sidecar binary path the same way `core::sidecar` does.
-    /// We keep a *separate* resolver here so the elevation path stays
-    /// testable without dragging in the full sidecar machinery.
-    pub(super) fn resolve_mihomo_binary(work_dir: &std::path::Path) -> Result<PathBuf> {
-        // 1. Look for a sidecar pinned by the build script next to the exe.
-        let exe_dir = std::env::current_exe()
-            .map_err(|e| AppError::Tun(format!("current_exe: {e}")))?
-            .parent()
-            .ok_or_else(|| AppError::Tun("exe has no parent dir".into()))?
-            .to_path_buf();
-        let candidate = exe_dir.join("mihomo-x86_64-pc-windows-msvc.exe");
-        if candidate.exists() {
-            return Ok(candidate);
+    /// The sidecar name as Cargo sees it via `externalBin` in
+    /// `tauri.conf.json`.  The build script appends the target triple
+    /// suffix, so on Windows x64 it becomes
+    /// `mihomo-x86_64-pc-windows-msvc.exe`.
+    const SIDECAR_BIN: &str = "mihomo-x86_64-pc-windows-msvc.exe";
+    const SIDECAR_BIN_FALLBACK: &str = "mihomo.exe";
+
+    /// Path to `src-tauri/binaries/` as baked in at compile time.
+    /// Only meaningful in dev mode (production builds bake a path
+    /// that won't exist on the user's machine and the search will
+    /// transparently fall through to other candidates).
+    const SOURCE_BINARIES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/binaries");
+
+    /// Build the sidecar binary path with a multi-tier fallback chain.
+    ///
+    /// Search order:
+    ///   1. Tauri 2 native: `app.path().resolve(..., BaseDirectory::Resource)`
+    ///      (works for production bundles; in dev it points at the
+    ///      `binaries/` source dir).
+    ///   2. Dev source-of-truth: `<CARGO_MANIFEST_DIR>/binaries/mihomo-*.exe`
+    ///      (covers `tauri:dev` where the sidecar is never copied to
+    ///      `target/debug/`).
+    ///   3. Production: `<exe_dir>/<sidecar>` (Tauri copies the
+    ///      externalBin next to the binary on release builds).
+    ///   4. Production: `<exe_dir>/resources/<sidecar>`.
+    ///   5. AppData work dir (legacy, kept as a last-ditch fallback
+    ///      for users who manually drop the binary there).
+    ///   6. `<exe_dir>/<sidecar>` with the bare `mihomo.exe` name
+    ///      (covers the case where someone renamed it during manual
+    ///      install).
+    ///
+    /// The first match is canonicalized via `Path::canonicalize` so
+    /// we hand `ShellExecuteExW` an absolute, normalised path with
+    /// no `..` segments or symlink ambiguity.
+    pub(super) fn resolve_mihomo_binary<R: Runtime>(
+        app: &AppHandle<R>,
+        work_dir: &Path,
+    ) -> Result<PathBuf> {
+        use tauri::path::BaseDirectory;
+        use tauri::Manager;
+
+        let candidates: Vec<PathBuf> = {
+            let mut v = Vec::new();
+
+            // (1) Tauri 2 native resolution.  In dev this lands on
+            //     `<resource_dir>/mihomo-x86_64-pc-windows-msvc.exe`,
+            //     which equals the source `binaries/` dir.
+            if let Ok(p) = app.path().resolve(SIDECAR_BIN, BaseDirectory::Resource) {
+                if p.exists() {
+                    v.push(p);
+                }
+            }
+
+            // (2) Compile-time source.  This is the gold standard for
+            //     `tauri:dev`; the dev binary runs from `target/debug`
+            //     but the sidecar lives one level up at `src-tauri/binaries/`.
+            v.push(PathBuf::from(SOURCE_BINARIES_DIR).join(SIDECAR_BIN));
+
+            // (3) & (4) Production installs: sidecar copied next to
+            //     the running exe, optionally under a `resources/`
+            //     subdir.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(exe_dir) = exe.parent() {
+                    v.push(exe_dir.join(SIDECAR_BIN));
+                    v.push(exe_dir.join("resources").join(SIDECAR_BIN));
+                }
+            }
+
+            // (5) AppData work dir (legacy / user-overridden).
+            v.push(work_dir.join(SIDECAR_BIN));
+            v.push(work_dir.join(SIDECAR_BIN_FALLBACK));
+
+            // (6) Bare `mihomo.exe` next to the running exe.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(exe_dir) = exe.parent() {
+                    v.push(exe_dir.join(SIDECAR_BIN_FALLBACK));
+                }
+            }
+
+            v
+        };
+
+        for cand in &candidates {
+            if cand.exists() {
+                // `canonicalize` resolves `..`, symlinks, and the
+                // 8.3 short-name trap.  We swallow the error and
+                // fall back to the raw path on the off chance the
+                // user runs us from a non-existent CWD on a UNC
+                // share (where canonicalize can spuriously fail).
+                let abs = cand.canonicalize().unwrap_or_else(|_| cand.clone());
+                eprintln!("[elevate] resolved mihomo binary: {}", abs.display());
+                return Ok(abs);
+            }
         }
-        // 2. Fall back to <work_dir>/mihomo.exe (dev mode).
-        let dev = work_dir.join("mihomo.exe");
-        if dev.exists() {
-            return Ok(dev);
-        }
+
         Err(AppError::Tun(format!(
-            "mihomo binary not found near {} or {}",
-            candidate.display(),
-            dev.display()
+            "mihomo binary not found in any of the {} search paths; first candidate was {}",
+            candidates.len(),
+            candidates.first().map(|p| p.display().to_string()).unwrap_or_default(),
         )))
     }
 
@@ -135,7 +211,13 @@ mod platform {
             lpVerb: PCWSTR(verb.as_ptr()),
             lpFile: PCWSTR(file.as_ptr()),
             lpParameters: PCWSTR(parameters.as_ptr()),
-            nShow: 1, // SW_SHOWNORMAL
+            // `SW_HIDE` (0) keeps the elevated mihomo child from
+            // flashing a console window during the UAC consent
+            // sequence.  The mihomo logs are still captured by
+            // stdout/stderr forwarding in sidecar.rs and surfaced
+            // via the `kernel://log` event, so the user never loses
+            // visibility into the binary's diagnostics.
+            nShow: 0, // SW_HIDE
             ..Default::default()
         };
 
@@ -239,15 +321,19 @@ mod platform {
 #[cfg(not(target_os = "windows"))]
 mod platform {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use tauri::{AppHandle, Runtime};
 
-    pub(super) fn resolve_mihomo_binary(_work_dir: &std::path::Path) -> Result<PathBuf> {
+    pub(super) fn resolve_mihomo_binary<R: Runtime>(
+        _app: &AppHandle<R>,
+        _work_dir: &Path,
+    ) -> Result<PathBuf> {
         Err(AppError::Tun("elevation is Windows-only in Phase 1".into()))
     }
     pub(super) fn runas_spawn(
         _binary: &PathBuf,
-        _work_dir: &std::path::Path,
-        _config_path: &std::path::Path,
+        _work_dir: &Path,
+        _config_path: &Path,
     ) -> Result<u32> {
         Err(AppError::Tun("elevation is Windows-only in Phase 1".into()))
     }
@@ -272,7 +358,7 @@ pub fn spawn_elevated_mihomo<R: Runtime>(app: &AppHandle<R>) -> Result<u32> {
         .unwrap_or_else(|| std::env::temp_dir());
 
     let config_path = work_dir.join("config.yaml");
-    let binary = platform::resolve_mihomo_binary(&work_dir)?;
+    let binary = platform::resolve_mihomo_binary(app, &work_dir)?;
 
     let pid = platform::runas_spawn(&binary, &work_dir, &config_path)?;
     *registry()

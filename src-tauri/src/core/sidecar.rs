@@ -58,6 +58,16 @@ pub enum ConfigRefresh {
     /// File existed but `external-controller` port didn't match.
     /// Overwritten; old port reported as `from_port` (None if unparseable).
     PortChanged { from_port: Option<u16>, to_port: u16 },
+    /// File existed but the `flexclash-config-version` comment was
+    /// older (or missing).  Overwritten; bumped to `to_version`.
+    /// The UI should prompt the user to restart the kernel so the
+    /// new rules / schema take effect.
+    SchemaBumped {
+        from_version: u32,
+        to_version: u32,
+        from_port: Option<u16>,
+        to_port: u16,
+    },
     /// File exists and port already matches; no write performed.
     Unchanged,
 }
@@ -173,6 +183,18 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
             let _ = app.emit(
                 crate::events::KERNEL_CONFIG_REFRESHED,
                 ConfigRefresh::PortChanged { from_port, to_port },
+            );
+        }
+        ConfigRefresh::SchemaBumped { from_version, to_version, from_port, to_port } => {
+            let msg = format!(
+                "[config] schema bumped v{} -> v{} (added TUN loopback bypass rules, etc.) — please restart the kernel",
+                from_version, to_version
+            );
+            handle.push_log(msg.clone());
+            let _ = app.emit(crate::events::KERNEL_LOG, msg);
+            let _ = app.emit(
+                crate::events::KERNEL_CONFIG_REFRESHED,
+                ConfigRefresh::SchemaBumped { from_version, to_version, from_port, to_port },
             );
         }
         ConfigRefresh::Unchanged => {}
@@ -311,9 +333,13 @@ fn ensure_work_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
 
 /// Materialise the bundled minimal config.
 ///
-/// - Missing  → create (`Created`).
-/// - Stale port → overwrite (`PortChanged { from_port, to_port }`).
-/// - Fresh    → no-op (`Unchanged`).
+/// - Missing                  → create (`Created`).
+/// - Stale port               → overwrite (`PortChanged`).
+/// - Stale schema (bump the
+///   `flexclash-config-version`
+///   comment in the bundle
+///   to force a refresh)     → overwrite (`SchemaBumped`).
+/// - Fresh                    → no-op (`Unchanged`).
 ///
 /// Phase 1 ships only one default yaml — `Real profiles` (M4) will land in
 /// `profiles/<id>/config.yaml` and will NOT be touched by this function.
@@ -328,6 +354,46 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
     }
 
     let existing = std::fs::read_to_string(&path)?;
+
+    // Bump detection — if the user's on-disk config is missing the
+    // version marker, or carries a strictly older one, we treat the
+    // whole file as stale and rewrite it.  This is how we push
+    // backwards-incompatible schema changes (e.g. TUN bypass rules)
+    // without forcing the user to nuke their work dir.
+    if let (Some(user_v), Some(bundled_v)) = (
+        extract_config_version(&existing),
+        extract_config_version(bundled),
+    ) {
+        if user_v < bundled_v {
+            let from_port = extract_controller_port(&existing);
+            std::fs::write(&path, bundled)?;
+            return Ok((
+                path,
+                ConfigRefresh::SchemaBumped {
+                    from_version: user_v,
+                    to_version: bundled_v,
+                    from_port,
+                    to_port: EXPECTED_CONTROLLER_PORT,
+                },
+            ));
+        }
+    } else if extract_config_version(bundled).is_some() {
+        // Bundled config has a version marker but the user's file
+        // doesn't (pre-versioning install).  Bump.
+        let from_port = extract_controller_port(&existing);
+        let to_version = extract_config_version(bundled).unwrap();
+        std::fs::write(&path, bundled)?;
+        return Ok((
+            path,
+            ConfigRefresh::SchemaBumped {
+                from_version: 0,
+                to_version,
+                from_port,
+                to_port: EXPECTED_CONTROLLER_PORT,
+            },
+        ));
+    }
+
     if existing.contains(&expected) {
         return Ok((path, ConfigRefresh::Unchanged));
     }
@@ -335,6 +401,16 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
     let from_port = extract_controller_port(&existing);
     std::fs::write(&path, bundled)?;
     Ok((path, ConfigRefresh::PortChanged { from_port, to_port: EXPECTED_CONTROLLER_PORT }))
+}
+
+/// Parses the `# flexclash-config-version: N` comment.  Returns `None`
+/// if the marker is absent or malformed.
+fn extract_config_version(yaml: &str) -> Option<u32> {
+    yaml.lines()
+        .map(str::trim_start)
+        .find(|l| l.starts_with("# flexclash-config-version:"))
+        .and_then(|l| l.rsplit(':').next())
+        .and_then(|s| s.trim().parse().ok())
 }
 
 /// Naive single-line parser: looks for `external-controller: 127.0.0.1:NNNN`.

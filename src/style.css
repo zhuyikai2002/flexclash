@@ -2,67 +2,208 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ------------------------------------------------------------------------
- * App layout shell.  The desktop app uses a fixed-position sidebar plus
- * a flex-1 main content area.  Both must be `h-screen` (Tauri v2 sets
- * the body to 100%, so this is safe).
- * ------------------------------------------------------------------------ */
-html, body, #app {
+/* ============================================================================
+ * GLOBAL APP SHELL
+ * ============================================================================
+ *  - Tauri 2 wraps the WebView in `<body><div id="app">…</div></body>`.
+ *  - We force html/body/#app to a known canvas (100% of viewport, no
+ *    scroll, fully transparent so the native backdrop bleeds through).
+ *  - Anything that should scroll lives inside `.scroll-area`.
+ * ============================================================================ */
+html,
+body,
+#app {
   height: 100%;
   margin: 0;
   background: transparent;
   color: #e5e7eb;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  /* Hide horizontal scrollbar globally; main panel handles its own scroll. */
   overflow: hidden;
 }
 
-/* Mica-friendly dark base.  Sidebar uses a slightly darker tone so the
- * active tab indicator (white/10) reads against it without becoming a
- * giant white slab.  The right-hand main pane keeps the original tint
- * (rgba(9, 9, 11, 0.62)) so the Win11 Mica backdrop shows through. */
-main {
-  background: rgba(9, 9, 11, 0.62);
+/* Light mode: warm zinc-800 body text on a frosted white shell.
+   Component-level Tailwind classes that need to swap with the
+   theme use the `dark:` variant (e.g. `text-zinc-100 dark:text-zinc-200`),
+   but the body default below covers anything that falls through. */
+.light html,
+.light body,
+.light #app {
+  color: #1f2937;
+}
+
+/* ============================================================================
+ * LAYOUT SCAFFOLD
+ * ============================================================================
+ *  - `.app-root`  : the only place that owns `h-screen w-screen`. Children
+ *                   take their size from flex, not from the viewport.
+ *  - `.app-aside` : the slim left rail (68px). `isolation: isolate`
+ *                   creates a fresh stacking context so absolutely
+ *                   positioned descendants (the breathing logo's glow,
+ *                   active-tab indicator) cannot escape into the main
+ *                   pane and never get painted over by the main's
+ *                   background or transform.
+ *  - `.app-main`  : the scroll container. `min-w-0` lets the flex-1
+ *                   child shrink below its intrinsic content width
+ *                   (otherwise wide pre/code blocks push the sidebar
+ *                   off-screen).
+ *  - No negative margins, no `-translate-x-*`, no `position: absolute`
+ *    bridging the two regions. Anything that needs to live on top of
+ *    the main pane (popovers, dialogs) uses a modal portal.
+ * ============================================================================ */
+.app-root {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: transparent;
+}
+
+.app-aside {
+  /* 68px slim rail.  Width is also enforced by Tailwind's
+     `w-[68px] min-w-[68px] max-w-[68px]` so the rule below is a
+     belt-and-suspenders copy. */
+  width: 68px;
+  min-width: 68px;
+  max-width: 68px;
+  height: 100%;
+  flex-shrink: 0;
+  flex-grow: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Layered above the main pane so the breathing logo's glow and
+     the active-tab indicator never get clipped or overlapped. */
+  position: relative;
+  z-index: 30;
+  /* Mica-friendly: the deeper base lets the breathing logo's
+     gradient pop.  Win10 fallback (no Mica) stays legible. */
+  background: rgba(9, 9, 11, 0.78);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.app-main {
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  position: relative;
+  z-index: 10;
+  background: rgba(9, 9, 11, 0.55);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
 
-/* The slim left sidebar.  Slightly more opaque so the section labels
- * are legible even when the Mica backdrop is light (e.g. Win10). */
-aside.app-sidebar {
-  background: rgba(9, 9, 11, 0.82);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
+/* ============================================================================
+ * LIGHT THEME — re-tints the two chrome regions to a frosted white
+ * ============================================================================
+ *  Switched on by `class="light"` on <html>.  We keep the same
+ *  two-layer composition (translucent base + backdrop-filter) so
+ *  the glass feel survives in either mode.  The inner card /
+ *  text tokens are Tailwind utility classes that already carry
+ *  `dark:` variants elsewhere; the chrome itself is handled here
+ *  because the half-transparent overlays cannot be expressed in
+ *  pure utility classes.
+ * ============================================================================ */
+.light .app-aside {
+  background: rgba(255, 255, 255, 0.72);
+  border-right: 1px solid rgba(15, 23, 42, 0.06);
+}
+.light .app-main {
+  background: rgba(255, 255, 255, 0.58);
+}
+.light aside.app-sidebar {
+  background: rgba(255, 255, 255, 0.72);
+  border-right: 1px solid rgba(15, 23, 42, 0.06);
+}
+.light ::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+}
+.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+.light ::-webkit-scrollbar-thumb:active {
+  background: rgba(15, 23, 42, 0.45);
+}
+.light * {
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
 }
 
-/* Scrollable main area — only this region scrolls, never the window. */
-.scroll-area {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+/* Backwards-compat alias — anything that still carries the old
+   `app-sidebar` class continues to receive the same dark tint. */
+aside.app-sidebar {
+  background: rgba(9, 9, 11, 0.78);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
-.scroll-area::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+
+/* ============================================================================
+ * SCROLLBAR — global, theme-aware
+ * ============================================================================
+ *  We paint ALL scrollbars in the app (Tauri's WebView is a
+ *  Chromium surface that respects ::-webkit-scrollbar) with a
+ *  6px wide translucent thumb.  The track is fully transparent
+ *  so the Mica backdrop / light backdrop is never interrupted by
+ *  a white gutter.  Hover / drag darken the thumb without
+ *  changing the layout.  No native light-mode default ever shows
+ *  up — not in the main pane, not in the side rails, not in any
+ *  overlay.
+ * ============================================================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-.scroll-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
+::-webkit-scrollbar-track {
+  background: transparent !important;
 }
-.scroll-area::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
 }
-.scroll-area::-webkit-scrollbar-track {
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.35);
+}
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* ------------------------------------------------------------------------
- * Brand logo.  The SVG (`src/assets/navbar-logo.svg`) is loaded as a URL
- * and used as a `mask-image` so a sky-500 → indigo-400 gradient is
- * "cut into" the cat silhouette.  Matches the gradient of the
- * tray-active icon and the main app-icon.svg for a consistent visual
- * identity across window title bar / tray / navbar / sidebar logo.
- * ------------------------------------------------------------------------ */
+/* Firefox — `scrollbar-width: thin` already trims the chrome, but
+   the colour tuple keeps the track transparent. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.scroll-area {
+  scroll-behavior: smooth;
+}
+/* Stable gutter means toggling scrollbars never shifts the grid. */
+.app-main {
+  scrollbar-gutter: stable;
+}
+
+/* ============================================================================
+ * BRAND LOGO
+ * ============================================================================
+ *  - `.brand-logo`         : the actual cat silhouette, filled with
+ *                            sky-500 → indigo-400 gradient.
+ *  - `.brand-logo-breathe` : wraps `.brand-logo` and adds a soft
+ *                            outer glow that pulses every 3.6s.
+ *                            We animate `filter: drop-shadow()` and
+ *                            `transform: scale()` — both are
+ *                            GPU-composited and never repaint
+ *                            the masked path. The previous
+ *                            `::after` pseudo with `opacity +
+ *                            scale` was repainting the parent and
+ *                            could not animate a `mask-image`
+ *                            gradient anyway.
+ * ============================================================================ */
 .brand-logo {
   background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
   -webkit-mask-image: var(--brand-mask);
@@ -76,24 +217,48 @@ aside.app-sidebar {
   display: inline-block;
 }
 
-/* Subtle ambient glow for the sidebar logo — a 12px ring of the same
- * gradient so the cat appears to "breathe" even when idle. */
 .brand-logo-breathe {
-  position: relative;
+  /* Cat glow breathes through `filter: drop-shadow(...)`.  Two
+     stacked shadows give the cat both a tight inner glow (sky-400)
+     and a wider ambient bloom (indigo-400).  The transform scale
+     adds a subtle "lungful" effect synced to the same 3.6s clock. */
+  animation: cat-glow-breathe 3.6s ease-in-out infinite;
+  will-change: filter, transform;
 }
-.brand-logo-breathe::after {
-  content: '';
-  position: absolute;
-  inset: -6px;
-  border-radius: inherit;
-  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
-  opacity: 0.18;
-  filter: blur(10px);
-  z-index: -1;
-  animation: brand-breathe 3.6s ease-in-out infinite;
+@keyframes cat-glow-breathe {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.45))
+            drop-shadow(0 0 14px rgba(129, 140, 248, 0.25));
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.85))
+            drop-shadow(0 0 28px rgba(129, 140, 248, 0.55));
+    opacity: 1;
+    transform: scale(1.04);
+  }
 }
-@keyframes brand-breathe {
-  0%, 100% { opacity: 0.12; transform: scale(0.94); }
-  50%      { opacity: 0.32; transform: scale(1.06); }
+/* Convenience class so other call-sites (e.g. About screen) can opt
+   into the same breathing without copying the keyframe declaration. */
+.brand-logo-active {
+  animation: cat-glow-breathe 3.6s ease-in-out infinite;
+  will-change: filter, transform;
 }
 
+/* ============================================================================
+ * SELECTABLE TEXT (opt-in)
+ * ============================================================================
+ * The inline `selectstart` block in `index.html` blocks text selection
+ * app-wide.  Markup that genuinely needs the user to copy (port
+ * numbers, subscription URLs, error payloads) wraps the relevant
+ * content in `.selectable` and that element + its descendants
+ * become selectable.  Inputs / textareas / contenteditable are
+ * already exempt via the inline JS check.
+ * ============================================================================ */
+.selectable,
+.selectable * {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
