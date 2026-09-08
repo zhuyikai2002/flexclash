@@ -22,6 +22,24 @@ body,
 }
 
 /* ============================================================================
+ * HIT-TEST SURFACE (drag-drop fix)
+ * ============================================================================
+ *  With `transparent: true` in `tauri.conf.json`, Windows can pass
+ *  drag-and-drop messages through the WebView2 child window to the
+ *  desktop underneath — the OS only sees an empty surface, so the
+ *  `WM_DROPFILES` handoff never lands.  We give the root element a
+ *  *barely* visible background (alpha 0.01) so the renderer still
+ *  reads as fully transparent to the user, but DWM registers a real
+ *  hit-test surface for OS-level drop events.  The Tauri runtime
+ *  also sees the WebView as non-empty and forwards Enter/Over/Drop
+ *  to the JS bridge.  This is the exact workaround the Tauri team
+ *  documents for fully-transparent windows.
+ * ============================================================================ */
+#app {
+  background-color: rgba(10, 10, 12, 0.01) !important;
+}
+
+/* ============================================================================
  * LAYOUT SCAFFOLD
  * ============================================================================
  *  - `.app-root`  : the only place that owns `h-screen w-screen`. Children

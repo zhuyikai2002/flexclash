@@ -1,6 +1,6 @@
 [package]
 name = "flexclash"
-version = "0.1.0"
+version = "0.1.2"
 description = "FlexClash - lightweight Mihomo (Clash Meta) proxy client"
 authors = ["FlexClash Contributors"]
 edition = "2021"
@@ -45,7 +45,11 @@ windows = { version = "0.58", features = [
   "Win32_System_Registry",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
 ] }
+# WebView2 底层控制：彻底禁用 DevTools + 浏览器加速键（Ctrl+Shift+I / F12 / Ctrl+R 等）
+webview2-com = "0.38"
+windows-core = "0.61"
 
 [profile.release]
 panic = "abort"

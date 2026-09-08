@@ -17,7 +17,7 @@ use crate::core::sidecar::SidecarHandle;
 use crate::core::startup::{self, SilentFlag};
 use crate::core::tun::TunManager;
 use crate::store::queries::HistoryDb;
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -45,57 +45,6 @@ pub fn run() {
         .manage(ExitFlag::default())
         .manage(silent_flag)
         .manage(TunManager::new())
-        // -----------------------------------------------------------------
-        // WINDOW-LEVEL DRAG-AND-DROP INTERCEPT
-        // -----------------------------------------------------------------
-        // We catch `WindowEvent::DragDrop` on the main thread of the
-        // Tauri runtime — this sits *below* the WebView2 child
-        // window, so the JS layer never sees a DOM event and the
-        // well-known WebView2 "no drop zone" issues go away.  We then
-        // re-broadcast three plain Tauri events the renderer can
-        // `listen()` on.  Filtering by extension lives in Rust so the
-        // frontend never even has to check.
-        // -----------------------------------------------------------------
-        .on_window_event(|window, event| {
-            if let WindowEvent::DragDrop(drag) = event {
-                match drag {
-                    tauri::DragDropEvent::Enter { paths, .. } => {
-                        // Show the overlay only if at least one of the
-                        // currently-hovered files is something we
-                        // would actually import.
-                        let any_yaml = paths.iter().any(|p| is_yaml_path(p));
-                        if any_yaml {
-                            let _ = window.emit(events::NATIVE_FILE_DRAG_ENTER, ());
-                        }
-                    }
-                    tauri::DragDropEvent::Over { .. } => {
-                        // No-op: `enter` already flipped the overlay.
-                    }
-                    tauri::DragDropEvent::Drop { paths, .. } => {
-                        let yaml_paths: Vec<String> = paths
-                            .iter()
-                            .filter(|p| is_yaml_path(p))
-                            .map(|p| p.to_string_lossy().to_string())
-                            .collect();
-                        if !yaml_paths.is_empty() {
-                            println!(
-                                "[DragDrop] hit {} yaml file(s): {:?}",
-                                yaml_paths.len(),
-                                yaml_paths
-                            );
-                            let _ = window.emit(events::NATIVE_FILE_DROP, &yaml_paths);
-                        }
-                        // Always clear the overlay on drop, even if no
-                        // file was accepted (e.g. user dropped a .png).
-                        let _ = window.emit(events::NATIVE_FILE_DRAG_LEAVE, ());
-                    }
-                    tauri::DragDropEvent::Leave => {
-                        let _ = window.emit(events::NATIVE_FILE_DRAG_LEAVE, ());
-                    }
-                    _ => {}
-                }
-            }
-        })
         .setup(move |app| {
             let handle = app.handle().clone();
             crate::core::shutdown::install(&handle);
@@ -135,6 +84,87 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             if let Some(win) = handle.get_webview_window("main") {
                 crate::core::startup::apply_native_backdrop(&win);
+
+                // Phase 9.9: 彻底禁用 WebView2 DevTools + 浏览器加速键。
+                //
+                // `tauri.conf.json` 的 `devtools: false` 只会调用
+                // `SetAreDevToolsEnabled(false)`，但 Ctrl+Shift+I / F12 /
+                // Ctrl+R / F5 这类浏览器加速键在 WebView2 浏览器进程层
+                // 处理，Settings 开关未必拦得住。这里用
+                // `AcceleratorKeyPressed` 事件在加速键分发前精确拦截，
+                // 同时保留 Ctrl+C/V/A 等编辑快捷键。
+                use windows_core::Interface;
+                let _ = win.with_webview(|webview| {
+                    use webview2_com::AcceleratorKeyPressedEventHandler;
+                    use webview2_com::Microsoft::Web::WebView2::Win32::{
+                        ICoreWebView2Settings3, COREWEBVIEW2_KEY_EVENT_KIND,
+                        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+                        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+                    };
+                    let controller = webview.controller();
+
+                    // 1. 引擎层开关（DevTools + 浏览器加速键）。
+                    if let Ok(core) = unsafe { controller.CoreWebView2() } {
+                        if let Ok(settings) = unsafe { core.Settings() } {
+                            let _ = unsafe { settings.SetAreDevToolsEnabled(false) };
+                            if let Ok(settings3) = settings.cast::<ICoreWebView2Settings3>() {
+                                let _ =
+                                    unsafe { settings3.SetAreBrowserAcceleratorKeysEnabled(false) };
+                            }
+                        }
+                    }
+
+                    // 2. 最终防线：AcceleratorKeyPressed 精确拦截。
+                    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(
+                        move |_, args| {
+                            let Some(args) = args else { return Ok(()) };
+                            let mut kind = COREWEBVIEW2_KEY_EVENT_KIND(0);
+                            unsafe { args.KeyEventKind(&mut kind)?; }
+                            // 只处理按下事件，忽略抬起/重复。
+                            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                                && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                            {
+                                return Ok(());
+                            }
+                            let mut vk: u32 = 0;
+                            unsafe { args.VirtualKey(&mut vk)?; }
+
+                            // 修饰键状态（Ctrl = 0x11, Shift = 0x10）。
+                            use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
+                            // GetKeyState 返回 i16，最高位（0x8000）置位表示按下，
+                            // 对 i16 而言即负数。
+                            let ctrl = unsafe { GetKeyState(0x11) } < 0;
+                            let shift = unsafe { GetKeyState(0x10) } < 0;
+
+                            let block = match vk {
+                                // F12 (DevTools) / F5 (reload)：无条件拦截。
+                                0x7B | 0x74 => true,
+                                // I / J：Ctrl+Shift+I/J (DevTools) 或 Ctrl+I/J。
+                                0x49 | 0x4A => ctrl,
+                                // R / U / P：Ctrl+R / Ctrl+U / Ctrl+P。
+                                0x52 | 0x55 | 0x50 => ctrl,
+                                // C：仅拦截 Ctrl+Shift+C (DevTools inspect)，
+                                // 保留 Ctrl+C (复制)。
+                                0x43 => ctrl && shift,
+                                _ => false,
+                            };
+                            if block {
+                                unsafe { args.SetHandled(true)?; }
+                            }
+                            Ok(())
+                        },
+                    ));
+                    let mut token: i64 = 0;
+                    if unsafe {
+                        controller.add_AcceleratorKeyPressed(&handler, &mut token)
+                    }
+                    .is_ok()
+                    {
+                        eprintln!(
+                            "[startup] WebView2 DevTools + accelerator keys hard-blocked"
+                        );
+                    }
+                });
 
                 // UIPI: relax drag-and-drop / OLE data-transfer message
                 // filters on the top-level HWND so that a non-elevated
@@ -206,18 +236,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlexClash");
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Case-insensitive `.yaml` / `.yml` extension check used by the
-/// drag-drop router above.  Lives in module scope so we can call it
-/// from the `on_window_event` closure without capturing state.
-fn is_yaml_path(p: &std::path::Path) -> bool {
-    matches!(
-        p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(),
-        Some("yaml") | Some("yml"),
-    )
 }

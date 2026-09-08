@@ -4,23 +4,13 @@
  *
  * Phase 9 / 2025 enhancements:
  *
- *   - DRAG & DROP, RUST-OWNED.
- *     The Tauri main process catches `WindowEvent::DragDrop` in
- *     `Builder::on_window_event` (see `src-tauri/src/lib.rs`) and
- *     re-broadcasts three plain Tauri events:
- *
- *         native-file-drag-enter   payload: ()
- *         native-file-drag-leave   payload: ()
- *         native-file-drop         payload: string[]   (already
- *                                                     filtered to
- *                                                     .yaml/.yml)
- *
- *     The renderer never binds a DOM / webview drop listener.  This
- *     is the reliable path on Windows because the WebView2 child
- *     window filters out OS-level drops in some builds and any
- *     non-trivial elevation boundary can drop messages at the
- *     webview layer.  Going through the Tauri runtime is the only
- *     API that survives every combination we care about.
+ *   - DRAG & DROP, HTML5-OWNED (Phase 9.8 final).
+ *     `dragDropEnabled: false` in tauri.conf.json stops Tauri/Wry
+ *     from registering an OS-level IDropTarget, so Chromium's
+ *     native HTML5 drag-and-drop engine owns the whole pipeline.
+ *     The Dropzone card reads dropped files with `File.text()` and
+ *     saves them through `store.pasteYaml(name, yaml)` — no
+ *     absolute path, no Win32 relay, no Rust interop.
  *
  *   - "⋯" overflow menu on every card with three actions: Rename,
  *     Open in system editor, Reveal in file explorer (Delete is
@@ -34,7 +24,6 @@
  * presentation layer.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import {
   Trash2,
   RefreshCw,
@@ -47,6 +36,7 @@ import {
   Pencil,
   ExternalLink,
   FolderOpen,
+  UploadCloud,
 } from 'lucide-vue-next'
 import { useProfilesStore } from '@/stores/profiles'
 import {
@@ -63,17 +53,17 @@ const { t } = useI18n()
 const emit = defineEmits<{ (e: 'open-subscribe'): void }>()
 
 // ============================================================================
-// Native drag & drop — JS side, listen-only.
+// DROPZONE — HTML5 native drag & drop (Phase 9.8 final).
 // ============================================================================
-// We never touch `getCurrentWebview().onDragDropEvent` or any DOM
-// `dragover` / `drop` listener.  Three plain Tauri listeners mirror
-// what the Rust side emits; we toggle a single boolean to show /
-// hide the dashed overlay and dispatch the drop paths straight to
-// the existing `addFromFile` store action (which calls the existing
-// `import_profile_file` Rust command — no need for a second read).
+// With `dragDropEnabled: false` in tauri.conf.json, Tauri/Wry does
+// NOT register an OS-level IDropTarget, so Chromium's own HTML5
+// drag-and-drop engine owns the whole pipeline.  `File.text()` reads
+// the dropped file directly in the renderer — no absolute path, no
+// Win32 message relay, no Rust interop needed.
 // ============================================================================
-const isDragging = ref(false)
-const unlistens: UnlistenFn[] = []
+const isDragOver = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const importBusy = ref(false)
 
 const importToast = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -83,60 +73,74 @@ function flashToast(kind: 'ok' | 'err', text: string) {
   toastTimer = setTimeout(() => { importToast.value = null }, 3500)
 }
 
-function basenameFromPath(p: string): string {
-  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
-  const base = idx >= 0 ? p.slice(idx + 1) : p
-  return base.replace(/\.(ya?ml)$/i, '')
+function isYamlName(name: string): boolean {
+  return /\.(ya?ml)$/i.test(name)
 }
 
-async function importPaths(paths: string[]) {
-  if (paths.length === 0) return
+function handleDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  isDragOver.value = true
+}
+
+function handleDragLeave(e: DragEvent) {
+  // Only collapse on actual leave, not when moving between children.
+  if (e.relatedTarget && (e.currentTarget as Node).contains(e.relatedTarget as Node)) {
+    return
+  }
+  isDragOver.value = false
+}
+
+async function handleDrop(e: DragEvent) {
+  e.preventDefault()
+  isDragOver.value = false
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  if (files.length === 0) return
+  await importFileObjects(files)
+}
+
+async function importFileObjects(files: File[]) {
+  if (importBusy.value) return
+  importBusy.value = true
   let ok = 0
-  for (const p of paths) {
-    try {
-      const display = basenameFromPath(p)
-      await store.addFromFile(p, display)
-      ok += 1
-    } catch (err) {
-      console.error('[profile] drop import failed:', err)
+  try {
+    for (const file of files) {
+      if (!isYamlName(file.name)) continue
+      try {
+        const text = await file.text()
+        await store.pasteYaml(file.name, text)
+        ok += 1
+      } catch (err) {
+        console.error('[profile] HTML5 import failed:', err)
+      }
     }
-  }
-  if (ok > 0) {
-    flashToast('ok', `${ok}/${paths.length} imported`)
-  } else {
-    flashToast('err', t('profiles.drag_drop_invalid'))
+    if (ok > 0) {
+      flashToast('ok', `${ok}/${files.length} imported`)
+    } else {
+      flashToast('err', t('profiles.drag_drop_invalid'))
+    }
+  } finally {
+    importBusy.value = false
   }
 }
 
-onMounted(async () => {
+function triggerFileInput() {
+  fileInputRef.value?.click()
+}
+
+async function handleFileInputChange(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  try {
+    await importFileObjects([file])
+  } finally {
+    target.value = '' // reset so the same file can be re-selected
+  }
+}
+
+onMounted(() => {
   void store.refresh()
-
-  // 1) Hovering. Rust only fires this when at least one of the
-  //    files in the drag session is a .yaml / .yml.
-  const u1 = await listen('native-file-drag-enter', () => {
-    isDragging.value = true
-  })
-
-  // 2) Leaving the window entirely. Also fired after a successful
-  //    drop, so the overlay always collapses.
-  const u2 = await listen('native-file-drag-leave', () => {
-    isDragging.value = false
-  })
-
-  // 3) Drop.  Rust has already filtered the paths; we just dispatch
-  //    them to the store.  We always clear the overlay afterwards
-  //    (Rust also sends a leave, but rendering is idempotent).
-  const u3 = await listen<string[]>('native-file-drop', async (event) => {
-    isDragging.value = false
-    await importPaths(event.payload)
-  })
-
-  unlistens.push(u1, u2, u3)
-})
-
-onBeforeUnmount(() => {
-  for (const u of unlistens) u()
-  unlistens.length = 0
 })
 
 // ============================================================================
@@ -317,6 +321,69 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
       </div>
     </header>
 
+    <!-- =====================================================================
+         DROPZONE — Phase 9.8 HTML5 native drag & drop.
+         ---------------------------------------------------------------------
+         Two always-available paths, both fully renderer-owned:
+
+           A. CLICK   ->  hidden <input type="file"> triggers the
+                          OS file picker; the selected File is read
+                          with `File.text()`.
+           B. DROP    ->  native HTML5 dragover/drop on the card;
+                          the dropped File is read with
+                          `File.text()`.
+
+         Neither path needs an absolute path or any Win32/Rust
+         interop — Chromium's HTML5 engine delivers the File blob
+         directly.  `dragDropEnabled: false` in tauri.conf.json
+         ensures Tauri/Wry never swallows the drop at the OS level.
+    ===================================================================== -->
+    <div
+      :class="[
+        'group relative flex w-full cursor-pointer select-none items-center gap-4 rounded-2xl border border-dashed p-6 transition-all duration-200',
+        isDragOver
+          ? 'border-sky-400 bg-sky-500/10 shadow-[0_0_25px_rgba(56,189,248,0.25)] scale-[1.01]'
+          : 'border-white/10 hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.04]',
+      ]"
+      data-testid="profile-dropzone"
+      @dragover="handleDragOver"
+      @dragenter="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+      @click="triggerFileInput"
+    >
+      <div
+        :class="[
+          'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors',
+          isDragOver
+            ? 'border-sky-500/50 bg-sky-500/20 text-sky-300'
+            : 'border-white/10 bg-white/[0.04] text-zinc-300 group-hover:border-sky-500/40 group-hover:text-sky-200',
+        ]"
+      >
+        <UploadCloud class="h-5 w-5" />
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-medium text-zinc-100">
+          {{ isDragOver ? t('profiles.drag_drop_overlay_title') : t('profiles.dropzone_title') }}
+        </div>
+        <div class="mt-0.5 text-[11px] text-zinc-500">
+          {{ t('profiles.dropzone_subtitle') }}
+        </div>
+      </div>
+      <div class="shrink-0 text-[11px] text-zinc-500 transition-colors group-hover:text-sky-300">
+        {{ importBusy ? '…' : t('common.open') }}
+      </div>
+
+      <!-- Hidden native file input — click fallback. -->
+      <input
+        ref="fileInputRef"
+        type="file"
+        accept=".yaml,.yml"
+        class="hidden"
+        @change="handleFileInputChange"
+      />
+    </div>
+
     <p v-if="store.lastError" class="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
       {{ store.lastError }}
     </p>
@@ -467,42 +534,6 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
         </div>
       </li>
     </ul>
-
-    <!-- =========================================================================
-         DRAG-AND-DROP FULLSCREEN OVERLAY
-         =========================================================================
-         Purely decorative, pointer-events: none.  Toggled by the
-         `native-file-drag-enter` / `native-file-drag-leave` events
-         emitted from the Rust main process.
-    ========================================================================== -->
-    <Transition
-      enter-active-class="transition duration-150 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="isDragging"
-        class="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center"
-      >
-        <div
-          class="absolute inset-3 rounded-3xl border-2 border-dashed border-sky-500/60 bg-sky-500/[0.06]"
-        />
-        <div
-          class="relative rounded-2xl border border-sky-500/40 bg-sky-500/10 px-8 py-5 text-center shadow-2xl shadow-sky-500/20"
-        >
-          <Download class="mx-auto h-7 w-7 text-sky-300" />
-          <p class="mt-2 text-sm font-medium text-sky-100">
-            {{ t('profiles.drag_drop_overlay_title') }}
-          </p>
-          <p class="mt-1 text-[11px] text-sky-200/80">
-            {{ t('profiles.drag_drop_overlay_hint') }}
-          </p>
-        </div>
-      </div>
-    </Transition>
 
     <!-- =========================================================================
          RENAME MODAL
