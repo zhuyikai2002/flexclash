@@ -137,7 +137,21 @@ impl SidecarHandle {
         if g.recent_log_tail.len() >= LOG_TAIL_CAP {
             g.recent_log_tail.remove(0);
         }
-        g.recent_log_tail.push(line);
+        g.recent_log_tail.push(line.clone());
+        // Persist every kernel/init log line to <work_dir>/runtime.log so a
+        // crash's real cause survives process teardown (the ring buffer is
+        // memory-only). Writing is best-effort and unbuffered per line.
+        if let Some(dir) = &g.work_dir {
+            use std::io::Write;
+            if let Ok(f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("runtime.log"))
+            {
+                let mut f = f;
+                let _ = writeln!(f, "{line}");
+            }
+        }
     }
 }
 
