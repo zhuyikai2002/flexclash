@@ -1,20 +1,16 @@
 // ============================================================================
-// clash.ts — Renderer-side Mihomo client (Phase R1: IPC façade).
+// clash.ts — Renderer-side Mihomo client (Phase R2: Specta typed bindings).
 //
-// RESPONSIBILITIES CHANGED (Phase R1):
-//   * Every Mihomo REST call is now a Tauri command invocation. The Rust
-//     side (`commands/mihomo.rs`) talks to the controller at
-//     http://127.0.0.1:9091 and returns serde_json values. Components and
-//     stores no longer touch that URL.
-//   * Only the push WebSocket streams (/traffic, /connections) stay on the
-//     renderer — a stream cannot ride a request/response IPC.
+// All Mihomo REST calls go through the typed client generated from the Rust
+// façade by tauri-specta (see `src/bindings.ts`). The Rust commands return
+// the raw JSON body as a string; we parse here and hand the object to the
+// store — store parsing/mapping logic is unchanged.
 //
-// All exported signatures are unchanged from the pre-R1 axios client, so
-// stores (`kernel`, `proxies`, `connections`, `profiles`, …) keep their
-// parsing/mapping logic untouched — only the transport was swapped.
+// Push WebSocket streams (/traffic, /connections) stay renderer-side.
 // ============================================================================
 
-import { safeInvokeOr } from '@/utils/tauri-bridge'
+import { commands, type AppError } from '@/bindings'
+import { isTauri, NotInTauriError } from '@/utils/tauri-bridge'
 import type {
   Config,
   ConnectionsResponse,
@@ -22,20 +18,45 @@ import type {
   ProxiesResponse,
   Proxy,
   ProxyDelayResponse,
-  Rule,
   RulesResponse,
   TrafficSample,
 } from '@/types/clash'
 
-// Kept for informational / WS URL purposes and any UI that displays the
-// controller address. All REST traffic now flows through Rust commands.
+// Kept for informational / WS URL purposes. All REST flows via Rust.
 export const MIHOMO_BASE_URL = 'http://127.0.0.1:9091'
 export const MIHOMO_WS_URL = 'ws://127.0.0.1:9091'
 
-/** Normalise whatever `invoke` rejects with into a real Error. */
-function wrapErr(err: unknown): Error {
-  if (err instanceof Error) return err
-  return new Error(typeof err === 'string' ? err : String(err))
+type CmdRes<T> =
+  | { status: 'ok'; data: T }
+  | { status: 'error'; error: AppError }
+
+function errText(e: AppError): string {
+  if (typeof e === 'string') return e
+  return JSON.stringify(e)
+}
+
+/** Unwrap a typed command result; throw a readable Error on `error`. */
+function ok<T>(r: CmdRes<T>): T {
+  if (r.status === 'ok') return r.data
+  throw new Error(errText(r.error))
+}
+
+/** Invoke a command returning a JSON string; parse it to an object. */
+async function getJson(
+  p: Promise<CmdRes<string>>,
+): Promise<unknown> {
+  const raw = ok(await p)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+}
+
+/** Browser-preview guard: throw the same typed error the safe wrapper used. */
+function guardTauri(cmd: string): void {
+  if (!isTauri()) throw new NotInTauriError(cmd)
 }
 
 // ============================================================================
@@ -45,60 +66,50 @@ function wrapErr(err: unknown): Error {
 /** Lightweight liveness probe (never throws). */
 export async function isAlive(timeoutMs = 2_000): Promise<boolean> {
   try {
-    await safeInvokeOr('get_mihomo_version', null)
-    return true
+    if (!isTauri()) return false
+    const r = await commands.getMihomoVersion()
+    return r.status === 'ok'
   } catch {
     return false
   }
 }
 
 export async function getVersion(timeoutMs = 2_000): Promise<MihomoVersion> {
-  try {
-    const v = await safeInvokeOr<unknown>('get_mihomo_version', null)
-    return v as unknown as MihomoVersion
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_version')
+  const v = await getJson(commands.getMihomoVersion())
+  return v as unknown as MihomoVersion
 }
 
 // ============================================================================
-// Configs (GET / PATCH / PUT) — all via Rust façade
+// Configs
 // ============================================================================
 
 export async function getConfigs(): Promise<Config> {
-  try {
-    const v = await safeInvokeOr<unknown>('get_mihomo_configs', null)
-    return v as unknown as Config
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_configs')
+  const v = await getJson(commands.getMihomoConfigs())
+  return v as unknown as Config
 }
 
-/** PATCH /configs — outbound mode switch, etc. */
+/** PATCH /configs — outbound mode switch. Only `mode` is wired today. */
 export async function patchConfigs(patch: Partial<Config>): Promise<void> {
-  await safeInvokeOr<void>('patch_mihomo_config', undefined, { payload: patch })
+  guardTauri('patch_mihomo_config')
+  const mode = String((patch as { mode?: string }).mode ?? 'rule')
+  const r = await commands.patchMihomoConfig(mode)
+  ok(r)
 }
 
-/**
- * PUT /configs?force=true — ask mihomo to reload its current on-disk
- * config (no body variant).
- */
+/** PUT /configs?force=true — reload current on-disk config. */
 export async function reloadConfigs(force = true): Promise<void> {
-  await safeInvokeOr<void>('reload_mihomo_config', undefined, {
-    path: null,
-    force,
-  })
+  guardTauri('reload_mihomo_config')
+  const r = await commands.reloadMihomoConfig(null, force)
+  ok(r)
 }
 
-/**
- * PUT /configs?force=true with body `{ path }` — hot-load a specific
- * profile yaml as the active config.
- */
+/** PUT /configs?force=true { path } — hot-load a specific profile yaml. */
 export async function reloadConfig(path: string, force = true): Promise<void> {
-  await safeInvokeOr<void>('reload_mihomo_config', undefined, {
-    path,
-    force,
-  })
+  guardTauri('reload_mihomo_config')
+  const r = await commands.reloadMihomoConfig(path, force)
+  ok(r)
 }
 
 /** Outbound mode: 'rule' | 'global' | 'direct'. */
@@ -113,57 +124,32 @@ export async function setMode(
 // ============================================================================
 
 export async function getProxies(): Promise<ProxiesResponse> {
-  try {
-    const v = await safeInvokeOr<unknown>('get_mihomo_proxies', null)
-    return v as unknown as ProxiesResponse
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_proxies')
+  const v = await getJson(commands.getMihomoProxies())
+  return v as unknown as ProxiesResponse
 }
 
 export async function getProxy(name: string): Promise<Proxy> {
-  try {
-    const v = await safeInvokeOr<unknown>('get_mihomo_proxy', null, { name })
-    return v as unknown as Proxy
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_proxy')
+  const v = await getJson(commands.getMihomoProxy(name))
+  return v as unknown as Proxy
 }
 
-/**
- * Switch the active node of a Selector / URLTest / LoadBalance group.
- * Returns the refreshed group object.
- */
+/** Switch the active node of a Selector group; returns refreshed group. */
 export async function selectProxy(group: string, name: string): Promise<Proxy> {
-  try {
-    const v = await safeInvokeOr<unknown>('select_mihomo_proxy', null, {
-      group,
-      proxy: name,
-    })
-    return v as unknown as Proxy
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('select_mihomo_proxy')
+  const v = await getJson(commands.selectMihomoProxy(group, name))
+  return v as unknown as Proxy
 }
 
-/**
- * Measure RTT to `url` through `name`. Default URL mirrors Clash forks.
- */
 export async function getProxyDelay(
   name: string,
   url = 'http://www.gstatic.com/generate_204',
   timeoutMs = 5_000,
 ): Promise<number> {
-  try {
-    const v = await safeInvokeOr<ProxyDelayResponse | null>(
-      'get_mihomo_proxy_delay',
-      null,
-      { name, url, timeoutMs },
-    )
-    return (v?.delay ?? 0) as number
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_proxy_delay')
+  const v = await getJson(commands.getMihomoProxyDelay(name, url, timeoutMs))
+  return ((v as ProxyDelayResponse | null)?.delay ?? 0) as number
 }
 
 // ============================================================================
@@ -171,20 +157,19 @@ export async function getProxyDelay(
 // ============================================================================
 
 export async function getConnections(): Promise<ConnectionsResponse> {
-  try {
-    const v = await safeInvokeOr<unknown>('get_mihomo_connections', null)
-    return v as unknown as ConnectionsResponse
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_connections')
+  const v = await getJson(commands.getMihomoConnections())
+  return v as unknown as ConnectionsResponse
 }
 
 export async function closeAllConnections(): Promise<void> {
-  await safeInvokeOr<void>('close_all_mihomo_connections', undefined)
+  guardTauri('close_all_mihomo_connections')
+  ok(await commands.closeAllMihomoConnections())
 }
 
 export async function closeConnection(id: string): Promise<void> {
-  await safeInvokeOr<void>('close_mihomo_connection', undefined, { id })
+  guardTauri('close_mihomo_connection')
+  ok(await commands.closeMihomoConnection(id))
 }
 
 // ============================================================================
@@ -192,51 +177,38 @@ export async function closeConnection(id: string): Promise<void> {
 // ============================================================================
 
 export async function getRules(): Promise<RulesResponse> {
-  try {
-    const v = await safeInvokeOr<unknown>('get_mihomo_rules', null)
-    return v as unknown as RulesResponse
-  } catch (e) {
-    throw wrapErr(e)
-  }
+  guardTauri('get_mihomo_rules')
+  const v = await getJson(commands.getMihomoRules())
+  return v as unknown as RulesResponse
 }
 
 // ============================================================================
-// WebSockets — push streams CANNOT ride IPC; kept renderer-side.
+// WebSockets — push streams cannot ride IPC; kept renderer-side.
 // ============================================================================
 
 export interface DisposableSocket {
   close(): void
 }
 
-/** Subscribe to `/traffic` push messages (≈1/sec). */
 export function openTrafficSocket(
   onSample: (s: TrafficSample) => void,
   onError?: (e: Event) => void,
 ): DisposableSocket {
   const ws = new WebSocket(`${MIHOMO_WS_URL}/traffic`)
   ws.onmessage = (e) => {
-    try {
-      onSample(JSON.parse(e.data) as TrafficSample)
-    } catch {
-      /* malformed payload — ignore */
-    }
+    try { onSample(JSON.parse(e.data) as TrafficSample) } catch { /* ignore */ }
   }
   ws.onerror = onError ?? (() => {})
   return { close: () => ws.close() }
 }
 
-/** Subscribe to `/connections` push messages. */
 export function openConnectionsSocket(
   onSnapshot: (c: ConnectionsResponse) => void,
   onError?: (e: Event) => void,
 ): DisposableSocket {
   const ws = new WebSocket(`${MIHOMO_WS_URL}/connections`)
   ws.onmessage = (e) => {
-    try {
-      onSnapshot(JSON.parse(e.data) as ConnectionsResponse)
-    } catch {
-      /* ignore */
-    }
+    try { onSnapshot(JSON.parse(e.data) as ConnectionsResponse) } catch { /* ignore */ }
   }
   ws.onerror = onError ?? (() => {})
   return { close: () => ws.close() }

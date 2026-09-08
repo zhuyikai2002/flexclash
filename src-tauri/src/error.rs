@@ -2,7 +2,7 @@
 
 use serde::{Serialize, Serializer};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, specta::Type)]
 pub enum AppError {
     #[error("io error: {0}")]
     Io(String),

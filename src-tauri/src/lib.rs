@@ -27,6 +27,45 @@ pub fn run() {
     let silent_flag = SilentFlag::default();
     silent_flag.set(silent);
 
+    // Phase R2: export typed IPC bindings (commands → src/bindings.ts).
+    // Debug/dev builds rewrite the file on every start so the frontend
+    // types never drift; release keeps the last generated copy.
+    {
+        use tauri_specta::{collect_commands, Builder};
+
+        let _ = std::fs::write(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/.specta-ran.log"),
+            "started",
+        );
+
+        let specta = Builder::<tauri::Wry>::new()
+            .disable_serde_phases()
+            .commands(collect_commands![
+                commands::mihomo::get_mihomo_version,
+                commands::mihomo::get_mihomo_configs,
+                commands::mihomo::patch_mihomo_config,
+                commands::mihomo::reload_mihomo_config,
+                commands::mihomo::get_mihomo_proxies,
+                commands::mihomo::get_mihomo_proxy,
+                commands::mihomo::select_mihomo_proxy,
+                commands::mihomo::get_mihomo_proxy_delay,
+                commands::mihomo::get_mihomo_connections,
+                commands::mihomo::close_mihomo_connection,
+                commands::mihomo::close_all_mihomo_connections,
+                commands::mihomo::get_mihomo_rules,
+            ]);
+
+        // Export TypeScript bindings to the frontend source tree.
+        let out_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/bindings.ts");
+        let handle = std::thread::spawn(move || {
+            specta.export(specta_typescript::Typescript::default(), out_path)
+        });
+        let _ = std::fs::write(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/.specta-export-err.log"),
+            format!("{:?}", handle.join()),
+        );
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
