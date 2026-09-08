@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::config::profile::RESERVED_CONTROLLER;
 use crate::core::sidecar::{KernelState, SidecarHandle};
