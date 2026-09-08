@@ -1,6 +1,6 @@
 [package]
 name = "flexclash"
-version = "0.1.0"
+version = "0.2.0"
 description = "FlexClash - lightweight Mihomo (Clash Meta) proxy client"
 authors = ["FlexClash Contributors"]
 edition = "2021"
