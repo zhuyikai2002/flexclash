@@ -445,7 +445,10 @@ pub fn reveal_profile_file<R: Runtime>(
 
 #[cfg(target_os = "windows")]
 fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResult<()> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+    // Hide the transient console for `cmd /C start` (no black flash).
+    let create_no_window: u32 = 0x0800_0000;
 
     // Prefer `cmd /c start "" "<file>"` for the `open` verb — Windows
     // resolves the file association (Notepad / VS Code / whatever the
@@ -461,7 +464,7 @@ fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResu
     let verb = if prefer_edit_verb { "edit" } else { "open" };
     if verb == "open" {
         let path_arg = path.as_os_str().to_string_lossy().into_owned();
-        let status = Command::new("cmd")
+        let status = Command::new("cmd").creation_flags(create_no_window)
             .args(["/C", "start", "", &path_arg])
             .status()
             .map_err(|e| AppError::Shell(format!("cmd /C start {}: {e}", path.display())))?;
@@ -475,7 +478,7 @@ fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResu
     } else {
         // Fallback: run the same `open` path.
         let path_arg = path.as_os_str().to_string_lossy().into_owned();
-        let status = Command::new("cmd")
+        let status = Command::new("cmd").creation_flags(create_no_window)
             .args(["/C", "start", "", &path_arg])
             .status()
             .map_err(|e| AppError::Shell(format!("cmd /C start {}: {e}", path.display())))?;

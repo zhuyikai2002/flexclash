@@ -393,10 +393,24 @@ pub fn wait_until_healthy(budget: Duration) -> Result<()> {
         .is_ok()
         {
             // 2. Real /version probe via curl.exe (reliable on Windows
-            //    where WinHTTP can hang).
-            let probe = std::process::Command::new("curl.exe")
-                .args(["-s", "-m", "1", "-o", "NUL", "-w", "%{http_code}", &url])
-                .output();
+            //    where WinHTTP can hang). Hide its console on Windows.
+            let probe = {
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    const CNW: u32 = 0x0800_0000;
+                    std::process::Command::new("curl.exe")
+                        .creation_flags(CNW)
+                        .args(["-s", "-m", "1", "-o", "NUL", "-w", "%{http_code}", &url])
+                        .output()
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    std::process::Command::new("curl.exe")
+                        .args(["-s", "-m", "1", "-o", "/dev/null", "-w", "%{http_code}", &url])
+                        .output()
+                }
+            };
             if let Ok(o) = probe {
                 let code = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 if code == "200" {

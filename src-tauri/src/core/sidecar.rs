@@ -314,8 +314,10 @@ pub fn hard_cleanup() {
     eprintln!("[shutdown] running hard_cleanup for Mihomo sidecar");
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         // /IM wildcard matches mihomo.exe AND mihomo-x86_64-pc-windows-msvc.exe
         let _ = std::process::Command::new("taskkill")
+            .creation_flags(0x0800_0000)
             .args(["/F", "/T", "/IM", "mihomo*.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

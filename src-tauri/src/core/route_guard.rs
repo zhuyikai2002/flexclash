@@ -24,6 +24,11 @@
 
 #[cfg(target_os = "windows")]
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+/// Hide child consoles when invoking netsh / route (no cmd flash on TUN ops).
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Result of a sweep. Mirrors the M7 stub `SweepResult` so the verify
 /// suite can assert the field layout stayed compatible.
@@ -91,7 +96,7 @@ fn sweep_routes_windows(result: &mut SweepResult) -> std::io::Result<()> {
     // Look for routes 0.0.0.0/1 and 128.0.0.0/1 (the two CIDRs mihomo
     // adds when auto-route is on). We use `route print` and grep for
     // them, then issue `route delete` per row.
-    let out = Command::new("route")
+    let out = Command::new("route").creation_flags(CREATE_NO_WINDOW)
         .args(["print", "-4"])
         .output()?;
     if !out.status.success() {
@@ -123,7 +128,7 @@ fn sweep_routes_windows(result: &mut SweepResult) -> std::io::Result<()> {
         if !is_link_local {
             continue;
         }
-        let del = Command::new("route")
+        let del = Command::new("route").creation_flags(CREATE_NO_WINDOW)
             .args(["delete", cols[0], "mask", cols[1]])
             .output();
         if let Ok(d) = del {
@@ -145,7 +150,7 @@ fn sweep_adapter_windows(result: &mut SweepResult) -> std::io::Result<()> {
     // exactly "flexclash-tun". If found and the device is administratively
     // down, we delete it via `netsh interface set interface ... disabled`
     // followed by `netsh interface delete interface ...`.
-    let out = Command::new("netsh")
+    let out = Command::new("netsh").creation_flags(CREATE_NO_WINDOW)
         .args(["interface", "show", "interface"])
         .output()?;
     if !out.status.success() {
@@ -168,12 +173,12 @@ fn sweep_adapter_windows(result: &mut SweepResult) -> std::io::Result<()> {
     }
     // Best-effort: disable first, then delete. Both are silent if the
     // device is already gone.
-    let _ = Command::new("netsh")
+    let _ = Command::new("netsh").creation_flags(CREATE_NO_WINDOW)
         .args([
             "interface", "set", "interface", TUN_DEVICE_NAME, "admin=disable",
         ])
         .output();
-    let del = Command::new("netsh")
+    let del = Command::new("netsh").creation_flags(CREATE_NO_WINDOW)
         .args([
             "interface", "delete", "interface", TUN_DEVICE_NAME,
         ])
