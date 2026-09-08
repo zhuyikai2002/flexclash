@@ -353,3 +353,177 @@ async fn reload_via_controller(file_path: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+// ============================================================================
+// File-system utilities
+// ============================================================================
+
+/// `rename_profile` — Patch a profile's display `name` in the index file.
+/// Used by the UI's card-level "rename" action. Empty / whitespace-only
+/// names are rejected with `AppError::Config`.  The yaml file is left
+/// alone (its file name remains the id-derived directory), but the
+/// `ProfileIndex` is rewritten so the list reflects the new label.
+#[tauri::command]
+pub fn rename_profile<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    name: String,
+) -> CmdResult<profile_ops::ProfileMeta> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Config("profile name cannot be empty".into()));
+    }
+    if trimmed.len() > 80 {
+        return Err(AppError::Config("profile name too long (>80 chars)".into()));
+    }
+    let storage = storage_for(&app)?;
+    let mut idx = storage.read_index()?;
+    let Some(slot) = idx.profiles.iter_mut().find(|p| p.id == id) else {
+        return Err(AppError::Config(format!("profile id not found: {id}")));
+    };
+    slot.name = trimmed.to_string();
+    slot.updated_at = chrono::Utc::now();
+    storage.write_index(&idx)?;
+    let updated = idx
+        .profiles
+        .iter()
+        .find(|p| p.id == id)
+        .cloned()
+        .ok_or_else(|| AppError::Config("profile disappeared during rename".into()))?;
+    let _ = app.emit(crate::events::PROFILE_LIST_CHANGED, &updated);
+    Ok(updated)
+}
+
+/// `open_profile_in_editor` — Hand the on-disk yaml to whatever the
+/// user has registered for `.yaml` (Notepad, VS Code, etc.).  We use
+/// `ShellExecuteW` with the `edit` verb when the association supports
+/// it, falling back to the `open` verb.  No-op stub on non-Windows.
+#[tauri::command]
+pub fn open_profile_in_editor<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+) -> CmdResult<()> {
+    let storage = storage_for(&app)?;
+    let path = storage.profile_yaml(&id);
+    if !path.exists() {
+        return Err(AppError::Config(format!(
+            "profile yaml missing on disk: {}",
+            path.display()
+        )));
+    }
+    let _ = app; // unused on Windows
+    open_path_external(&path, true)?;
+    Ok(())
+}
+
+/// `reveal_profile_file` — Open the profile's containing folder in
+/// Explorer with the file already selected. Implemented via the
+/// Win32 `SHOpenFolderAndSelectItems` shell API, which is exactly
+/// what `explorer.exe /select,"path"` does under the hood.  Stub on
+/// non-Windows: prints the parent dir to stderr.
+#[tauri::command]
+pub fn reveal_profile_file<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+) -> CmdResult<()> {
+    let storage = storage_for(&app)?;
+    let path = storage.profile_yaml(&id);
+    if !path.exists() {
+        return Err(AppError::Config(format!(
+            "profile yaml missing on disk: {}",
+            path.display()
+        )));
+    }
+    let _ = app;
+    reveal_in_explorer(&path)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Platform shims
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResult<()> {
+    use std::process::Command;
+
+    // Prefer `cmd /c start "" "<file>"` for the `open` verb — Windows
+    // resolves the file association (Notepad / VS Code / whatever the
+    // user installed for `.yaml`).  For the `edit` verb we fall back
+    // to the default `open` because most editors don't register an
+    // "edit" verb; the `open` verb has the same end-user result.
+    //
+    // The empty "" after `start` is the window title slot, not a path
+    // — `start` interprets the first quoted arg as a title if it is
+    // always a literal, but since we want a path there we pass "" to
+    // explicitly skip the title.  Without this Windows can mangle
+    // paths that start with "/".
+    let verb = if prefer_edit_verb { "edit" } else { "open" };
+    if verb == "open" {
+        let path_arg = path.as_os_str().to_string_lossy().into_owned();
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &path_arg])
+            .status()
+            .map_err(|e| AppError::Shell(format!("cmd /C start {}: {e}", path.display())))?;
+        if !status.success() {
+            return Err(AppError::Shell(format!(
+                "cmd /C start {} exited with {}",
+                path.display(),
+                status
+            )));
+        }
+    } else {
+        // Fallback: run the same `open` path.
+        let path_arg = path.as_os_str().to_string_lossy().into_owned();
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &path_arg])
+            .status()
+            .map_err(|e| AppError::Shell(format!("cmd /C start {}: {e}", path.display())))?;
+        if !status.success() {
+            return Err(AppError::Shell(format!(
+                "cmd /C start {} exited with {}",
+                path.display(),
+                status
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_path_external(path: &std::path::Path, _prefer_edit_verb: bool) -> CmdResult<()> {
+    eprintln!("[profile] open_path_external stub on non-Windows: {}", path.display());
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_in_explorer(path: &std::path::Path) -> CmdResult<()> {
+    use std::process::Command;
+
+    // `explorer.exe /select,"<path>"` opens the parent folder in a
+    // new window with the file already highlighted.  This is the
+    // exact same call `SHOpenFolderAndSelectItems` makes under the
+    // hood, but it doesn't need the COM-style PIDL plumbing or any
+    // extra `windows` crate features.  The `/n` switch keeps the
+    // call from accidentally opening an existing Explorer window.
+    let arg = format!("/select,{}", path.display());
+    let status = Command::new("explorer.exe")
+        .arg(&arg)
+        .status()
+        .map_err(|e| AppError::Shell(format!("explorer.exe {arg}: {e}")))?;
+    if !status.success() {
+        // explorer.exe often returns 1 even on success; treat any
+        // "the process ran" as success, only bail on OS-level error.
+        eprintln!(
+            "[profile] explorer.exe {} returned {} (usually benign)",
+            arg, status
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn reveal_in_explorer(path: &std::path::Path) -> CmdResult<()> {
+    eprintln!("[profile] reveal_in_explorer stub on non-Windows: {}", path.display());
+    Ok(())
+}

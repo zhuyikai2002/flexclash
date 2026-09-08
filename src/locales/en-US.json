@@ -53,10 +53,7 @@
     "profiles": "Profiles",
     "stats": "Stats",
     "language": "Language",
-    "settings": "Settings",
-    "theme": "Theme",
-    "theme_dark": "Dark",
-    "theme_light": "Light"
+    "settings": "Settings"
   },
   "time": {
     "just_now": "just now",
@@ -217,6 +214,19 @@
     "edit_url": "Edit URL",
     "delete_confirm_title": "Delete profile?",
     "delete_confirm_body": "This will delete profile \"{name}\" and its local cache. Continue?",
+    "more_actions": "More actions",
+    "rename": "Rename",
+    "rename_title": "Rename profile",
+    "rename_placeholder": "e.g. main airport",
+    "open_in_editor": "Open in system editor",
+    "reveal_in_explorer": "Reveal in file explorer",
+    "delete": "Delete",
+    "drag_drop_hint": "Drop .yaml / .yml files anywhere on this page to import",
+    "drag_drop_overlay_title": "Release to import",
+    "drag_drop_overlay_hint": ".yaml / .yml files supported, one or many",
+    "drag_drop_invalid": "Only .yaml / .yml files are supported",
+    "clipboard_detected_url": "Detected subscription URL in clipboard; filled into URL field",
+    "clipboard_detected_yaml": "Detected config snippet in clipboard; filled into paste field",
     "subscription": {
       "url": "Subscription URL",
       "url_placeholder": "https://example.com/sub?token=xxx",

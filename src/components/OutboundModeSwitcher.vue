@@ -96,10 +96,10 @@ async function pick(m: Mode) {
 
 <template>
   <section
-    class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-3 dark:border-white/5 dark:bg-white/[0.04] light:border-zinc-200/60 light:bg-white/60"
+    class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-3"
   >
     <header class="flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-800">
+      <h2 class="text-sm font-semibold text-zinc-100">
         {{ t('dashboard.outbound_mode.title') }}
       </h2>
     </header>
@@ -109,7 +109,7 @@ async function pick(m: Mode) {
          ease-out` from the buttons themselves — that is the spring
          you see as the pill glides. -->
     <div
-      class="relative grid grid-cols-3 gap-1 rounded-xl bg-white/[0.03] border border-white/5 p-1 dark:bg-white/[0.03] dark:border-white/5 light:bg-zinc-100/70 light:border-zinc-200"
+      class="relative grid grid-cols-3 gap-1 rounded-xl bg-white/[0.03] border border-white/5 p-1"
     >
       <button
         v-for="(m, i) in modes"
@@ -121,19 +121,17 @@ async function pick(m: Mode) {
           'relative z-10 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-200',
           'disabled:opacity-50 disabled:cursor-not-allowed',
           current === m.id
-            ? 'text-zinc-100 dark:text-zinc-100 light:text-zinc-900'
-            : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-500 light:hover:text-zinc-700'
+            ? 'text-zinc-100'
+            : 'text-zinc-400 hover:text-zinc-200'
         ]"
         @click="pick(m.id)"
       >
         <span class="mr-1.5 text-base leading-none">{{ m.icon }}</span>
         {{ t(m.labelKey) }}
       </button>
-      <!-- Sliding indicator: GPU-composited left/width transition.
-           width/3 stays a constant fraction so the pill is always
-           exactly one third of the track, minus 4px on each side. -->
+      <!-- Sliding indicator: GPU-composited left/width transition. -->
       <span
-        class="absolute top-1 bottom-1 rounded-lg bg-white/10 ring-1 ring-white/10 shadow-sm shadow-sky-500/10 transition-all duration-200 ease-out pointer-events-none dark:bg-white/10 dark:ring-white/10 light:bg-white light:ring-zinc-300 light:shadow-zinc-300/40"
+        class="absolute top-1 bottom-1 rounded-lg bg-white/10 ring-1 ring-white/10 shadow-sm shadow-sky-500/10 transition-all duration-200 ease-out pointer-events-none"
         :style="{
           left: `calc(${(activeIndex * 100) / 3}% + 4px)`,
           width: `calc(${100 / 3}% - 8px)`,
@@ -141,13 +139,13 @@ async function pick(m: Mode) {
       />
     </div>
 
-    <p class="text-[11px] text-zinc-500 leading-relaxed dark:text-zinc-500 light:text-zinc-500">
+    <p class="text-[11px] text-zinc-500 leading-relaxed">
       {{ t('dashboard.outbound_mode.hint') }}
     </p>
 
     <p
       v-if="lastError"
-      class="text-[11px] text-rose-300/90 font-mono dark:text-rose-300/90 light:text-rose-600"
+      class="text-[11px] text-rose-300/90 font-mono"
     >
       {{ lastError }}
     </p>

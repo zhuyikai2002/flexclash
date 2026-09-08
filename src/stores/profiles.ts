@@ -16,6 +16,7 @@ import {
   importProfileUrl as importUrl,
   importProfileFile as importFile,
   listProfiles as fetchList,
+  renameProfile as renameOne,
   saveProfile as saveYaml,
   setActiveProfile as activate,
   updateSubscription as updateOne,
@@ -79,6 +80,18 @@ export const useProfilesStore = defineStore('profiles', () => {
     await delProfile(id)
     if (activeId.value === id) activeId.value = null
     await refresh()
+  }
+
+  /**
+   * Patch the display name of a profile.  The on-disk yaml file
+   * name is NOT changed (the id is derived from it); only the
+   * `ProfileIndex` entry is rewritten.  Re-uses `refresh()` so the
+   * list (and the active profile card) re-render with the new label.
+   */
+  async function rename(id: string, name: string): Promise<ProfileMeta> {
+    const meta = await renameOne(id, name.trim())
+    await refresh()
+    return meta
   }
 
   /**
@@ -180,6 +193,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     addFromFile,
     pasteYaml,
     remove,
+    rename,
     updateProfile,
     activateProfile,
     attach,

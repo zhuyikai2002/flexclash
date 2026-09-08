@@ -21,16 +21,6 @@ body,
   overflow: hidden;
 }
 
-/* Light mode: warm zinc-800 body text on a frosted white shell.
-   Component-level Tailwind classes that need to swap with the
-   theme use the `dark:` variant (e.g. `text-zinc-100 dark:text-zinc-200`),
-   but the body default below covers anything that falls through. */
-.light html,
-.light body,
-.light #app {
-  color: #1f2937;
-}
-
 /* ============================================================================
  * LAYOUT SCAFFOLD
  * ============================================================================
@@ -93,41 +83,6 @@ body,
   background: rgba(9, 9, 11, 0.55);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
-}
-
-/* ============================================================================
- * LIGHT THEME — re-tints the two chrome regions to a frosted white
- * ============================================================================
- *  Switched on by `class="light"` on <html>.  We keep the same
- *  two-layer composition (translucent base + backdrop-filter) so
- *  the glass feel survives in either mode.  The inner card /
- *  text tokens are Tailwind utility classes that already carry
- *  `dark:` variants elsewhere; the chrome itself is handled here
- *  because the half-transparent overlays cannot be expressed in
- *  pure utility classes.
- * ============================================================================ */
-.light .app-aside {
-  background: rgba(255, 255, 255, 0.72);
-  border-right: 1px solid rgba(15, 23, 42, 0.06);
-}
-.light .app-main {
-  background: rgba(255, 255, 255, 0.58);
-}
-.light aside.app-sidebar {
-  background: rgba(255, 255, 255, 0.72);
-  border-right: 1px solid rgba(15, 23, 42, 0.06);
-}
-.light ::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.18);
-}
-.light ::-webkit-scrollbar-thumb:hover {
-  background: rgba(15, 23, 42, 0.32);
-}
-.light ::-webkit-scrollbar-thumb:active {
-  background: rgba(15, 23, 42, 0.45);
-}
-.light * {
-  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
 }
 
 /* Backwards-compat alias — anything that still carries the old
@@ -193,16 +148,12 @@ aside.app-sidebar {
  * ============================================================================
  *  - `.brand-logo`         : the actual cat silhouette, filled with
  *                            sky-500 → indigo-400 gradient.
- *  - `.brand-logo-breathe` : wraps `.brand-logo` and adds a soft
- *                            outer glow that pulses every 3.6s.
- *                            We animate `filter: drop-shadow()` and
- *                            `transform: scale()` — both are
- *                            GPU-composited and never repaint
- *                            the masked path. The previous
- *                            `::after` pseudo with `opacity +
- *                            scale` was repainting the parent and
- *                            could not animate a `mask-image`
- *                            gradient anyway.
+ *  - `.brand-logo-breathe` : static neon glow (sky-400 + indigo-400
+ *                            drop-shadows).  The previous animated
+ *                            keyframe was dropped because the
+ *                            per-frame filter repaint looked "twitchy"
+ *                            on a masked path; the static glow below
+ *                            reads cleaner against the dark rail.
  * ============================================================================ */
 .brand-logo {
   background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
@@ -218,32 +169,20 @@ aside.app-sidebar {
 }
 
 .brand-logo-breathe {
-  /* Cat glow breathes through `filter: drop-shadow(...)`.  Two
-     stacked shadows give the cat both a tight inner glow (sky-400)
-     and a wider ambient bloom (indigo-400).  The transform scale
-     adds a subtle "lungful" effect synced to the same 3.6s clock. */
-  animation: cat-glow-breathe 3.6s ease-in-out infinite;
-  will-change: filter, transform;
+  /* Static neon glow (no animation). Two stacked drop-shadows give
+     the cat a tight sky-400 inner halo and a wider indigo-400
+     ambient bloom. The intensity is fixed at the "high" keyframe
+     from the previous animation so it still feels alive without
+     the per-frame repaint cost. */
+  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.75))
+          drop-shadow(0 0 24px rgba(129, 140, 248, 0.55));
 }
-@keyframes cat-glow-breathe {
-  0%, 100% {
-    filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.45))
-            drop-shadow(0 0 14px rgba(129, 140, 248, 0.25));
-    opacity: 0.9;
-    transform: scale(1);
-  }
-  50% {
-    filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.85))
-            drop-shadow(0 0 28px rgba(129, 140, 248, 0.55));
-    opacity: 1;
-    transform: scale(1.04);
-  }
-}
-/* Convenience class so other call-sites (e.g. About screen) can opt
-   into the same breathing without copying the keyframe declaration. */
+
+/* Backwards-compat alias — kept so any future call-site that
+   references `.brand-logo-active` still gets the same glow. */
 .brand-logo-active {
-  animation: cat-glow-breathe 3.6s ease-in-out infinite;
-  will-change: filter, transform;
+  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.75))
+          drop-shadow(0 0 24px rgba(129, 140, 248, 0.55));
 }
 
 /* ============================================================================

@@ -1,7 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
-  darkMode: 'class',
+  // Light variant is intentionally disabled — see stores/theme.ts.
+  // All utility classes resolve to their dark-on-glass tokens.
   theme: {
     extend: {
       colors: {

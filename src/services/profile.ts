@@ -54,6 +54,30 @@ export async function setActiveProfile(id: string): Promise<ReloadResult> {
   return await safeInvoke<ReloadResult>('set_active_profile', { id })
 }
 
+/**
+ * Patch a profile's display name (UTF-8).  Empty names are rejected
+ * by the Rust side.  Emits `profile://list-changed`.
+ */
+export async function renameProfile(id: string, name: string): Promise<ProfileMeta> {
+  return await safeInvoke<ProfileMeta>('rename_profile', { id, name })
+}
+
+/**
+ * Hand the on-disk yaml to whatever is registered for `.yaml`
+ * (Notepad, VS Code, …).  Windows-only path; no-op on other OSes.
+ */
+export async function openProfileInEditor(id: string): Promise<void> {
+  await safeInvoke('open_profile_in_editor', { id })
+}
+
+/**
+ * Pop the parent folder in Explorer with the file selected.
+ * Windows-only path; no-op on other OSes.
+ */
+export async function revealProfileFile(id: string): Promise<void> {
+  await safeInvoke('reveal_profile_file', { id })
+}
+
 // Tauri event names — mirror `events.rs`.
 export const EVT_PROFILE_LIST_CHANGED = 'profile://list-changed'
 export const EVT_PROFILE_RELOADED = 'profile://reloaded'

@@ -53,10 +53,7 @@
     "profiles": "配置",
     "stats": "统计",
     "language": "语言",
-    "settings": "设置",
-    "theme": "主题",
-    "theme_dark": "深色",
-    "theme_light": "浅色"
+    "settings": "设置"
   },
   "time": {
     "just_now": "刚刚",
@@ -217,6 +214,19 @@
     "edit_url": "更新 URL",
     "delete_confirm_title": "删除配置？",
     "delete_confirm_body": "将删除配置 \"{name}\" 及其本地缓存，确认操作？",
+    "more_actions": "更多操作",
+    "rename": "重命名",
+    "rename_title": "重命名配置",
+    "rename_placeholder": "例如: 主力机场",
+    "open_in_editor": "在系统编辑器中打开",
+    "reveal_in_explorer": "在文件管理器中显示",
+    "delete": "删除",
+    "drag_drop_hint": "将 .yaml / .yml 文件拖到此处导入",
+    "drag_drop_overlay_title": "松开以导入配置",
+    "drag_drop_overlay_hint": "支持 .yaml / .yml，单个或多个文件",
+    "drag_drop_invalid": "只支持 .yaml / .yml 文件",
+    "clipboard_detected_url": "已从剪贴板检测到订阅链接，已填入 URL 框",
+    "clipboard_detected_yaml": "已从剪贴板检测到配置片段，已填入粘贴框",
     "subscription": {
       "url": "订阅链接",
       "url_placeholder": "https://example.com/sub?token=xxx",

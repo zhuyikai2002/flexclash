@@ -1,9 +1,25 @@
 <script setup lang="ts">
 /**
  * SubscribeDialog — Add a profile (URL / file / paste YAML).
- * Modal restyle only; submit flow preserved.
+ *
+ * 2025 enhancement: CLIPBOARD INTELLIGENCE.
+ *  When the dialog opens we read `navigator.clipboard.readText()` and
+ *  branch on the content shape:
+ *    - matches `^https?://…`        → switch to the URL tab and pre-fill
+ *    - looks like a Clash YAML
+ *      (contains `proxies:` /
+ *      `port:` / `mixed-port:` /
+ *      `rules:`)                    → switch to the paste tab and
+ *                                     pre-fill the textarea
+ *    - anything else                 → stay on the URL tab (default)
+ *
+ *  Browser security note: `navigator.clipboard.readText()` requires
+ *  either focus on the document OR the user to have explicitly granted
+ *  permission.  Tauri WebView2 grants read-access to the active web
+ *  page in the same way Chromium does — it works.  We still wrap the
+ *  call in try/catch so a denied permission does not break the dialog.
  */
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { X, Link, FileCode2, ClipboardPaste, Loader2 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProfilesStore } from '@/stores/profiles'
@@ -26,13 +42,65 @@ const pastedYaml = ref('')
 
 const busy = ref(false)
 const error = ref<string | null>(null)
+const hint = ref<string | null>(null) // clipboard auto-detect message
 
 function reset() {
   url.value = ''; name.value = ''; filePath.value = ''
   pastedName.value = ''; pastedYaml.value = ''
-  error.value = null; busy.value = false
+  error.value = null; busy.value = false; hint.value = null
 }
 function close() { reset(); emit('close') }
+
+// ============================================================================
+// Clipboard auto-detect
+// ============================================================================
+// We mark the request so a user-gesture denial is silent (we just
+// fall through to the URL tab without nagging the user).
+async function readClipboard(): Promise<string | null> {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return null
+    return await navigator.clipboard.readText()
+  } catch {
+    return null
+  }
+}
+
+function isUrl(s: string): boolean {
+  return /^https?:\/\/\S+$/i.test(s.trim())
+}
+
+function isClashYaml(s: string): boolean {
+  // Heuristic: real Clash configs always include at least one of the
+  // canonical top-level keys.  We accept `proxies:`, `proxy-groups:`,
+  // `rules:`, `mixed-port:`, `port:`, `tun:` or `dns:` — any of these
+  // inside the first 4 KB is enough to call it a config snippet.
+  const head = s.slice(0, 4096)
+  return /(^|\n)\s*(proxies|proxy-groups|rules|mixed-port|port|tun|dns)\s*[:{]/m.test(head)
+}
+
+async function probeClipboard() {
+  hint.value = null
+  const text = await readClipboard()
+  if (!text) return
+  const trimmed = text.trim()
+  if (isUrl(trimmed)) {
+    tab.value = 'url'
+    if (!url.value) url.value = trimmed
+    hint.value = t('profiles.clipboard_detected_url')
+  } else if (isClashYaml(trimmed)) {
+    tab.value = 'paste'
+    if (!pastedYaml.value) pastedYaml.value = text
+    hint.value = t('profiles.clipboard_detected_yaml')
+  }
+}
+
+// Run the probe every time the dialog opens. We `watch(props.open)`
+// rather than `onMounted` so re-opens re-read fresh clipboard content.
+watch(
+  () => props.open,
+  (open) => { if (open) void probeClipboard() },
+  { immediate: true },
+)
 
 async function pickFile() {
   try {
@@ -114,6 +182,15 @@ const tabs = [
             {{ t.label }}
           </button>
         </nav>
+
+        <!-- Auto-detect feedback (only visible when we found something
+             in the clipboard that we acted on). -->
+        <p
+          v-if="hint"
+          class="mb-3 rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-200"
+        >
+          {{ hint }}
+        </p>
 
         <form class="space-y-3" @submit.prevent="submit">
           <div v-if="tab === 'url'" class="space-y-2">

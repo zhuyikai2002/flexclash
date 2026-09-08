@@ -3,7 +3,7 @@
  * Sidebar.vue — slim 68px left navigation rail.
  *
  *   ┌────┐
- *   │ 🐱 │  ← breathing brand logo (top)
+ *   │ 🐱 │  ← static neon brand logo (top)
  *   ├────┤
  *   │ D  │  ← dashboard
  *   │ P  │  ← proxies
@@ -14,7 +14,6 @@
  *   │ ⚙  │  ← settings (config destination, separate from data views)
  *   │    │
  *   │ 🌐 │  ← language switcher
- *   │ ☀  │  ← theme toggle (sun ⇄ moon)
  *   │ ●  │  ← kernel status indicator
  *   └────┘
  *
@@ -29,7 +28,6 @@ import {
 import { useI18n } from '@/composables/useI18n'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import StatusBadge from './StatusBadge.vue'
-import ThemeToggle from './ThemeToggle.vue'
 import type { KernelState } from '@/types/clash'
 import navbarLogoUrl from '@/assets/navbar-logo.svg?url'
 
@@ -141,10 +139,9 @@ function pick(id: TabId) {
       ></span>
     </button>
 
-    <!-- Bottom: language + theme + status -->
+    <!-- Bottom: language + status (light-mode toggle is locked off). -->
     <div class="mt-3 flex flex-col items-center gap-2.5">
       <LanguageSwitcher compact />
-      <ThemeToggle />
       <StatusBadge :state="kernelState" compact />
     </div>
   </div>

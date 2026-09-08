@@ -1,24 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FlexClash</title>
     <script>
-      // Resolve the persisted theme synchronously, before the bundle
-      // even starts loading — otherwise dark-mode users see a single
-      // frame of light palette.  Kept in lockstep with
-      // `src/stores/theme.ts`.
+      // The app is dark-only (light variant was removed — see
+      // `src/stores/theme.ts`). We still set the class + color-scheme
+      // synchronously so the first paint is on-brand; this also
+      // pins native form controls (scrollbars, inputs) to dark.
       (function () {
-        try {
-          var t = localStorage.getItem('flexclash.theme');
-          if (t !== 'dark' && t !== 'light') t = 'dark';
-          document.documentElement.classList.add(t);
-          document.documentElement.style.colorScheme = t;
-        } catch (e) {
-          document.documentElement.classList.add('dark');
-          document.documentElement.style.colorScheme = 'dark';
-        }
+        document.documentElement.classList.add('dark');
+        document.documentElement.style.colorScheme = 'dark';
       })();
     </script>
   </head>
