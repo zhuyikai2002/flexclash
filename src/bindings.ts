@@ -18,7 +18,9 @@ export const commands = {
 	getMihomoProxy: (name: string) => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_proxy", { name })),
 	/**
 	 *  PUT /proxies/{group} — switch the active child of a Selector group.
-	 *  Returns the refreshed group object (mihomo echoes it on 200).
+	 *  Mihomo answers the PUT with 204 (empty body) on success, so we then
+	 *  re-GET the group and return its authoritative JSON — the renderer never
+	 *  sees a bare `null` payload it would crash on.
 	 */
 	selectMihomoProxy: (group: string, proxy: string) => typedError<string, AppError>(__TAURI_INVOKE("select_mihomo_proxy", { group, proxy })),
 	/**  GET /proxies/{name}/delay?url=…&timeout=… */

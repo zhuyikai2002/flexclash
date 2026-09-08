@@ -246,6 +246,14 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
                 }
                 CommandEvent::Terminated(TerminatedPayload { code, signal }) => {
                     handle_for_task.set_child(None);
+                    // Visible in dev-terminal + kernel log so a crash's real
+                    // exit code / signal is never hidden by the watcher.
+                    eprintln!(
+                        "[sidecar] mihomo exited code={code:?} signal={signal:?}"
+                    );
+                    handle_for_task.push_log(format!(
+                        "[sidecar] mihomo exited (code={code:?}, signal={signal:?})"
+                    ));
                     let new_state = if code == Some(0) {
                         KernelState::Stopped
                     } else {
@@ -355,11 +363,17 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
 
     let existing = std::fs::read_to_string(&path)?;
 
-    // Bump detection — if the user's on-disk config is missing the
-    // version marker, or carries a strictly older one, we treat the
-    // whole file as stale and rewrite it.  This is how we push
-    // backwards-incompatible schema changes (e.g. TUN bypass rules)
-    // without forcing the user to nuke their work dir.
+    // PROTECTION: a config WITHOUT our version marker is a user-activated
+    // subscription (activate_profile fs-copies the profile yaml verbatim)
+    // or a hand-edited file. NEVER clobber it back to the bundled default
+    // — that is what made imported nodes vanish after a restart.
+    if extract_config_version(&existing).is_none() {
+        return Ok((path, ConfigRefresh::Unchanged));
+    }
+
+    // Bump detection — only for configs we own (they carry the marker).
+    // A stale schema (e.g. new TUN bypass rules) is pushed by rewriting
+    // the bundled default, never a user file.
     if let (Some(user_v), Some(bundled_v)) = (
         extract_config_version(&existing),
         extract_config_version(bundled),
@@ -377,21 +391,6 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
                 },
             ));
         }
-    } else if extract_config_version(bundled).is_some() {
-        // Bundled config has a version marker but the user's file
-        // doesn't (pre-versioning install).  Bump.
-        let from_port = extract_controller_port(&existing);
-        let to_version = extract_config_version(bundled).unwrap();
-        std::fs::write(&path, bundled)?;
-        return Ok((
-            path,
-            ConfigRefresh::SchemaBumped {
-                from_version: 0,
-                to_version,
-                from_port,
-                to_port: EXPECTED_CONTROLLER_PORT,
-            },
-        ));
     }
 
     if existing.contains(&expected) {

@@ -161,7 +161,11 @@ pub async fn get_mihomo_proxy(
 }
 
 /// PUT /proxies/{group} — switch the active child of a Selector group.
-/// Returns the refreshed group object (mihomo echoes it on 200).
+/// Mihomo answers the PUT with 204 (empty body) on success, so we then
+/// re-GET the group and return its authoritative JSON — the renderer never
+/// sees a bare `null` payload it would crash on. A failed re-GET is NOT
+/// fatal: the switch already happened, so we degrade to `null` and the
+/// frontend falls back to optimistic state.
 #[specta]
 #[tauri::command]
 pub async fn select_mihomo_proxy(
@@ -169,18 +173,27 @@ pub async fn select_mihomo_proxy(
     group: String,
     proxy: String,
 ) -> CmdResult<String> {
+    // Tight 1.5 s budget: a hung controller must not wedge the UI.
+    const SELECT_TIMEOUT_MS: u64 = 1_500;
     let path = format!(
         "/proxies/{}",
         percent_encode(&group)
     );
+    // 1) Issue the switch; propagate transport/HTTP errors, ignore body.
     mihomo_request(
         reqwest::Method::PUT,
         &path,
         Some(serde_json::json!({ "name": proxy })),
-        DEFAULT_TIMEOUT_MS,
+        SELECT_TIMEOUT_MS,
     )
-    .await
-    .map(|v| v.to_string())
+    .await?;
+    // 2) Best-effort re-GET of the refreshed group. If this races or
+    //    times out the switch already took effect — return null so the
+    //    renderer uses its optimistic fallback instead of erroring.
+    match mihomo_request(reqwest::Method::GET, &path, None, SELECT_TIMEOUT_MS).await {
+        Ok(v) => Ok(v.to_string()),
+        Err(_) => Ok(Value::Null.to_string()),
+    }
 }
 
 /// GET /proxies/{name}/delay?url=…&timeout=…

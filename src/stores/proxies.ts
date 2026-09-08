@@ -228,10 +228,15 @@ export const useProxiesStore = defineStore('proxies', {
     async selectProxyNode(groupName: string, nodeName: string): Promise<void> {
       try {
         const updated = await apiSelectProxy(groupName, nodeName)
-        if (this.groups[groupName]) {
-          this.groups[groupName].now = updated.now ?? nodeName
+        const target = this.groups[groupName]
+        if (target) {
+          // Rust now always returns the refreshed group object, but stay
+          // defensive: never read `.now` off a null payload.
+          target.now = updated?.now ?? nodeName
         }
-        this.byName[groupName] = updated
+        if (updated) {
+          this.byName[groupName] = updated
+        }
       } catch (e) {
         this.error = e instanceof Error ? e.message : String(e)
         throw e

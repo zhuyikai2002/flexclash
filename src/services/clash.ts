@@ -139,7 +139,9 @@ export async function getProxy(name: string): Promise<Proxy> {
 export async function selectProxy(group: string, name: string): Promise<Proxy> {
   guardTauri('select_mihomo_proxy')
   const v = await getJson(commands.selectMihomoProxy(group, name))
-  return v as unknown as Proxy
+  // Rust re-GETs the group so this is normally the full object; fall back
+  // to a minimal shape so callers never dereference `null.now`.
+  return (v ?? { name: group, now: name }) as unknown as Proxy
 }
 
 export async function getProxyDelay(
