@@ -19,14 +19,14 @@ pub fn set_system_proxy(port: u16) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     { windows::set_system_proxy(port) }
     #[cfg(not(target_os = "windows"))]
-    { Err("system proxy is only implemented on Windows in this build".into()) }
+    { unix::set_system_proxy(port) }
 }
 
 pub fn disable_system_proxy() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     { windows::disable_system_proxy() }
     #[cfg(not(target_os = "windows"))]
-    { Err("system proxy is only implemented on Windows in this build".into()) }
+    { unix::disable_system_proxy() }
 }
 
 /// Read the current effective system-proxy state from the registry.
@@ -38,7 +38,7 @@ pub fn query_system_proxy_status() -> Option<ProxyStatus> {
     #[cfg(target_os = "windows")]
     { windows::query_system_proxy_status() }
     #[cfg(not(target_os = "windows"))]
-    { None }
+    { unix::query_system_proxy_status() }
 }
 
 /// Convenience: parse "host:port" into `(host, port)`.

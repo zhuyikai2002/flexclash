@@ -24,6 +24,11 @@
 //   flip swaps the icon on its own.
 // ============================================================================
 
+// Tray is only mounted on Windows (see lib.rs setup). On other platforms the
+// whole module is dead code — silence the lints instead of cfg-gating every
+// item.
+#![cfg_attr(not(target_os = "windows"), allow(dead_code, unused_imports))]
+
 use std::sync::Arc;
 use std::sync::Mutex;
 
