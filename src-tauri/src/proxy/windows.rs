@@ -4,7 +4,7 @@
 // Talks to:
 //   HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 //     ProxyEnable   (DWORD32)  0 / 1
-//     ProxyServer   (REG_SZ)   "127.0.0.1:7890"
+//     ProxyServer   (REG_SZ)   "127.0.0.1:7897"
 //     ProxyOverride (REG_SZ)   "localhost;127.*;10.*;172.16.*;192.168.*;<local>"
 //
 // Then calls `InternetSetOptionW(NULL, INTERNET_OPTION_SETTINGS_CHANGED, ...)`

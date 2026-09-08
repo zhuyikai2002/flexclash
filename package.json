@@ -1,15 +1,23 @@
 {
   "name": "flexclash",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "dev": "tauri dev",
+    "dev:web": "vite",
+    "build": "tauri build",
+    "build:web": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "check:types": "vue-tsc --noEmit",
+    "check:rust": "cd src-tauri && cargo check",
+    "check": "vue-tsc --noEmit && npm run check:rust",
+    "clean": "powershell -NoProfile -Command \"Get-Process flexclash,mihomo -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*flexclash*' -or $_.Name -eq 'flexclash' } | Stop-Process -Force\"",
+    "reset-dev": "npm run clean && npm run dev",
+    "ports": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 7890,7897,9091 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess\""
   },
   "dependencies": {
     "@tanstack/vue-virtual": "^3.10.8",

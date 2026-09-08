@@ -251,7 +251,7 @@ fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
             let r = if currently_on {
                 proxy::disable_system_proxy()
             } else {
-                proxy::set_system_proxy(7890)
+                proxy::set_system_proxy(7897)
             };
             if let Err(e) = r {
                 let _ = app.emit(KERNEL_LOG, format!("[tray] proxy toggle failed: {e}"));
@@ -262,7 +262,7 @@ fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
                 SYSTEM_PROXY_CHANGED,
                 serde_json::json!({
                     "enabled": new_state,
-                    "port": if new_state { Some(7890u16) } else { None },
+                    "port": if new_state { Some(7897u16) } else { None },
                     "source": "tray",
                 }),
             );

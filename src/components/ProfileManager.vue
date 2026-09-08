@@ -39,6 +39,7 @@ import {
   UploadCloud,
 } from 'lucide-vue-next'
 import { useProfilesStore } from '@/stores/profiles'
+import { useProxiesStore } from '@/stores/proxies'
 import {
   openProfileInEditor,
   revealProfileFile,
@@ -48,6 +49,7 @@ import { useI18n } from '@/composables/useI18n'
 import type { ProfileMeta } from '@/types/clash'
 
 const store = useProfilesStore()
+const proxiesStore = useProxiesStore()
 const { t } = useI18n()
 
 const emit = defineEmits<{ (e: 'open-subscribe'): void }>()
@@ -191,14 +193,25 @@ const updatingId = computed(() => {
 
 async function activate(id: string) {
   const r = await store.activateProfile(id)
-  if (r.status === 'failed') console.error('[profile] activate failed:', r.detail)
+  if (r.status === 'failed') {
+    console.error('[profile] activate failed:', r.detail)
+    return
+  }
+  // Profile hot-reloaded into mihomo — refresh the proxy tree so the
+  // Proxies tab shows the activated subscription's groups immediately.
+  void proxiesStore.fetchProxies()
 }
 async function activateWithBusy(id: string) {
   busyId.value = id
   try { await activate(id) } finally { busyId.value = null }
 }
 async function updateOne(id: string) {
-  try { await store.updateProfile(id) } catch (e) { console.error('[profile] update failed:', e) }
+  try {
+    await store.updateProfile(id)
+    // If the updated profile is the active one, mihomo was reloaded —
+    // keep the Proxies tree in sync.
+    void proxiesStore.fetchProxies()
+  } catch (e) { console.error('[profile] update failed:', e) }
 }
 
 // ============================================================================

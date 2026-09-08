@@ -273,7 +273,7 @@ const tabs = [
               <textarea
                 v-model="pastedYaml"
                 rows="10"
-                placeholder="mixed-port: 7890&#10;proxies:&#10;  - { name: 'ss1', type: ss, server: 1.2.3.4, port: 8388 }"
+                placeholder="mixed-port: 7897&#10;proxies:&#10;  - { name: 'ss1', type: ss, server: 1.2.3.4, port: 8388 }"
                 class="mt-1 block w-full rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-400/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
               />
             </label>

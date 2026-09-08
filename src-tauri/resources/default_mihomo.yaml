@@ -9,9 +9,9 @@
 # line; if it's missing or older than the bundled version, the file
 # is rewritten and `kernel://config-refreshed` is emitted so the UI
 # can prompt the user to restart.
-# flexclash-config-version: 2
+# flexclash-config-version: 3
 
-mixed-port: 7890
+mixed-port: 7897
 allow-lan: false
 mode: rule
 log-level: info
@@ -19,6 +19,7 @@ ipv6: false
 
 # RESTful API consumed by the frontend directly (NOT through Rust).
 # Port 9091 isolates FlexClash from any Clash Party (9090) running on the host.
+# Mixed-port 7897 isolates FlexClash from any Clash Party (7890) running on the host.
 external-controller: 127.0.0.1:9091
 external-controller-cors:
   allow-private-network: true

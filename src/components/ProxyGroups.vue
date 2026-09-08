@@ -12,24 +12,52 @@
  *   - Speed test is per-group, not per-node
  *   - Sort / refresh controls sit in the section header (sticky)
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   CheckCircle2, Loader2, Zap,
   ArrowDownNarrowWide, ArrowDownWideNarrow, RefreshCw, ChevronDown, ChevronRight,
 } from 'lucide-vue-next'
 import { useProxiesStore, type DelayStatus } from '@/stores/proxies'
+import { useKernelStore } from '@/stores/kernel'
+import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { useI18n } from '@/composables/useI18n'
 
 const proxies = useProxiesStore()
+const kernel = useKernelStore()
 const { t } = useI18n()
 const selecting = ref<Record<string, boolean>>({})
 const collapsed = ref<Record<string, boolean>>({})
+const unlistens: UnlistenFn[] = []
 
+// Always pull the freshest proxy tree on mount — a subscription activated
+// while the user was on the Profiles tab won't be visible otherwise.
 onMounted(() => {
-  if (!proxies.lastFetchAt) {
-    void proxies.fetchProxies()
-  }
+  void proxies.fetchProxies()
+
+  // React to profile (re)loads / kernel state flips while this view is
+  // alive: a toast-triggered reload should also refresh the tree.
+  void safeListen('profile://reloaded', () => { void proxies.fetchProxies() })
+    .then((u) => unlistens.push(u))
+    .catch(() => {})
+  void safeListen('profile://list-changed', () => {
+    if (kernel.isRunning) void proxies.fetchProxies()
+  })
+    .then((u) => unlistens.push(u))
+    .catch(() => {})
+
+  // When the kernel transitions into Running while this tab is already
+  // mounted (dashboard auto-start), pull the tree too.
+  watch(
+    () => kernel.isRunning,
+    (running) => { if (running) void proxies.fetchProxies() },
+  )
 })
+
+onUnmounted(() => {
+  for (const u of unlistens) u()
+  unlistens.length = 0
+})
+
 
 async function handleSelect(group: string, node: string) {
   const key = `${group}::${node}`

@@ -28,7 +28,7 @@ const errMsg = computed(() => store.lastError)
 const detail = computed(() => {
   if (!enabled.value) return ''
   return t('dashboard.toggles.system_proxy.current', {
-    value: `127.0.0.1:${port.value ?? 7890}`,
+    value: `127.0.0.1:${port.value ?? 7897}`,
   })
 })
 

@@ -64,7 +64,7 @@ pub struct ProfileIndex {
 /// MUST stay in sync with `src/services/clash.ts` `MIHOMO_BASE_URL`.
 pub const RESERVED_CONTROLLER: &str = "127.0.0.1:9091";
 pub const RESERVED_LOG_LEVEL: &str = "info";
-pub const RESERVED_MIXED_PORT: u16 = 7890;
+pub const RESERVED_MIXED_PORT: u16 = 7897;
 pub const RESERVED_ALLOW_LAN: bool = false;
 pub const RESERVED_MODE: &str = "rule";
 
@@ -272,7 +272,7 @@ pub fn activate_profile(
 ///   - `external-controller`        : `127.0.0.1:9091`
 ///   - `external-controller-cors`   : tauri://localhost + http://localhost:5173
 ///   - `secret`                     : "" (no auth)
-///   - `mixed-port`                 : 7890 (only if absent)
+///   - `mixed-port`                 : 7897 (only if absent)
 ///   - `allow-lan`                  : false
 ///   - `mode`                       : rule
 ///   - `log-level`                  : info
@@ -507,7 +507,7 @@ mod tun_yaml_tests {
 
     #[test]
     fn inject_tun_adds_block_when_missing() {
-        let yaml = "mixed-port: 7890\nexternal-controller: 127.0.0.1:9091\n";
+        let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
         let out = toggle_tun_block(yaml, true).unwrap();
         assert!(out.contains("tun:"));
         assert!(out.contains("device: flexclash-tun"));
@@ -523,7 +523,7 @@ mod tun_yaml_tests {
 
     #[test]
     fn inject_tun_toggle_off_removes_block() {
-        let with = toggle_tun_block("mixed-port: 7890\n", true).unwrap();
+        let with = toggle_tun_block("mixed-port: 7897\n", true).unwrap();
         let without = toggle_tun_block(&with, false).unwrap();
         assert!(!without.contains("tun:"));
         assert!(!without.contains("flexclash-tun"));
@@ -531,7 +531,7 @@ mod tun_yaml_tests {
 
     #[test]
     fn inject_tun_round_trip_is_idempotent() {
-        let yaml = "mixed-port: 7890\nexternal-controller: 127.0.0.1:9091\n";
+        let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
         let once = toggle_tun_block(yaml, true).unwrap();
         let twice = toggle_tun_block(&once, true).unwrap();
         assert_eq!(once, twice, "toggling enable twice must not mutate the yaml");
@@ -539,7 +539,7 @@ mod tun_yaml_tests {
 
     #[test]
     fn inject_tun_preserves_user_overrides() {
-        let mut yaml = String::from("mixed-port: 7890\n");
+        let mut yaml = String::from("mixed-port: 7897\n");
         yaml.push_str("tun:\n  enable: false\n  inet4-address: 10.0.0.1/30\n");
         let out = toggle_tun_block(&yaml, true).unwrap();
         // Our lock-in keys should be on.

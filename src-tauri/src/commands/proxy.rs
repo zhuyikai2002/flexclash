@@ -21,13 +21,13 @@ pub struct ProxyToggleResult {
 }
 
 /// Turn the Windows system proxy on, pointing at `127.0.0.1:<port>`.
-/// If `port` is None we use mihomo's default mixed-port (7890).
+/// If `port` is None we use mihomo's default mixed-port (7897).
 #[tauri::command]
 pub fn enable_system_proxy<R: Runtime>(
     app: AppHandle<R>,
     port: Option<u16>,
 ) -> CmdResult<ProxyToggleResult> {
-    let p = port.unwrap_or(7890);
+    let p = port.unwrap_or(7897);
     proxy::set_system_proxy(p).map_err(AppError::Proxy)?;
     let _ = app.emit(
         SYSTEM_PROXY_CHANGED,

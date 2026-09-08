@@ -98,7 +98,7 @@ fn enable_writes_expected_values() {
 #[test]
 #[serial]
 fn disable_clears_enable_and_preserves_other_values() {
-    proxy::set_system_proxy(7890).expect("set 7890");
+    proxy::set_system_proxy(7897).expect("set 7897");
     proxy::disable_system_proxy().expect("disable");
 
     let (en, srv, ov) = read_status_now();

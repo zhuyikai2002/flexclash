@@ -38,7 +38,7 @@ export const useProxyStore = defineStore('proxy', {
 
   getters: {
     enabled: (s): boolean => s.status?.enabled === true,
-    /** Effective port the system proxy points to (defaults to 7890 / mihomo mixed-port). */
+    /** Effective port the system proxy points to (defaults to 7897 / mihomo mixed-port). */
     port: (s): number | null => {
       if (!s.status?.enabled || !s.status.server) return null
       const m = s.status.server.match(/:(\d+)$/)
@@ -74,7 +74,7 @@ export const useProxyStore = defineStore('proxy', {
       )
     },
 
-    async enable(port = 7890): Promise<ProxyToggleResult> {
+    async enable(port = 7897): Promise<ProxyToggleResult> {
       this.toggling = true
       this.lastError = null
       try {

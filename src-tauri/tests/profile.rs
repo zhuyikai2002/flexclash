@@ -101,7 +101,7 @@ fn sanitize_fills_in_mixed_port_if_absent() {
     let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
     assert_eq!(
         v.as_mapping().unwrap().get("mixed-port").unwrap().as_u64(),
-        Some(7890),
+        Some(7897),
     );
 }
 
@@ -126,7 +126,7 @@ fn profile_storage_save_list_delete_roundtrip() {
     let dir = helper::tmp("crud");
     let storage = profile_ops::ProfileStorage::new(&dir);
     let body = r#"
-mixed-port: 7890
+mixed-port: 7897
 proxies:
   - { name: "ss1", type: ss, server: 1.2.3.4, port: 8388 }
   - { name: "ss2", type: ss, server: 1.2.3.5, port: 8388 }
@@ -166,7 +166,7 @@ fn profile_storage_activate_copies_yaml_to_active_path() {
     let dir = helper::tmp("activate");
     let storage = profile_ops::ProfileStorage::new(&dir);
 
-    let body = "mixed-port: 7890\nmode: rule\n";
+    let body = "mixed-port: 7897\nmode: rule\n";
     let meta = profile_ops::save_profile(
         &storage,
         None,

@@ -140,9 +140,9 @@ async function restartKernel() {
  *  bundled yaml and surface them as read-only badges.  The real
  *  "edit + persist" flow lands when the Rust config-write Tauri
  *  command ships (Phase 8). */
-const mixedPort = ref(7890)
+const mixedPort = ref(7897)
 const controllerPort = ref(9091)
-const socksPort = ref(7891)
+const socksPort = ref(7892)
 
 void safeInvokeOr<{
   mixedPort: number
