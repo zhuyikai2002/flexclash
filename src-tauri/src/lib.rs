@@ -17,7 +17,7 @@ use crate::core::sidecar::SidecarHandle;
 use crate::core::startup::{self, SilentFlag};
 use crate::core::tun::TunManager;
 use crate::store::queries::HistoryDb;
-use tauri::Manager;
+use tauri::{Emitter, Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -45,6 +45,57 @@ pub fn run() {
         .manage(ExitFlag::default())
         .manage(silent_flag)
         .manage(TunManager::new())
+        // -----------------------------------------------------------------
+        // WINDOW-LEVEL DRAG-AND-DROP INTERCEPT
+        // -----------------------------------------------------------------
+        // We catch `WindowEvent::DragDrop` on the main thread of the
+        // Tauri runtime — this sits *below* the WebView2 child
+        // window, so the JS layer never sees a DOM event and the
+        // well-known WebView2 "no drop zone" issues go away.  We then
+        // re-broadcast three plain Tauri events the renderer can
+        // `listen()` on.  Filtering by extension lives in Rust so the
+        // frontend never even has to check.
+        // -----------------------------------------------------------------
+        .on_window_event(|window, event| {
+            if let WindowEvent::DragDrop(drag) = event {
+                match drag {
+                    tauri::DragDropEvent::Enter { paths, .. } => {
+                        // Show the overlay only if at least one of the
+                        // currently-hovered files is something we
+                        // would actually import.
+                        let any_yaml = paths.iter().any(|p| is_yaml_path(p));
+                        if any_yaml {
+                            let _ = window.emit(events::NATIVE_FILE_DRAG_ENTER, ());
+                        }
+                    }
+                    tauri::DragDropEvent::Over { .. } => {
+                        // No-op: `enter` already flipped the overlay.
+                    }
+                    tauri::DragDropEvent::Drop { paths, .. } => {
+                        let yaml_paths: Vec<String> = paths
+                            .iter()
+                            .filter(|p| is_yaml_path(p))
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        if !yaml_paths.is_empty() {
+                            println!(
+                                "[DragDrop] hit {} yaml file(s): {:?}",
+                                yaml_paths.len(),
+                                yaml_paths
+                            );
+                            let _ = window.emit(events::NATIVE_FILE_DROP, &yaml_paths);
+                        }
+                        // Always clear the overlay on drop, even if no
+                        // file was accepted (e.g. user dropped a .png).
+                        let _ = window.emit(events::NATIVE_FILE_DRAG_LEAVE, ());
+                    }
+                    tauri::DragDropEvent::Leave => {
+                        let _ = window.emit(events::NATIVE_FILE_DRAG_LEAVE, ());
+                    }
+                    _ => {}
+                }
+            }
+        })
         .setup(move |app| {
             let handle = app.handle().clone();
             crate::core::shutdown::install(&handle);
@@ -155,4 +206,18 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlexClash");
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Case-insensitive `.yaml` / `.yml` extension check used by the
+/// drag-drop router above.  Lives in module scope so we can call it
+/// from the `on_window_event` closure without capturing state.
+fn is_yaml_path(p: &std::path::Path) -> bool {
+    matches!(
+        p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(),
+        Some("yaml") | Some("yml"),
+    )
 }

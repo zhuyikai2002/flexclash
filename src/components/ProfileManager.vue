@@ -3,18 +3,29 @@
  * ProfileManager — list, activate, delete, update + quota progress.
  *
  * Phase 9 / 2025 enhancements:
- *   - NATIVE OS drag & drop via `getCurrentWebview().onDragDropEvent`
- *     (Tauri 2 emits `tauri://drag-drop` with the real absolute
- *     Windows path of every dropped file).  We do NOT rely on the
- *     HTML5 `drop` event because in a Tauri webview HTML5 drops
- *     only catch *intra-window* drags — files dragged from
- *     Explorer are filtered out.  The Tauri native event covers
- *     every file the OS shell hands us.
- *   - An elegant full-screen dashed overlay covers the viewport
- *     while the user is dragging.
+ *
+ *   - DRAG & DROP, RUST-OWNED.
+ *     The Tauri main process catches `WindowEvent::DragDrop` in
+ *     `Builder::on_window_event` (see `src-tauri/src/lib.rs`) and
+ *     re-broadcasts three plain Tauri events:
+ *
+ *         native-file-drag-enter   payload: ()
+ *         native-file-drag-leave   payload: ()
+ *         native-file-drop         payload: string[]   (already
+ *                                                     filtered to
+ *                                                     .yaml/.yml)
+ *
+ *     The renderer never binds a DOM / webview drop listener.  This
+ *     is the reliable path on Windows because the WebView2 child
+ *     window filters out OS-level drops in some builds and any
+ *     non-trivial elevation boundary can drop messages at the
+ *     webview layer.  Going through the Tauri runtime is the only
+ *     API that survives every combination we care about.
+ *
  *   - "⋯" overflow menu on every card with three actions: Rename,
  *     Open in system editor, Reveal in file explorer (Delete is
  *     folded into the same menu so the card stays tidy).
+ *
  *   - Cards show the file basename (`19f29131ce0.yaml`) as a
  *     monospace subtitle so the user can correlate the friendly
  *     alias (e.g. "主力机场") with the on-disk file.
@@ -23,8 +34,7 @@
  * presentation layer.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { getCurrentWebview } from '@tauri-apps/api/webview'
-import type { UnlistenFn } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import {
   Trash2,
   RefreshCw,
@@ -53,27 +63,17 @@ const { t } = useI18n()
 const emit = defineEmits<{ (e: 'open-subscribe'): void }>()
 
 // ============================================================================
-// Drag & drop — Tauri 2 NATIVE
+// Native drag & drop — JS side, listen-only.
 // ============================================================================
-// The Tauri runtime delivers `tauri://drag-enter` / `drag-over` / `drag-drop`
-// / `drag-leave` events that the `webview` JS module re-exposes as a single
-// stream of typed payloads via `onDragDropEvent`.  The `drop` payload
-// includes the OS-level absolute file paths, which is exactly what we need
-// to forward to the Rust import command (no FileReader binary round-trip).
-//
-// We still keep a JS-side boolean `isDragging` for the dashed overlay.  The
-// `enter` / `over` events share the same `enter`+`over` semantics in
-// Tauri 2.x: every cursor movement that hovers over a new sub-element fires
-// `over`.  We track a `dragDepth` counter so the overlay does not flicker
-// when the cursor crosses a child element.
+// We never touch `getCurrentWebview().onDragDropEvent` or any DOM
+// `dragover` / `drop` listener.  Three plain Tauri listeners mirror
+// what the Rust side emits; we toggle a single boolean to show /
+// hide the dashed overlay and dispatch the drop paths straight to
+// the existing `addFromFile` store action (which calls the existing
+// `import_profile_file` Rust command — no need for a second read).
 // ============================================================================
 const isDragging = ref(false)
-const dragDepth = ref(0)
-let unlistenDrag: UnlistenFn | null = null
-
-function isYamlPath(p: string): boolean {
-  return /\.(ya?ml)$/i.test(p)
-}
+const unlistens: UnlistenFn[] = []
 
 const importToast = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -84,23 +84,15 @@ function flashToast(kind: 'ok' | 'err', text: string) {
 }
 
 function basenameFromPath(p: string): string {
-  // Forward- and back-slash friendly — Explorer on Windows hands
-  // us a path with `\\` even though our internal file_path uses
-  // `/` (Tauri normalises the case in a sense, but never the
-  // separator).  Use the last separator of either flavour.
   const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
   const base = idx >= 0 ? p.slice(idx + 1) : p
   return base.replace(/\.(ya?ml)$/i, '')
 }
 
 async function importPaths(paths: string[]) {
-  const accepted = paths.filter(isYamlPath)
-  if (accepted.length === 0) {
-    flashToast('err', t('profiles.drag_drop_invalid'))
-    return
-  }
+  if (paths.length === 0) return
   let ok = 0
-  for (const p of accepted) {
+  for (const p of paths) {
     try {
       const display = basenameFromPath(p)
       await store.addFromFile(p, display)
@@ -110,7 +102,7 @@ async function importPaths(paths: string[]) {
     }
   }
   if (ok > 0) {
-    flashToast('ok', `${ok}/${accepted.length} imported`)
+    flashToast('ok', `${ok}/${paths.length} imported`)
   } else {
     flashToast('err', t('profiles.drag_drop_invalid'))
   }
@@ -118,52 +110,33 @@ async function importPaths(paths: string[]) {
 
 onMounted(async () => {
   void store.refresh()
-  try {
-    unlistenDrag = await getCurrentWebview().onDragDropEvent((event) => {
-      const p = event.payload as
-        | { type: 'enter'; paths: string[] }
-        | { type: 'over' }
-        | { type: 'drop'; paths: string[] }
-        | { type: 'leave' }
-      switch (p.type) {
-        case 'enter':
-          dragDepth.value += 1
-          isDragging.value = true
-          break
-        case 'over':
-          // `over` fires for every hover tick while dragging. We
-          // only care that we're still dragging (it is the
-          // companion of `enter`), so no-op.
-          if (!isDragging.value) isDragging.value = true
-          break
-        case 'drop':
-          dragDepth.value = 0
-          isDragging.value = false
-          if (p.paths && p.paths.length > 0) {
-            void importPaths(p.paths)
-          }
-          break
-        case 'leave':
-          dragDepth.value = Math.max(0, dragDepth.value - 1)
-          if (dragDepth.value === 0) isDragging.value = false
-          break
-      }
-    })
-  } catch (e) {
-    // `onDragDropEvent` is only available when the window has
-    // `dragDropEnabled: true` in `tauri.conf.json`. If the user
-    // is running the app via `vite` without the Tauri runtime
-    // (e.g. plain browser preview), this throws and we silently
-    // fall through. Drag/drop then just doesn't work in preview.
-    console.warn('[profile] onDragDropEvent unavailable:', e)
-  }
+
+  // 1) Hovering. Rust only fires this when at least one of the
+  //    files in the drag session is a .yaml / .yml.
+  const u1 = await listen('native-file-drag-enter', () => {
+    isDragging.value = true
+  })
+
+  // 2) Leaving the window entirely. Also fired after a successful
+  //    drop, so the overlay always collapses.
+  const u2 = await listen('native-file-drag-leave', () => {
+    isDragging.value = false
+  })
+
+  // 3) Drop.  Rust has already filtered the paths; we just dispatch
+  //    them to the store.  We always clear the overlay afterwards
+  //    (Rust also sends a leave, but rendering is idempotent).
+  const u3 = await listen<string[]>('native-file-drop', async (event) => {
+    isDragging.value = false
+    await importPaths(event.payload)
+  })
+
+  unlistens.push(u1, u2, u3)
 })
 
 onBeforeUnmount(() => {
-  if (unlistenDrag) {
-    unlistenDrag()
-    unlistenDrag = null
-  }
+  for (const u of unlistens) u()
+  unlistens.length = 0
 })
 
 // ============================================================================
@@ -498,11 +471,9 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
     <!-- =========================================================================
          DRAG-AND-DROP FULLSCREEN OVERLAY
          =========================================================================
-         The overlay covers the entire viewport (fixed inset-0) and is
-         purely decorative; it has pointer-events: none so OS-level
-         drop events pass through to the webview.  We only show it
-         when at least one `enter` event has fired and we haven't
-         yet seen a matching `leave` / `drop`.
+         Purely decorative, pointer-events: none.  Toggled by the
+         `native-file-drag-enter` / `native-file-drag-leave` events
+         emitted from the Rust main process.
     ========================================================================== -->
     <Transition
       enter-active-class="transition duration-150 ease-out"

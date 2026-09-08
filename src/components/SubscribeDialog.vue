@@ -3,8 +3,10 @@
  * SubscribeDialog — Add a profile (URL / file / paste YAML).
  *
  * 2025 enhancement: CLIPBOARD INTELLIGENCE.
- *  When the dialog opens we read `navigator.clipboard.readText()` and
- *  branch on the content shape:
+ *  When the dialog opens we read the OS clipboard via
+ *  `tauri-plugin-clipboard-manager`'s `readText()` (which delegates
+ *  to Win32 `GetClipboardData` through `arboard`) and branch on the
+ *  content shape:
  *    - matches `^https?://…`        → switch to the URL tab and pre-fill
  *    - looks like a Clash YAML
  *      (contains `proxies:` /
@@ -13,11 +15,10 @@
  *                                     pre-fill the textarea
  *    - anything else                 → stay on the URL tab (default)
  *
- *  Browser security note: `navigator.clipboard.readText()` requires
- *  either focus on the document OR the user to have explicitly granted
- *  permission.  Tauri WebView2 grants read-access to the active web
- *  page in the same way Chromium does — it works.  We still wrap the
- *  call in try/catch so a denied permission does not break the dialog.
+ *  No Chromium permission dialog is shown — the plugin runs in the
+ *  Rust process and has direct access to the user's clipboard.  We
+ *  still wrap the call in try/catch so a denied OS-level access
+ *  (e.g. a non-text format) does not break the dialog.
  */
 import { ref, watch } from 'vue'
 import { X, Link, FileCode2, ClipboardPaste, Loader2 } from 'lucide-vue-next'
