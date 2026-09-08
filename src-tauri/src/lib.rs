@@ -53,8 +53,11 @@ pub fn run() {
                 commands::mihomo::close_mihomo_connection,
                 commands::mihomo::close_all_mihomo_connections,
                 commands::mihomo::get_mihomo_rules,
+                commands::updater::check_update,
+                commands::updater::install_update,
             ])
-            .typ::<crate::core::watcher::AppStateSnapshot>();
+            .typ::<crate::core::watcher::AppStateSnapshot>()
+            .typ::<crate::commands::updater::UpdateInfo>();
 
         // Export TypeScript bindings to the frontend source tree.
         let out_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/bindings.ts");
@@ -74,6 +77,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             // `tauri-plugin-autostart` requires a launcher for init. We use
             // MacosLauncher::LaunchAgent as the generic default; on Windows
@@ -263,6 +267,8 @@ pub fn run() {
             commands::mihomo::close_mihomo_connection,
             commands::mihomo::close_all_mihomo_connections,
             commands::mihomo::get_mihomo_rules,
+            commands::updater::check_update,
+            commands::updater::install_update,
             commands::profile::list_profiles,
             commands::profile::get_active_profile,
             commands::profile::get_profile_content,

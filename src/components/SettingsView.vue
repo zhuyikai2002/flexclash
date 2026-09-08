@@ -18,6 +18,7 @@ import {
   Cpu, Network, RotateCcw, FileText, Activity, Eye, EyeOff,
   Layers, GitBranch, Languages, Power, X, Github, RefreshCw, Loader2,
   CheckCircle2, AlertCircle, Hash, Cog, Wifi, BookOpen, AlertTriangle, Trash2,
+  ArrowUpCircle, DownloadCloud,
 } from 'lucide-vue-next'
 import { useI18n } from '@/composables/useI18n'
 import { useKernelStore } from '@/stores/kernel'
@@ -70,20 +71,82 @@ function setCloseBehavior(v: CloseBehavior) {
   if (typeof localStorage !== 'undefined') localStorage.setItem(CLOSE_BEHAVIOR_KEY, v)
 }
 
-/** Update check stub.  The real `gh release list` flow will land
- *  in a follow-up; for Phase 7 we render a static "you're up to
- *  date" badge so the layout is verifiable. */
-const updateState = ref<'idle' | 'checking' | 'uptodate' | 'available'>('idle')
+// ---------------------------------------------------------------------------
+// Updater (Phase updater): real tauri-plugin-updater via typed bindings.
+// ---------------------------------------------------------------------------
+import { commands, type UpdateInfo } from '@/bindings'
+
+type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'uptodate'
+  | 'available'
+  | 'downloading'
+  | 'installing'
+  | 'error'
+
+const updateState = ref<UpdatePhase>('idle')
 const updateMessage = ref<string | null>(null)
-const appVersion = '0.1.2'
+const updateInfo = ref<UpdateInfo | null>(null)
+const dlPercent = ref(0)
+const appVersion = '0.1.2' // mirrors package.json (bumped at release time)
+let updateUnlisten: UnlistenFn | null = null
+
+/** Attach a live progress listener for `updater://progress`. */
+function attachProgress(): Promise<void> {
+  return safeListen<{ downloaded?: number; total?: number | null }>(
+    'updater://progress',
+    (e) => {
+      const { downloaded = 0, total } = e.payload
+      dlPercent.value =
+        total && total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
+    },
+  ).then((u) => { updateUnlisten = u })
+}
 
 async function checkForUpdate() {
   updateState.value = 'checking'
   updateMessage.value = null
-  // Simulated delay so the spinner has something to render against.
-  await new Promise((r) => setTimeout(r, 800))
-  updateState.value = 'uptodate'
-  updateMessage.value = `v${appVersion} (latest)`
+  updateInfo.value = null
+  try {
+    const found = await commands.checkUpdate()
+    if (found.status === 'error') {
+      throw new Error(typeof found.error === 'string' ? found.error : JSON.stringify(found.error))
+    }
+    const info = found.data
+    if (info) {
+      updateInfo.value = info
+      updateState.value = 'available'
+    } else {
+      updateState.value = 'uptodate'
+      updateMessage.value = `v${appVersion} (latest)`
+    }
+  } catch (e) {
+    updateState.value = 'error'
+    updateMessage.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function doUpdate() {
+  if (!updateInfo.value) return
+  updateState.value = 'downloading'
+  dlPercent.value = 0
+  updateMessage.value = null
+  await attachProgress()
+  try {
+    const r = await commands.installUpdate()
+    if (r.status === 'error') {
+      throw new Error(typeof r.error === 'string' ? r.error : JSON.stringify(r.error))
+    }
+    // Installer has run; the app relaunches itself. If it returns here,
+    // the platform deferred the swap — surface as ready.
+    updateState.value = 'installing'
+    updateMessage.value = `v${updateInfo.value.version} installed — restarting…`
+  } catch (e) {
+    updateState.value = 'error'
+    updateMessage.value = e instanceof Error ? e.message : String(e)
+  }
+  if (updateUnlisten) { updateUnlisten(); updateUnlisten = null }
 }
 
 const GITHUB_URL = 'https://github.com/zhuyikai2002/flexclash'
@@ -611,6 +674,58 @@ onUnmounted(() => {
             <span v-if="updateMessage" class="text-[11px] text-zinc-400 font-mono">
               {{ updateMessage }}
             </span>
+          </div>
+
+          <!-- Available release card: version + body + update button -->
+          <div
+            v-if="updateInfo"
+            class="mt-3 rounded-xl border border-white/5 bg-zinc-950/30 p-3 space-y-2"
+          >
+            <div class="flex items-center gap-2">
+              <ArrowUpCircle class="w-4 h-4 text-sky-400 shrink-0" />
+              <span class="text-xs font-semibold text-zinc-100">
+                {{ t('settings.about.new_version', { v: updateInfo.version }) }}
+              </span>
+              <button
+                type="button"
+                :disabled="updateState === 'downloading' || updateState === 'installing'"
+                class="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-400 disabled:opacity-50 transition-colors"
+                @click="doUpdate"
+              >
+                <Loader2
+                  v-if="updateState === 'downloading' || updateState === 'installing'"
+                  class="w-3 h-3 animate-spin"
+                />
+                <DownloadCloud v-else class="w-3 h-3" />
+                {{ t('settings.about.update_now') }}
+              </button>
+            </div>
+            <!-- Progress bar while downloading -->
+            <div
+              v-if="updateState === 'downloading'"
+              class="flex items-center gap-2"
+            >
+              <div class="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
+                <div
+                  class="absolute inset-y-0 left-0 bg-sky-400 transition-all"
+                  :style="{ width: `${dlPercent}%` }"
+                ></div>
+              </div>
+              <span class="font-mono text-[10px] text-zinc-400">{{ dlPercent }}%</span>
+            </div>
+            <p
+              v-if="updateInfo.body"
+              class="max-h-24 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-zinc-400 font-mono"
+            >
+              {{ updateInfo.body }}
+            </p>
+            <!-- Error detail (check/install failures, incl. network) -->
+            <p
+              v-if="updateState === 'error'"
+              class="text-[11px] leading-relaxed text-rose-300 font-mono"
+            >
+              {{ updateMessage }}
+            </p>
           </div>
         </div>
       </div>

@@ -308,6 +308,8 @@
       "client_version": "Client Version",
       "update_check": "Check for Updates",
       "update_action": "Check GitHub Releases",
+      "new_version": "New version v{v} available",
+      "update_now": "Update Now",
       "open_repo": "Open repository"
     },
     "danger_zone": {

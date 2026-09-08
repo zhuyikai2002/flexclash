@@ -35,6 +35,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["javascript", "typescript"] }
 specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 specta-typescript = "0.0.12"
+tauri-plugin-updater = "2.0.0-rc.4"
 
 [dev-dependencies]
 serial_test = "3"

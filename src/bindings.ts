@@ -31,6 +31,25 @@ export const commands = {
 	closeMihomoConnection: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("close_mihomo_connection", { id })),
 	closeAllMihomoConnections: () => typedError<null, AppError>(__TAURI_INVOKE("close_all_mihomo_connections")),
 	getMihomoRules: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_rules")),
+	/**
+	 *  Check GitHub's update feed for a newer release. Returns `None` when the
+	 *  current version is already the latest. Network failures are surfaced as
+	 *  readable errors — never panics, never crashes the renderer.
+	 */
+	checkUpdate: () => typedError<{
+	/**  Version announced by the remote feed (e.g. "0.2.1"). */
+	version: string,
+	/**  Version currently installed in this build. */
+	currentVersion: string,
+	/**  Release body / notes, if the feed carries them. */
+	body: string | null,
+} | null, string>(__TAURI_INVOKE("check_update")),
+	/**
+	 *  Download the latest update and trigger install. Progress is emitted as
+	 *  `updater://progress` with `{ downloaded, total }`; `total` may be null
+	 *  until the server reports a content length.
+	 */
+	installUpdate: () => typedError<null, string>(__TAURI_INVOKE("install_update")),
 };
 
 /* Types */
@@ -48,6 +67,16 @@ export type AppStateSnapshot = {
 	downloadSpeed: number,
 	/**  Outbound mode: rule / global / direct. */
 	currentMode: string,
+};
+
+/**  Lightweight update descriptor pushed to the UI. */
+export type UpdateInfo = {
+	/**  Version announced by the remote feed (e.g. "0.2.1"). */
+	version: string,
+	/**  Version currently installed in this build. */
+	currentVersion: string,
+	/**  Release body / notes, if the feed carries them. */
+	body: string | null,
 };
 
 /* Tauri Specta runtime */

@@ -6,3 +6,4 @@ pub mod profile;
 pub mod proxy;
 pub mod reset;
 pub mod tun;
+pub mod updater;
