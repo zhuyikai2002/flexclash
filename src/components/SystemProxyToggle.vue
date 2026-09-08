@@ -1,5 +1,12 @@
 <script setup lang="ts">
+/**
+ * SystemProxyToggle — system proxy on/off card.
+ *
+ * Wraps the new full-card ToggleCard with the proxy-specific icon /
+ * accent.  The whole card is clickable; the inner switch is decorative.
+ */
 import { onMounted, computed } from 'vue'
+import { Network } from 'lucide-vue-next'
 import { useProxyStore } from '@/stores/proxy'
 import { useI18n } from '@/composables/useI18n'
 import ToggleCard from './ToggleCard.vue'
@@ -38,6 +45,7 @@ async function flip() {
   <ToggleCard
     :enabled="enabled"
     :busy="busy"
+    :icon="Network"
     :title="t('dashboard.toggles.system_proxy.title')"
     :description="t('dashboard.toggles.system_proxy.description')"
     :detail="detail"

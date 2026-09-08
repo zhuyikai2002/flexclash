@@ -14,7 +14,11 @@ ipv6: false
 external-controller: 127.0.0.1:9091
 external-controller-cors:
   allow-private-network: true
+  # `*` is safe here because the controller binds 127.0.0.1 only — no
+  # external origin can reach it.  We keep the explicit tauri + vite
+  # origins in addition so logs / debug tools show the real requester.
   allow-origins:
+    - "*"
     - "tauri://localhost"
     - "http://localhost:5173"
   allow-methods:

@@ -25,7 +25,7 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-import { getVersion, MIHOMO_BASE_URL } from '@/services/clash'
+import { getVersion, MIHOMO_BASE_URL, pollUntil, isAlive } from '@/services/clash'
 import type { KernelState } from '@/types/clash'
 
 interface ConfigRefreshNotice {
@@ -87,11 +87,23 @@ export const useKernelStore = defineStore('kernel', {
       await this.subscribeEvents()
       try {
         this.state = await invoke<KernelState>('get_kernel_state')
-        if (this.state === 'running') {
-          await this.probe()
-        }
       } catch (e) {
         lastErrorRef.value = String(e)
+      }
+      // If the kernel is already running (post-restart, autostart) we still
+      // need to poll until mihomo actually binds 9091 — otherwise the first
+      // proxies / traffic calls would race the bind and fail noisily. The
+      // backoff window is 5s (10 × 500ms), enough for cold start.
+      if (this.state === 'running') {
+        await this.probeWithBackoff()
+      } else {
+        // Even if Rust says "stopped", mihomo may already be binding; try
+        // a single cheap probe and let the user click "start" if it fails.
+        const v = await isAlive(1500)
+        if (v) {
+          this.state = 'running'
+          await this.probeWithBackoff()
+        }
       }
     },
 
@@ -160,6 +172,48 @@ export const useKernelStore = defineStore('kernel', {
       }
     },
 
+    /**
+     * Poll `GET /version` every 500ms up to 10 times (5s backoff window).
+     * Designed to ride out mihomo's cold-start: even after Rust flips
+     * `state → running`, the TCP port 9091 may not be bound for another
+     * 500-1500ms (especially on first launch when the MMDB geoip file
+     * is being downloaded).
+     *
+     * On success: mark `healthy` and set `version`.
+     * On total failure: mark `error` and surface the most recent
+     * transport-level reason (CORS / refused / timeout) so the user
+     * knows whether the problem is theirs or the kernel's.
+     */
+    async probeWithBackoff(): Promise<void> {
+      this.probeStatus = 'probing'
+      const t0 = performance.now()
+      const result = await pollUntil(
+        () => isAlive(2000).then((ok) => (ok ? true : null)),
+        { intervalMs: 500, maxAttempts: 10, label: 'mihomo/version' },
+      )
+      if (result.ok) {
+        try {
+          const ver = await getVersion(2000)
+          this.version = ver.version
+          this.probeLatencyMs = Math.round(performance.now() - t0)
+          this.probeStatus = 'healthy'
+          lastErrorRef.value = null
+        } catch (e) {
+          // Shouldn't happen — `isAlive` just passed — but be defensive.
+          this.probeStatus = 'error'
+          this.probeLatencyMs = null
+          lastErrorRef.value = e instanceof Error ? e.message : String(e)
+        }
+      } else {
+        this.probeStatus = 'error'
+        this.probeLatencyMs = null
+        const reason = result.lastError?.message ?? 'mihomo unreachable after 5s'
+        lastErrorRef.value = `${reason} (tried ${result.attempts} times)`
+        // eslint-disable-next-line no-console
+        console.warn(`[kernel] probeWithBackoff failed: ${lastErrorRef.value}`)
+      }
+    },
+
     async start(): Promise<void> {
       lastErrorRef.value = null
       try {
@@ -187,9 +241,10 @@ export const useKernelStore = defineStore('kernel', {
       this.probeLatencyMs = null
       try {
         this.state = await invoke<KernelState>('restart_kernel')
-        // Mihomo needs a moment to listen again after restart.
-        await new Promise((r) => setTimeout(r, 700))
-        await this.probe()
+        // Mihomo needs ~1-2s to rebind 9091. Use the full backoff window
+        // instead of a fixed 700ms sleep so MMDB download / Wintun init
+        // don't trip a false "unreachable".
+        await this.probeWithBackoff()
       } catch (e) {
         lastErrorRef.value = String(e)
         throw e

@@ -191,6 +191,16 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
     handle.set_state(KernelState::Running);
     let _ = app.emit(crate::events::KERNEL_STATE, KernelState::Running);
 
+    // Surface a clear banner on the kernel log so the user can see what
+    // URL to hit from a browser if the dashboard ever fails to connect.
+    // Also serves as a sanity check that CORS allow-origins made it into
+    // the rendered config (grep the user's mihomo log later if not).
+    let boot_msg = format!(
+        "[sidecar] mihomo up — RESTful API on http://127.0.0.1:{EXPECTED_CONTROLLER_PORT} (CORS: *)",
+    );
+    handle.push_log(boot_msg.clone());
+    let _ = app.emit(crate::events::KERNEL_LOG, boot_msg);
+
     // 3) Drain events: forward logs, watch termination.
     let app_for_task = app.clone();
     let handle_for_task = handle.clone();

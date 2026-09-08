@@ -3,34 +3,65 @@
 @tailwind utilities;
 
 /* ------------------------------------------------------------------------
- * M7: transparent body so the Win11 Mica / Win10 Acrylic backdrop applied
- * in Rust (`core::startup::apply_native_backdrop`) shows through. Tailwind
- * utility classes for cards (`bg-zinc-900`) keep their own backgrounds;
- * only the top-level surface is left clear.
+ * App layout shell.  The desktop app uses a fixed-position sidebar plus
+ * a flex-1 main content area.  Both must be `h-screen` (Tauri v2 sets
+ * the body to 100%, so this is safe).
  * ------------------------------------------------------------------------ */
-
 html, body, #app {
   height: 100%;
   margin: 0;
   background: transparent;
   color: #e5e7eb;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Hide horizontal scrollbar globally; main panel handles its own scroll. */
+  overflow: hidden;
 }
 
-/* Slightly darker than pure transparent so the dark theme reads well on
- * machines where the backdrop (Mica) defaults to a light tint. */
+/* Mica-friendly dark base.  Sidebar uses a slightly darker tone so the
+ * active tab indicator (white/10) reads against it without becoming a
+ * giant white slab.  The right-hand main pane keeps the original tint
+ * (rgba(9, 9, 11, 0.62)) so the Win11 Mica backdrop shows through. */
 main {
   background: rgba(9, 9, 11, 0.62);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
 
+/* The slim left sidebar.  Slightly more opaque so the section labels
+ * are legible even when the Mica backdrop is light (e.g. Win10). */
+aside.app-sidebar {
+  background: rgba(9, 9, 11, 0.82);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Scrollable main area — only this region scrolls, never the window. */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ------------------------------------------------------------------------
- * Brand logo (Navbar).  The SVG (`src/assets/navbar-logo.svg`) is loaded
- * as a URL and used as a `mask-image` so a sky-500 → indigo-400
- * gradient is "cut into" the cat silhouette.  Matches the gradient of
- * the tray-active icon and the main app-icon.svg for a consistent
- * visual identity across window title bar / tray / navbar.
+ * Brand logo.  The SVG (`src/assets/navbar-logo.svg`) is loaded as a URL
+ * and used as a `mask-image` so a sky-500 → indigo-400 gradient is
+ * "cut into" the cat silhouette.  Matches the gradient of the
+ * tray-active icon and the main app-icon.svg for a consistent visual
+ * identity across window title bar / tray / navbar / sidebar logo.
  * ------------------------------------------------------------------------ */
 .brand-logo {
   background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
@@ -43,5 +74,26 @@ main {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
   display: inline-block;
+}
+
+/* Subtle ambient glow for the sidebar logo — a 12px ring of the same
+ * gradient so the cat appears to "breathe" even when idle. */
+.brand-logo-breathe {
+  position: relative;
+}
+.brand-logo-breathe::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+  opacity: 0.18;
+  filter: blur(10px);
+  z-index: -1;
+  animation: brand-breathe 3.6s ease-in-out infinite;
+}
+@keyframes brand-breathe {
+  0%, 100% { opacity: 0.12; transform: scale(0.94); }
+  50%      { opacity: 0.32; transform: scale(1.06); }
 }
 

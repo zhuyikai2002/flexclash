@@ -32,30 +32,58 @@ export const MIHOMO_WS_URL = 'ws://127.0.0.1:9091'
 
 const client: AxiosInstance = axios.create({
   baseURL: MIHOMO_BASE_URL,
+  // Global ceiling. Per-request overrides (see `isAlive`) tighten this
+  // to 2000ms so a stuck mihomo never freezes the dashboard.
   timeout: 5_000,
   headers: { 'Content-Type': 'application/json' },
 })
 
 /**
  * Translate transport-level failures into messages a human can act on.
+ *
+ * Categorisation matters for the cold-boot retry loop in the kernel store:
+ *   - CORS / 403     → not retried (config is wrong on the Rust side)
+ *   - ECONNREFUSED   → retried (mihomo is still starting)
+ *   - timeout        → retried once (mihomo is slow to bind the port)
+ *   - 5xx            → retried (mihomo is up but erroring)
+ *   - other 4xx      → not retried (request is wrong)
+ *
  * Mihomo itself uses 401 for secret mismatch and 404 for unknown proxy names.
  */
+function classify(err: AxiosError): { retriable: boolean; reason: string } {
+  if (err.response) {
+    const s = err.response.status
+    if (s === 401) return { retriable: false, reason: 'auth (secret mismatch)' }
+    if (s === 403) return { retriable: false, reason: 'CORS / forbidden' }
+    if (s === 404) return { retriable: false, reason: 'not found' }
+    if (s >= 500)  return { retriable: true,  reason: `HTTP ${s} (server error)` }
+    return { retriable: false, reason: `HTTP ${s}` }
+  }
+  // No response = transport error.
+  if (err.code === 'ECONNREFUSED' || err.code === 'ERR_NETWORK') {
+    return { retriable: true, reason: 'connection refused (kernel not listening yet?)' }
+  }
+  if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+    return { retriable: true, reason: 'timeout' }
+  }
+  return { retriable: false, reason: err.code ?? err.message }
+}
+
 function toUserError(err: unknown): Error {
   if (axios.isAxiosError(err)) {
-    const ax = err as AxiosError
-    if (ax.code === 'ERR_NETWORK' || ax.code === 'ECONNREFUSED') {
+    const c = classify(err as AxiosError)
+    // eslint-disable-next-line no-console
+    console.debug(`[mihomo] ${(err as AxiosError).config?.url} → ${c.reason}`)
+    if (c.reason.startsWith('connection refused')) {
       return new Error('mihomo not reachable — is the kernel running?')
     }
-    if (ax.code === 'ECONNABORTED') {
+    if (c.reason === 'timeout') {
       return new Error('mihomo request timed out')
     }
-    if (ax.response?.status === 401) {
-      return new Error('mihomo secret mismatch (check config)')
+    if (c.reason === 'CORS / forbidden') {
+      return new Error('mihomo CORS rejected the request — check external-controller-cors.allow-origins')
     }
-    if (ax.response?.status === 404) {
-      return new Error('mihomo: resource not found')
-    }
-    return new Error(`mihomo HTTP ${ax.response?.status ?? '?'}: ${ax.message}`)
+    return new Error(`mihomo ${c.reason}: ${(err as AxiosError).message}`)
   }
   return err instanceof Error ? err : new Error(String(err))
 }
@@ -71,19 +99,23 @@ client.interceptors.response.use(
 
 /**
  * Lightweight liveness probe. Returns true iff `GET /version` succeeds within
- * 2s. Used by the kernel store's reactive `probeStatus`.
+ * `timeoutMs` (default 2000ms). Catches all errors silently so the kernel
+ * store can use it as a poll predicate.
+ *
+ * NOTE: must NOT throw — the cold-boot retry loop depends on a clean
+ * true/false signal. Use `getVersion()` directly if you need the payload.
  */
-export async function isAlive(): Promise<boolean> {
+export async function isAlive(timeoutMs = 2_000): Promise<boolean> {
   try {
-    await client.get<MihomoVersion>('/version', { timeout: 2_000 })
+    await client.get<MihomoVersion>('/version', { timeout: timeoutMs })
     return true
   } catch {
     return false
   }
 }
 
-export async function getVersion(): Promise<MihomoVersion> {
-  const r = await client.get<MihomoVersion>('/version')
+export async function getVersion(timeoutMs = 2_000): Promise<MihomoVersion> {
+  const r = await client.get<MihomoVersion>('/version', { timeout: timeoutMs })
   return r.data
 }
 
@@ -234,3 +266,53 @@ export function openConnectionsSocket(
 }
 
 export { client as axios }
+
+// ============================================================================
+// Retry helper
+// ============================================================================
+
+/**
+ * Poll an async predicate until it resolves truthy or the attempt budget
+ * is exhausted. Used by `stores/kernel.ts#probeWithBackoff` to ride out
+ * mihomo's ~1-2s cold-start window without an "unreachable" flash on
+ * every dashboard load.
+ *
+ *   await pollUntil(
+ *     () => isAlive(),
+ *     { intervalMs: 500, maxAttempts: 10, label: 'mihomo /version' },
+ *   )
+ *
+ * Returns the resolved value of the LAST attempt (true/false) plus the
+ * number of attempts taken — the store can use this to decide whether
+ * to surface a "still unreachable" notice to the user.
+ */
+export interface PollResult<T> {
+  ok: boolean
+  value: T | null
+  attempts: number
+  lastError: Error | null
+}
+
+export async function pollUntil<T>(
+  fn: () => Promise<T | null | undefined | false>,
+  opts: { intervalMs: number; maxAttempts: number; label?: string },
+): Promise<PollResult<T>> {
+  const label = opts.label ?? 'probe'
+  let lastError: Error | null = null
+  for (let attempt = 1; attempt <= opts.maxAttempts; attempt += 1) {
+    try {
+      const v = await fn()
+      if (v) {
+        // eslint-disable-next-line no-console
+        console.debug(`[${label}] ok after ${attempt}/${opts.maxAttempts} attempt(s)`)
+        return { ok: true, value: v as T, attempts: attempt, lastError: null }
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e))
+    }
+    if (attempt < opts.maxAttempts) {
+      await new Promise((r) => setTimeout(r, opts.intervalMs))
+    }
+  }
+  return { ok: false, value: null, attempts: opts.maxAttempts, lastError }
+}

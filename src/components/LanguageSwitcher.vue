@@ -2,12 +2,19 @@
 /**
  * LanguageSwitcher — compact dropdown for switching between zh-CN and en-US.
  * Persists the choice via i18n.setLocale() which writes localStorage.
+ *
+ *   compact: icon-only button (no text label) — used inside the 68px sidebar.
+ *   default: full pill with Globe + current locale name.
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { Globe, Check, ChevronDown } from 'lucide-vue-next'
 import { useI18n } from '@/composables/useI18n'
 import { LOCALE_LABELS, type Locale } from '@/i18n'
 
+const props = withDefaults(
+  defineProps<{ compact?: boolean }>(),
+  { compact: false },
+)
 const { t, locale, setLocale } = useI18n()
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -35,6 +42,7 @@ function labelFor(opt: Locale): string {
 <template>
   <div ref="root" class="relative">
     <button
+      v-if="!props.compact"
       type="button"
       :aria-label="t('nav.language')"
       class="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-white/[0.04] px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/[0.08] hover:border-white/10 transition-colors"
@@ -47,6 +55,17 @@ function labelFor(opt: Locale): string {
       />
     </button>
 
+    <button
+      v-else
+      type="button"
+      :aria-label="t('nav.language')"
+      :title="t('nav.language') + ' — ' + current"
+      class="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors"
+      @click.stop="open = !open"
+    >
+      <Globe class="h-4 w-4" />
+    </button>
+
     <Transition
       enter-active-class="transition duration-120 ease-out"
       enter-from-class="opacity-0 -translate-y-1"
@@ -57,7 +76,8 @@ function labelFor(opt: Locale): string {
     >
       <div
         v-if="open"
-        class="absolute right-0 z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-white/10 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur-xl"
+        class="absolute z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-white/10 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur-xl"
+        :class="props.compact ? 'left-full ml-2 top-0' : 'right-0'"
       >
         <button
           v-for="opt in options"

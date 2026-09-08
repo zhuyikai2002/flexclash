@@ -1,5 +1,9 @@
 <script setup lang="ts">
+/**
+ * AutoStartToggle — Windows auto-start on/off card.
+ */
 import { onMounted, computed } from 'vue'
+import { Power } from 'lucide-vue-next'
 import { useDesktopStore } from '@/stores/desktop'
 import { useI18n } from '@/composables/useI18n'
 import ToggleCard from './ToggleCard.vue'
@@ -38,6 +42,7 @@ async function flip() {
   <ToggleCard
     :enabled="enabled"
     :busy="busy"
+    :icon="Power"
     :title="t('dashboard.toggles.autostart.title')"
     :description="t('dashboard.toggles.autostart.description')"
     :detail="detail"

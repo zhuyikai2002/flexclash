@@ -1,0 +1,109 @@
+<script setup lang="ts">
+/**
+ * Sidebar.vue — slim 68px left navigation rail.
+ *
+ *   ┌────┐
+ *   │ 🐱 │  ← breathing brand logo (top)
+ *   ├────┤
+ *   │ D  │  ← dashboard
+ *   │ P  │  ← proxies
+ *   │ C  │  ← connections
+ *   │ S  │  ← profiles
+ *   │ T  │  ← stats
+ *   │    │
+ *   │ ⬇  │  ← language switcher
+ *   │ ●  │  ← kernel status indicator
+ *   └────┘
+ *
+ * Layout reference: "Clash Party" sidebar — wide enough for an icon +
+ * a small badge, narrow enough to free up screen real-estate for the
+ * main content grid.
+ */
+import { computed } from 'vue'
+import {
+  LayoutDashboard, Network, Plug, Layers, BarChart3,
+} from 'lucide-vue-next'
+import { useI18n } from '@/composables/useI18n'
+import LanguageSwitcher from './LanguageSwitcher.vue'
+import StatusBadge from './StatusBadge.vue'
+import type { KernelState } from '@/types/clash'
+import navbarLogoUrl from '@/assets/navbar-logo.svg?url'
+
+type TabId = 'dashboard' | 'proxies' | 'connections' | 'profiles' | 'stats'
+
+const props = defineProps<{
+  modelValue: TabId
+  kernelState: KernelState
+  connCount: number
+  profileCount: number
+}>()
+
+const emit = defineEmits<{ 'update:modelValue': [v: TabId] }>()
+
+const { t } = useI18n()
+
+const tabs = computed(() => [
+  { id: 'dashboard'   as TabId, icon: LayoutDashboard, label: t('nav.dashboard'),   badge: 0 },
+  { id: 'proxies'     as TabId, icon: Network,         label: t('nav.proxies'),     badge: 0 },
+  { id: 'connections' as TabId, icon: Plug,            label: t('nav.connections'), badge: props.connCount },
+  { id: 'profiles'    as TabId, icon: Layers,          label: t('nav.profiles'),    badge: props.profileCount },
+  { id: 'stats'       as TabId, icon: BarChart3,       label: t('nav.stats'),       badge: 0 },
+])
+
+function pick(id: TabId) {
+  emit('update:modelValue', id)
+}
+</script>
+
+<template>
+  <aside
+    class="app-sidebar flex h-full w-[68px] shrink-0 flex-col items-center py-4"
+  >
+    <!-- Top: brand logo (breathing) -->
+    <div
+      class="brand-logo brand-logo-breathe h-10 w-10 rounded-xl shadow-lg shadow-indigo-500/30 ring-1 ring-white/10"
+      :style="{ '--brand-mask': `url('${navbarLogoUrl}')` }"
+      :title="t('app.name')"
+      aria-hidden="true"
+    ></div>
+
+    <!-- Middle: vertical capsule nav -->
+    <nav class="mt-6 flex flex-1 flex-col items-center gap-1">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        type="button"
+        :title="tab.label"
+        :aria-label="tab.label"
+        :aria-current="modelValue === tab.id ? 'page' : undefined"
+        :class="[
+          'group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-150',
+          modelValue === tab.id
+            ? 'bg-white/10 text-zinc-100 ring-1 ring-white/10 shadow-md shadow-sky-500/10'
+            : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]'
+        ]"
+        @click="pick(tab.id)"
+      >
+        <component :is="tab.icon" class="h-4 w-4" />
+        <!-- Badge: a tiny pill in the top-right corner when count > 0 -->
+        <span
+          v-if="tab.badge > 0"
+          class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-indigo-500 text-white text-[9px] font-mono font-medium flex items-center justify-center ring-2 ring-zinc-950"
+        >
+          {{ tab.badge > 99 ? '99+' : tab.badge }}
+        </span>
+        <!-- Active indicator: a thin gradient bar on the left edge -->
+        <span
+          v-if="modelValue === tab.id"
+          class="absolute -left-3 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-gradient-to-b from-sky-400 to-indigo-400"
+        ></span>
+      </button>
+    </nav>
+
+    <!-- Bottom: language + status -->
+    <div class="mt-2 flex flex-col items-center gap-2.5">
+      <LanguageSwitcher compact />
+      <StatusBadge :state="kernelState" compact />
+    </div>
+  </aside>
+</template>

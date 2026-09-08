@@ -48,6 +48,7 @@
   },
   "nav": {
     "dashboard": "仪表盘",
+    "proxies": "节点",
     "connections": "连接",
     "profiles": "配置",
     "stats": "统计",
