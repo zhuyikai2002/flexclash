@@ -1,4 +1,5 @@
 pub mod elevate;
+pub mod job_object;
 pub mod route_guard;
 pub mod shutdown;
 pub mod sidecar;

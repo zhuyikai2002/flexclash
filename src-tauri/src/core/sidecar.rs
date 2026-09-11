@@ -224,6 +224,23 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
         config_path.to_string_lossy().as_ref(),
     ]);
     let (mut rx, child) = cmd.spawn()?;
+
+    // Bind the child into the kill-on-close job BEFORE we publish it as
+    // running. If the UI saw `Running` first and the main process died in
+    // between, mihomo would be left orphaned — which is the exact failure
+    // this is here to prevent. Best-effort by design: a machine where the
+    // job cannot be armed still gets a working kernel, just without the
+    // nuclear-option guarantee.
+    match crate::core::job_object::assign_child(child.pid()) {
+        Ok(true) => {}
+        Ok(false) => eprintln!(
+            "[sidecar] mihomo pid={} not job-guarded (elevated or unavailable); \
+             relies on graceful shutdown only",
+            child.pid()
+        ),
+        Err(e) => eprintln!("[sidecar] WARNING: job-object guard failed: {e}"),
+    }
+
     handle.set_child(Some(child));
     handle.set_state(KernelState::Running);
     let _ = app.emit(crate::events::KERNEL_STATE, KernelState::Running);

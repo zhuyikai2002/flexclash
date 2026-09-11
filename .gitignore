@@ -92,6 +92,9 @@ m8-traffic-gen.cjs
 configs.raw.json
 verify-m1.v2.ps1
 
+# Throwaway crate built by scripts/verify-job-object.py
+.job_probe/
+
 # PowerShell transient files
 *.tmp
 
