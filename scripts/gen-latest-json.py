@@ -35,14 +35,17 @@ REPO = "https://github.com/zhuyikai2002/flexclash"
 # Keep in sync with `tauri.conf.json > plugins.updater.endpoints`.
 DOWNLOAD_BASE = f"{REPO}/releases/download"
 
+# NOTE: this is the changelog the in-app updater dialog shows. It is NOT
+# derived from `release_notes.md` or from `version`, so it MUST be rewritten
+# by hand on every release. A stale value ships the previous version's notes
+# to every user and fails silently -- there is no check that catches it.
+# Keep it to a few short clauses; long-form notes belong in release_notes.md.
 NOTES = (
-    "Fix: silent TUN privilege escalation with no console flash; "
-    "Fix: kernel health probe no longer spawns curl subprocesses; "
-    "Fix: force mixed-port 7897 so imported configs stop colliding with "
-    "other Clash-family clients; "
-    "Fix: WebView2 sandbox fallback for machines where the renderer "
-    "could not start; "
-    "Chore: ship updater artifacts so in-app updates work."
+    "New: the mihomo kernel is now guarded by a Windows Job Object, so a hard "
+    "kill or crash of FlexClash can no longer orphan it and break your network; "
+    "New: UAC-free silent autostart on login via a Task Scheduler task, "
+    "mutually exclusive with the old registry entry; "
+    "Note: no signing key rotation in this release, so v0.2.2 can update in-app."
 )
 
 
