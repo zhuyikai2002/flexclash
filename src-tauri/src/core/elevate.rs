@@ -34,11 +34,13 @@
 // state machine can fail-fast with a clear message.
 // ============================================================================
 
+use std::net::{SocketAddr, TcpStream};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Runtime};
 
+use crate::config::profile::RESERVED_CONTROLLER;
 use crate::error::{AppError, Result};
 
 /// Process-global AppHandle. Set by `install()` at `setup` time.
@@ -82,6 +84,7 @@ mod platform {
     use windows::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
     };
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -217,7 +220,12 @@ mod platform {
             // stdout/stderr forwarding in sidecar.rs and surfaced
             // via the `kernel://log` event, so the user never loses
             // visibility into the binary's diagnostics.
-            nShow: 0, // SW_HIDE
+            //
+            // NOTE: `nShow` is the *only* supported way to suppress the
+            // child console here. Do NOT add SEE_MASK_NO_CONSOLE — in a
+            // `tauri dev` run the parent *has* a console and the child
+            // would inherit it instead of staying hidden.
+            nShow: SW_HIDE.0 as i32,
             ..Default::default()
         };
 
@@ -381,42 +389,13 @@ pub fn stop_elevated_mihomo() -> Result<()> {
 /// `budget` elapses. Does not require the elevated PID — we just
 /// check the public REST endpoint.
 pub fn wait_until_healthy(budget: Duration) -> Result<()> {
-    use std::net::TcpStream;
+    // `RESERVED_CONTROLLER` is the single source of truth for
+    // `127.0.0.1:9091`; never re-hard-code the port here.
+    let addr: SocketAddr = RESERVED_CONTROLLER.parse().unwrap();
     let deadline = Instant::now() + budget;
-    let url = format!("http://127.0.0.1:9091/version");
     while Instant::now() < deadline {
-        // 1. Cheap TCP-level probe first.
-        if TcpStream::connect_timeout(
-            &"127.0.0.1:9091".parse().unwrap(),
-            Duration::from_millis(250),
-        )
-        .is_ok()
-        {
-            // 2. Real /version probe via curl.exe (reliable on Windows
-            //    where WinHTTP can hang). Hide its console on Windows.
-            let probe = {
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt;
-                    const CNW: u32 = 0x0800_0000;
-                    std::process::Command::new("curl.exe")
-                        .creation_flags(CNW)
-                        .args(["-s", "-m", "1", "-o", "NUL", "-w", "%{http_code}", &url])
-                        .output()
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    std::process::Command::new("curl.exe")
-                        .args(["-s", "-m", "1", "-o", "/dev/null", "-w", "%{http_code}", &url])
-                        .output()
-                }
-            };
-            if let Ok(o) = probe {
-                let code = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if code == "200" {
-                    return Ok(());
-                }
-            }
+        if probe_version(addr).is_ok() {
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -424,6 +403,56 @@ pub fn wait_until_healthy(budget: Duration) -> Result<()> {
         "controller not healthy after {:?}",
         budget
     )))
+}
+
+/// Minimal in-process HTTP/1.1 `GET /version` probe.
+///
+/// Deliberately does **not** shell out to `curl.exe`. This function is
+/// polled every 200 ms for up to 8 s while TUN is coming up, so one
+/// subprocess per tick meant ~40 console-subprocess spawns per TUN
+/// toggle — each a potential black-box flash (and a hard dependency on
+/// `curl.exe` being present). A raw `GET` over `TcpStream` is
+/// platform-neutral, dependency-free, and leaves the TUN bring-up path
+/// with zero child processes.
+fn probe_version(addr: SocketAddr) -> std::io::Result<()> {
+    use std::io::{Read, Write};
+
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(250))?;
+    stream.set_write_timeout(Some(Duration::from_millis(500)))?;
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+
+    let request = format!(
+        "GET /version HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         User-Agent: flexclash/health\r\n\
+         Accept: */*\r\n\
+         Connection: close\r\n\
+         \r\n"
+    );
+    stream.write_all(request.as_bytes())?;
+
+    // Only the status line matters; 128 B is more than enough for
+    // `HTTP/1.1 200 OK`.
+    let mut head = [0u8; 128];
+    let n = stream.read(&mut head)?;
+    if n == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "controller closed without a response",
+        ));
+    }
+    let text = String::from_utf8_lossy(&head[..n]);
+    if text.starts_with("HTTP/") && text.split_whitespace().nth(1) == Some("200") {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "unexpected /version status: {}",
+                text.lines().next().unwrap_or("<no status line>")
+            ),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------

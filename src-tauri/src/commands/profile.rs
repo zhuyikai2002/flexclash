@@ -501,7 +501,12 @@ fn open_path_external(path: &std::path::Path, _prefer_edit_verb: bool) -> CmdRes
 
 #[cfg(target_os = "windows")]
 fn reveal_in_explorer(path: &std::path::Path) -> CmdResult<()> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+    // Uniform with the rest of the Windows branch: never let a child
+    // allocate a console. explorer.exe is GUI-subsystem so this is a
+    // no-op in practice, but it keeps every spawn site consistent.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     // `explorer.exe /select,"<path>"` opens the parent folder in a
     // new window with the file already highlighted.  This is the
@@ -511,6 +516,7 @@ fn reveal_in_explorer(path: &std::path::Path) -> CmdResult<()> {
     // call from accidentally opening an existing Explorer window.
     let arg = format!("/select,{}", path.display());
     let status = Command::new("explorer.exe")
+        .creation_flags(CREATE_NO_WINDOW)
         .arg(&arg)
         .status()
         .map_err(|e| AppError::Shell(format!("explorer.exe {arg}: {e}")))?;
