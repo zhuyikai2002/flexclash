@@ -35,7 +35,7 @@
       "endpoints": [
         "https://github.com/zhuyikai2002/flexclash/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwMTRGRENCNjI4MDFDOUYKUldTZkhJQml5LzBVc0dqaXFpcWVuaHhSMllkOTZLL1B0WElQYi92UG1YaXFHenhvaTlCdmRuZG4K"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFGRkQ4OTJGNDhDMzM5NkYKUldSdk9jTklMNG45SDZtRjdVQ0dxYU5WcmUvUi9FZEF1OHFiaWpqRjNuR3ZlL294RWhMRDdsRGIK"
     }
   },
   "bundle": {
@@ -48,6 +48,8 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/mihomo"]
+    "externalBin": [
+      "binaries/mihomo"
+    ]
   }
 }
