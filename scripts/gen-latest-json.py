@@ -10,8 +10,12 @@ file this script reads.
     python scripts/gen-latest-json.py
 
 The manifest is written to
-`src-tauri/target/release/bundle/latest.json`; upload it together with the
-`.nsis.zip` installer to the GitHub release.
+`src-tauri/target/release/bundle/latest.json`. Upload it together with the
+installer it points at to the GitHub release.
+
+Note on the payload: Tauri 2.11 signs the NSIS installer itself and emits
+`<installer>.exe.sig`. It does NOT produce a separate `.nsis.zip` updater
+artifact on this version, so the updater downloads the full installer.
 
 Nothing here needs the private key — it only reads the public `.sig`.
 """
@@ -53,13 +57,16 @@ def read_version() -> str:
 def main() -> None:
     version = read_version()
 
-    zips = sorted(NSIS_DIR.glob("*.nsis.zip"))
-    if not zips:
+    # Prefer the installer that matches the configured version; fall back to
+    # the newest one so a stale build directory still produces something.
+    exact = NSIS_DIR / f"FlexClash_{version}_x64-setup.exe"
+    candidates = [exact] if exact.is_file() else sorted(NSIS_DIR.glob("*-setup.exe"))
+    if not candidates:
         sys.exit(
-            f"no .nsis.zip in {NSIS_DIR}\n"
+            f"no NSIS installer in {NSIS_DIR}\n"
             "run `npm run tauri build` with TAURI_SIGNING_PRIVATE_KEY first"
         )
-    installer = zips[-1]
+    installer = candidates[-1]
 
     sig_path = installer.with_suffix(installer.suffix + ".sig")
     if not sig_path.is_file():
@@ -89,7 +96,7 @@ def main() -> None:
     print(f"  version : {version}")
     print(f"  payload : {installer.name}")
     print(f"  url     : {manifest['platforms']['windows-x86_64']['url']}")
-    print("\nupload to the release: latest.json + the .nsis.zip above")
+    print("\nupload to the release: latest.json + the installer above")
 
 
 if __name__ == "__main__":
