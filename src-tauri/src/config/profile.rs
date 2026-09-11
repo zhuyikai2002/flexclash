@@ -246,6 +246,21 @@ pub fn activate_profile(
             src.display()
         )));
     }
+    // Re-sanitise on activation so the fix lands immediately instead of on
+    // the next restart: profiles written by older builds still carry a
+    // subscription's inbound port, and mihomo would otherwise keep starting
+    // on 7890 (or fail outright when another client already holds it).
+    //
+    // Best effort — a yaml we cannot parse is still copied through
+    // untouched so mihomo itself reports the real error.
+    if let Ok(raw) = fs::read_to_string(&src) {
+        if let Ok(refreshed) = patch_and_sanitize_yaml(&raw) {
+            if refreshed != raw {
+                let _ = fs::write(&src, refreshed.as_bytes());
+            }
+        }
+    }
+
     fs::copy(&src, storage.active_config()).map_err(|e| {
         AppError::Io(format!("copy profile -> active config: {e}"))
     })?;
@@ -272,7 +287,7 @@ pub fn activate_profile(
 ///   - `external-controller`        : `127.0.0.1:9091`
 ///   - `external-controller-cors`   : tauri://localhost + http://localhost:5173
 ///   - `secret`                     : "" (no auth)
-///   - `mixed-port`                 : 7897 (only if absent)
+///   - `mixed-port`                 : 7897 (always; `port`/`socks-port` dropped)
 ///   - `allow-lan`                  : false
 ///   - `mode`                       : rule
 ///   - `log-level`                  : info
@@ -297,11 +312,20 @@ pub fn patch_and_sanitize_yaml(raw_yaml: &str) -> Result<String, AppError> {
     // CORS must be in place so the Tauri webview can call the API.
     inject_cors(mapping);
 
-    // ---- fill-in-only if absent (don't trample subscription defaults) ----
-    if !mapping.contains_key("mixed-port") && !mapping.contains_key("port")
-        && !mapping.contains_key("socks-port") {
-        insert_u64(mapping, "mixed-port", u64::from(RESERVED_MIXED_PORT));
-    }
+    // ---- FORCE the inbound port ------------------------------------------
+    // `mixed-port` is the one inbound port FlexClash owns end to end: the
+    // system proxy, the tray toggle and the frontend all resolve to
+    // `RESERVED_MIXED_PORT` (7897). A subscription that ships
+    // `mixed-port: 7890` — or the legacy `port:` / `socks-port:` pair on
+    // 7890 / 7891 / 7892 — collides with any other Clash-family client
+    // already running on the box and silently breaks the proxy. Unlike the
+    // other reserved fields this one is therefore *always* rewritten, never
+    // "fill in if absent".
+    //
+    // `mixed-port` carries both HTTP and SOCKS, so dropping the legacy pair
+    // is functionally equivalent and removes two further collision points.
+    drop_legacy_inbound_ports(mapping);
+    insert_u64(mapping, "mixed-port", u64::from(RESERVED_MIXED_PORT));
 
     serde_yaml::to_string(&root)
         .map_err(|e| AppError::Config(format!("serialise sanitised yaml: {e}")))
@@ -315,6 +339,27 @@ fn insert_bool(m: &mut serde_yaml::Mapping, k: &str, v: bool) {
 }
 fn insert_u64(m: &mut serde_yaml::Mapping, k: &str, v: u64) {
     m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::Number(v.into()));
+}
+
+/// Remove the legacy `port:` / `socks-port:` inbound ports.
+///
+/// Rebuilt as "filter, then re-insert" rather than using a direct removal
+/// because `serde_yaml::Mapping`'s lookup helpers are keyed by `Value`, and
+/// this keeps the helper free of any `Index`-trait import. Key order is
+/// preserved for everything that survives.
+fn drop_legacy_inbound_ports(m: &mut serde_yaml::Mapping) {
+    let kept: Vec<(serde_yaml::Value, serde_yaml::Value)> = m
+        .iter()
+        .filter(|(k, _)| !matches!(k.as_str(), Some("port" | "socks-port")))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if kept.len() == m.len() {
+        return; // nothing to drop — avoid churning the mapping
+    }
+    m.clear();
+    for (k, v) in kept {
+        m.insert(k, v);
+    }
 }
 
 fn inject_cors(m: &mut serde_yaml::Mapping) {
@@ -559,4 +604,40 @@ mod tun_yaml_tests {
 /// to surface subscription fetch progress.
 pub fn log<S: Into<String>>(app: &tauri::AppHandle, line: S) {
     let _ = app.emit(KERNEL_LOG, line.into());
+}
+
+#[cfg(test)]
+mod inbound_port_tests {
+    use super::*;
+
+    #[test]
+    fn subscription_mixed_port_is_rewritten_to_reserved() {
+        let raw = "mixed-port: 7890\nmode: rule\nproxies:\n  - name: a\n    type: ss\n";
+        let out = patch_and_sanitize_yaml(raw).unwrap();
+        assert!(out.contains("mixed-port: 7897"), "got:\n{out}");
+        assert!(!out.contains("7890"), "stale 7890 survived:\n{out}");
+        // the rewrite must not cost us any nodes
+        assert!(out.contains("name: a"), "nodes lost:\n{out}");
+    }
+
+    #[test]
+    fn legacy_port_and_socks_port_are_dropped() {
+        let raw = "port: 7890\nsocks-port: 7891\nmixed-port: 7897\n";
+        let out = patch_and_sanitize_yaml(raw).unwrap();
+        assert!(out.contains("mixed-port: 7897"), "got:\n{out}");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let m = doc.as_mapping().unwrap();
+        let key = |k: &str| serde_yaml::Value::String(k.to_string());
+        assert!(m.get(&key("port")).is_none(), "port survived:\n{out}");
+        assert!(
+            m.get(&key("socks-port")).is_none(),
+            "socks-port survived:\n{out}"
+        );
+    }
+
+    #[test]
+    fn missing_inbound_port_gets_filled() {
+        let out = patch_and_sanitize_yaml("mode: rule\n").unwrap();
+        assert!(out.contains("mixed-port: 7897"), "got:\n{out}");
+    }
 }

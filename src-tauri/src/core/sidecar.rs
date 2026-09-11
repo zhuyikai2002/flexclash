@@ -19,6 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent, TerminatedPayload};
 use tauri_plugin_shell::ShellExt;
 
+use crate::config::profile::{patch_and_sanitize_yaml, RESERVED_MIXED_PORT};
 use crate::error::{AppError, Result};
 
 const SIDECAR_NAME: &str = "mihomo";
@@ -384,6 +385,27 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
     // or a hand-edited file. NEVER clobber it back to the bundled default
     // — that is what made imported nodes vanish after a restart.
     if extract_config_version(&existing).is_none() {
+        // Still repair one class of breakage, though: configs written by
+        // older builds (or activated straight from a subscription) can carry
+        // a foreign inbound port — typically `mixed-port: 7890`. That is the
+        // clash-family default, so as soon as another client is running the
+        // port is taken and mihomo dies on startup, which reads to the user
+        // as "the kernel keeps crashing".
+        //
+        // `patch_and_sanitize_yaml` only rewrites FlexClash-owned top-level
+        // keys and leaves `proxies` / `proxy-groups` / `rules` alone, so no
+        // node can be lost here. It does re-serialise the document (and thus
+        // drops comments), which is why we only reach for it when the port
+        // is actually wrong.
+        if has_foreign_inbound_port(&existing) {
+            eprintln!(
+                "[sidecar] active config uses a non-reserved inbound port; \
+                 re-sanitising to mixed-port {RESERVED_MIXED_PORT}"
+            );
+            if let Ok(sanitized) = patch_and_sanitize_yaml(&existing) {
+                let _ = std::fs::write(&path, &sanitized);
+            }
+        }
         return Ok((path, ConfigRefresh::Unchanged));
     }
 
@@ -418,6 +440,30 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
     Ok((path, ConfigRefresh::PortChanged { from_port, to_port: EXPECTED_CONTROLLER_PORT }))
 }
 
+/// True when `yaml` declares an inbound port that FlexClash does not own:
+/// a legacy `port:` / `socks-port:` pair, a `mixed-port` set to something
+/// other than `RESERVED_MIXED_PORT` (subscriptions commonly ship 7890), or
+/// no inbound port at all.
+///
+/// Unparseable YAML reports `false` on purpose — `ensure_default_config` must
+/// never be the thing that destroys a config it cannot understand.
+fn has_foreign_inbound_port(yaml: &str) -> bool {
+    let Ok(root) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else {
+        return false;
+    };
+    let Some(m) = root.as_mapping() else {
+        return false;
+    };
+    let key = |k: &str| serde_yaml::Value::String(k.to_string());
+    if m.contains_key(&key("port")) || m.contains_key(&key("socks-port")) {
+        return true;
+    }
+    match m.get(&key("mixed-port")).and_then(|v| v.as_u64()) {
+        Some(p) => p != u64::from(RESERVED_MIXED_PORT),
+        None => true,
+    }
+}
+
 /// Parses the `# flexclash-config-version: N` comment.  Returns `None`
 /// if the marker is absent or malformed.
 fn extract_config_version(yaml: &str) -> Option<u32> {
@@ -434,4 +480,37 @@ fn extract_controller_port(yaml: &str) -> Option<u16> {
         .find(|l| l.trim_start().starts_with("external-controller:"))
         .and_then(|l| l.rsplit(':').next())
         .and_then(|s| s.trim().trim_matches('"').parse().ok())
+}
+
+#[cfg(test)]
+mod config_port_tests {
+    use super::*;
+
+    #[test]
+    fn detects_subscription_default_7890() {
+        assert!(has_foreign_inbound_port("mixed-port: 7890\n"));
+    }
+
+    #[test]
+    fn accepts_the_reserved_port() {
+        assert!(!has_foreign_inbound_port("mixed-port: 7897\n"));
+    }
+
+    #[test]
+    fn detects_legacy_port_pair() {
+        assert!(has_foreign_inbound_port(
+            "port: 7890\nsocks-port: 7891\nmixed-port: 7897\n"
+        ));
+    }
+
+    #[test]
+    fn flags_missing_inbound_port() {
+        assert!(has_foreign_inbound_port("mode: rule\n"));
+    }
+
+    #[test]
+    fn unparseable_yaml_is_left_alone() {
+        // must never be the thing that destroys a config it cannot read
+        assert!(!has_foreign_inbound_port("this: [is: not: yaml"));
+    }
 }

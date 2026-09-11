@@ -392,6 +392,15 @@ pub fn wait_until_healthy(budget: Duration) -> Result<()> {
     // `RESERVED_CONTROLLER` is the single source of truth for
     // `127.0.0.1:9091`; never re-hard-code the port here.
     let addr: SocketAddr = RESERVED_CONTROLLER.parse().unwrap();
+    wait_until_healthy_at(addr, budget)
+}
+
+/// Same as [`wait_until_healthy`] against an explicit address.
+///
+/// Split out so the unit test can probe a port that is guaranteed closed
+/// instead of the real controller port — mihomo is normally already
+/// running in a dev session, which made the old test flap.
+pub fn wait_until_healthy_at(addr: SocketAddr, budget: Duration) -> Result<()> {
     let deadline = Instant::now() + budget;
     while Instant::now() < deadline {
         if probe_version(addr).is_ok() {
@@ -473,11 +482,12 @@ mod tests {
 
     #[test]
     fn wait_until_healthy_fails_fast_on_dead_port() {
-        // Port 9091 may or may not be live in the test harness; we
-        // only assert that wait_until_healthy returns Err within the
-        // budget rather than panicking.
+        // Probe port 1, which is always closed, rather than the real
+        // controller port: mihomo is usually already listening on 9091 in
+        // a dev session, and that used to make this test flap.
+        let dead: SocketAddr = "127.0.0.1:1".parse().unwrap();
         let start = Instant::now();
-        let res = wait_until_healthy(Duration::from_millis(300));
+        let res = wait_until_healthy_at(dead, Duration::from_millis(300));
         let elapsed = start.elapsed();
         assert!(res.is_err(), "expected timeout, got Ok");
         assert!(elapsed < Duration::from_secs(2), "budget honored");
