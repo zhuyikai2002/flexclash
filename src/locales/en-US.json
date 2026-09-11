@@ -116,7 +116,13 @@
       },
       "autostart": {
         "title": "Auto-start",
-        "description": "Launch FlexClash silently on Windows login"
+        "description": "Launch FlexClash silently on Windows login (standard rights, so TUN still asks for UAC)"
+      },
+      "autostart_elevated": {
+        "title": "Silent Auto-start",
+        "description": "Start as administrator at login so TUN never prompts; asks for UAC once when enabling",
+        "active": "Handled by Task Scheduler",
+        "hint": "Task Scheduler \\ FlexClash"
       },
       "tun": {
         "title": "TUN Mode",

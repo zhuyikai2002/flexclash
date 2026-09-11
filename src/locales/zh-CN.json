@@ -116,7 +116,13 @@
       },
       "autostart": {
         "title": "开机自启",
-        "description": "登录 Windows 时静默启动 FlexClash"
+        "description": "登录 Windows 时静默启动 FlexClash（普通权限，开启 TUN 时仍需 UAC）"
+      },
+      "autostart_elevated": {
+        "title": "免 UAC 自启",
+        "description": "以管理员身份开机自启，TUN 无需反复授权；开启时需授权一次",
+        "active": "由计划任务接管",
+        "hint": "任务计划程序 \\ FlexClash"
       },
       "tun": {
         "title": "TUN 透明代理",

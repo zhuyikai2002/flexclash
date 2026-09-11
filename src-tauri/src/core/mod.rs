@@ -4,6 +4,7 @@ pub mod route_guard;
 pub mod shutdown;
 pub mod sidecar;
 pub mod startup;
+pub mod task_autostart;
 pub mod tun;
 pub mod uipi;
 pub mod watcher;

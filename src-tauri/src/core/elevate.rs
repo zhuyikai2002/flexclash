@@ -35,6 +35,7 @@
 // ============================================================================
 
 use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -81,8 +82,10 @@ mod platform {
     use std::process::Command;
 
     use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
     use windows::Win32::UI::Shell::{
-        ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
+        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
@@ -263,6 +266,79 @@ mod platform {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
+    /// Run `binary args` elevated via `runas` and block until it exits.
+    /// Returns the child's exit code.
+    ///
+    /// Unlike [`runas_spawn`] this is for short-lived helpers (`schtasks`,
+    /// etc.) where the caller needs the result rather than a PID. We ask for
+    /// `SEE_MASK_NOCLOSEPROCESS` so `hProcess` is filled in and can be waited
+    /// on; without that flag the struct returns a null handle and the only
+    /// option would be polling `tasklist` for a PID, which races.
+    ///
+    /// `ShellExecuteExW` itself blocks until the UAC consent dialog is
+    /// resolved, so by the time we reach the wait the user has already
+    /// answered. The bounded wait below only guards against a hung helper.
+    pub(super) fn runas_exec_wait(binary: &std::path::Path, args: &str) -> Result<i32> {
+        let verb = wide("runas");
+        let file = wide(&binary.to_string_lossy());
+        let parameters = wide(args);
+
+        let mut exec_info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS,
+            lpVerb: PCWSTR(verb.as_ptr()),
+            lpFile: PCWSTR(file.as_ptr()),
+            lpParameters: PCWSTR(parameters.as_ptr()),
+            nShow: SW_HIDE.0 as i32,
+            ..Default::default()
+        };
+
+        // SAFETY: POD struct of pointers; the wide buffers outlive the call.
+        unsafe { ShellExecuteExW(&mut exec_info) }.map_err(|e| {
+            // ERROR_CANCELLED (1223) == the user dismissed the UAC prompt.
+            // Surfacing it verbatim lets the UI say "you cancelled" instead
+            // of a generic failure.
+            AppError::Elevation(format!("ShellExecuteExW(runas) failed: {e}"))
+        })?;
+
+        let h: isize = exec_info.hInstApp.0 as isize;
+        if h <= 32 {
+            return Err(AppError::Elevation(format!(
+                "ShellExecuteExW returned hInstApp={h} (<=32 = error)"
+            )));
+        }
+
+        let process = exec_info.hProcess;
+        if process.is_invalid() {
+            return Err(AppError::Elevation(
+                "elevated helper returned no process handle".into(),
+            ));
+        }
+
+        // 120s is far beyond any `schtasks` round-trip; a helper that takes
+        // longer than this is wedged and the caller needs to hear about it
+        // rather than have the UI hang forever.
+        const TIMEOUT_MS: u32 = 120_000;
+        // SAFETY: `process` is a valid handle we own for the duration.
+        let waited = unsafe { WaitForSingleObject(process, TIMEOUT_MS) };
+        if waited != WAIT_OBJECT_0 {
+            // SAFETY: releasing the handle we asked for above.
+            unsafe { let _ = CloseHandle(process); }
+            return Err(AppError::Elevation(format!(
+                "elevated helper did not exit within {TIMEOUT_MS} ms"
+            )));
+        }
+
+        let mut code: u32 = 0;
+        // SAFETY: valid handle, valid out-pointer.
+        let status = unsafe { GetExitCodeProcess(process, &mut code) };
+        // SAFETY: same handle; must be closed because we created it.
+        unsafe { let _ = CloseHandle(process); }
+
+        status.map_err(|e| AppError::Elevation(format!("GetExitCodeProcess: {e}")))?;
+        Ok(code as i32)
+    }
+
     fn resolve_pid_via_tasklist(binary: &PathBuf) -> std::io::Result<u32> {
         let name = binary
             .file_name()
@@ -348,6 +424,11 @@ mod platform {
     pub(super) fn graceful_stop(_pid: u32) -> Result<()> {
         Ok(())
     }
+    pub(super) fn runas_exec_wait(_binary: &Path, _args: &str) -> Result<i32> {
+        Err(AppError::Elevation(
+            "privilege elevation is Windows-only".into(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +464,19 @@ pub fn stop_elevated_mihomo() -> Result<()> {
         .map(|c| c.pid)
         .unwrap_or(0);
     platform::graceful_stop(pid)
+}
+
+/// Run a short-lived helper elevated and block until it finishes.
+///
+/// Used by the Task Scheduler autostart path, which needs `schtasks` to run
+/// with administrator rights (creating a `HighestAvailable` task otherwise
+/// fails with access-denied). Shows a UAC prompt; the caller is responsible
+/// for making that an explicit, user-initiated action.
+///
+/// On non-Windows this is a typed error rather than a silent no-op: callers
+/// would otherwise report success for something that never ran.
+pub fn runas_exec_wait(binary: &Path, args: &str) -> Result<i32> {
+    platform::runas_exec_wait(binary, args)
 }
 
 /// Poll the controller port's `/version` until it returns 200 or

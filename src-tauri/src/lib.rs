@@ -286,6 +286,8 @@ pub fn run() {
             commands::proxy::get_system_proxy_status,
             commands::desktop::get_autostart_status,
             commands::desktop::set_autostart,
+            commands::desktop::get_silent_autostart_status,
+            commands::desktop::set_silent_autostart,
             commands::desktop::get_silent_flag,
             commands::desktop::sweep_residual_routes,
             commands::tun::get_tun_state,

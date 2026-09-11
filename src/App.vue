@@ -42,6 +42,7 @@ import ProfileManager from '@/components/ProfileManager.vue'
 import SubscribeDialog from '@/components/SubscribeDialog.vue'
 import SystemProxyToggle from '@/components/SystemProxyToggle.vue'
 import AutoStartToggle from '@/components/AutoStartToggle.vue'
+import SilentAutostartToggle from '@/components/SilentAutostartToggle.vue'
 import TunModeToggle from '@/components/TunModeToggle.vue'
 import OutboundModeSwitcher from '@/components/OutboundModeSwitcher.vue'
 import ActiveProfileCard from '@/components/ActiveProfileCard.vue'
@@ -120,11 +121,15 @@ onUnmounted(() => {
       <div class="mx-auto max-w-7xl space-y-6">
         <!-- ============== Dashboard tab (Phase 8 IA) ============== -->
         <div v-if="tab === 'dashboard'" class="space-y-6">
-          <!-- Row 1: three system-control hero cards -->
-          <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <!-- Row 1: four system-control hero cards.
+               The two autostart cards are mutually exclusive in the
+               backend, so they sit side by side to make the choice
+               legible rather than hiding one behind a submenu. -->
+          <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <SystemProxyToggle />
             <TunModeToggle />
             <AutoStartToggle />
+            <SilentAutostartToggle />
           </section>
 
           <!-- Row 2: outbound mode switcher + active profile card -->
