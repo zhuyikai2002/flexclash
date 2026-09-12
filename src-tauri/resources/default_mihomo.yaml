@@ -9,7 +9,7 @@
 # line; if it's missing or older than the bundled version, the file
 # is rewritten and `kernel://config-refreshed` is emitted so the UI
 # can prompt the user to restart.
-# flexclash-config-version: 3
+# flexclash-config-version: 4
 
 mixed-port: 7897
 allow-lan: false
@@ -41,6 +41,31 @@ secret: ""
 
 profile:
   store-selected: false
+
+# ----------------------------------------------------------------------------
+# DNS.
+#
+# REQUIRED for TUN mode to route anything.  Enabling `tun:` installs a
+# `dns-hijack`, which makes mihomo the resolver for the whole host — but with
+# no `dns:` block mihomo runs with its DNS server *disabled* and simply drops
+# every hijacked query.  The visible result is "TUN is on, nothing is proxied":
+# no fake-ip is handed out, so `nslookup` returns the real address, and every
+# domain-based rule below stops matching.
+#
+# `fake-ip-range` is mihomo's own default (198.18.0.1/16).  A 198.18.x.x
+# answer from `nslookup` is the positive signal that the hijack + resolver
+# chain is actually alive end to end.
+#
+# A profile that ships its own `dns:` block replaces this one wholesale —
+# `inject_tun_config` deliberately never rewrites a subscription's DNS setup.
+# ----------------------------------------------------------------------------
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
 
 tun:
   enable: false

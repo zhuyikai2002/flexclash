@@ -429,6 +429,31 @@ pub const TUN_DNS_HIJACK: &[&str] = &["0.0.0.0:53"];
 /// captured by TUN and loops back through mihomo).
 pub const TUN_AUTO_ROUTE_EXCLUDE: &[&str] = &["127.0.0.0/8"];
 
+/// DNS block stamped onto the active config when TUN is enabled and the
+/// config has no `dns:` block of its own.
+///
+/// **Why this is not optional.** Enabling `tun:` installs a `dns-hijack`,
+/// which makes mihomo the resolver for the whole host. But `dns-hijack`
+/// only *delivers* queries — with no `dns:` block mihomo runs with its DNS
+/// server disabled, so every hijacked query dies inside mihomo. The
+/// observable symptoms are exactly "TUN is on but nothing is routed":
+/// no fake-ip is handed out, `nslookup` returns the real address, and
+/// every domain-based rule in `rules:` stops matching.
+///
+/// The bundled `default_mihomo.yaml` shipped a `tun:` block but **no**
+/// `dns:` block, so a fresh install (or any profile copied from a
+/// subscription that omits `dns:`) landed in precisely that state.
+///
+/// A config that already carries its own `dns:` block is left untouched:
+/// a subscription's `respect-rules` / `nameserver-policy` / rule-set
+/// driven split resolution is strictly better informed than ours. We only
+/// fill a hole — and on disable we remove the block again **only if it is
+/// still byte-for-byte the one we inserted**, so toggling TUN round-trips
+/// back to the original file.
+pub const TUN_DNS_ENHANCED_MODE: &str = "fake-ip";
+pub const TUN_DNS_FAKE_IP_RANGE: &str = "198.18.0.1/16";
+pub const TUN_DNS_NAMESERVERS: &[&str] = &["223.5.5.5", "119.29.29.29"];
+
 /// Result of `inject_tun_config` returned to the caller. The frontend never
 /// sees this — it is consumed by `core::tun::TunManager`. `changed: true`
 /// means a write to disk happened, `false` means the yaml was already in
@@ -531,8 +556,12 @@ pub fn toggle_tun_block(yaml: &str, enable: bool) -> Result<String, AppError> {
             serde_yaml::Value::String("tun".into()),
             serde_yaml::Value::Mapping(tun),
         );
+        // `dns-hijack` with no DNS server behind it is a black hole — fill
+        // the hole when the profile left one (see the TUN_DNS_* docs above).
+        inject_tun_dns(mapping, true);
     } else {
         mapping.remove("tun");
+        inject_tun_dns(mapping, false);
     }
 
     serde_yaml::to_string(&root)
@@ -544,6 +573,52 @@ fn insert_str_map(m: &mut serde_yaml::Mapping, k: &str, v: &str) {
 }
 fn insert_bool_map(m: &mut serde_yaml::Mapping, k: &str, v: bool) {
     m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::Bool(v));
+}
+
+/// The exact `dns:` mapping we stamp when the active config has none.
+/// Built by one function so the "is the on-disk block still ours?" check on
+/// disable compares against an identical structure rather than a re-listing
+/// that can silently drift out of sync.
+fn locked_dns_block() -> serde_yaml::Mapping {
+    let mut dns = serde_yaml::Mapping::new();
+    insert_bool_map(&mut dns, "enable", true);
+    insert_str_map(&mut dns, "enhanced-mode", TUN_DNS_ENHANCED_MODE);
+    insert_str_map(&mut dns, "fake-ip-range", TUN_DNS_FAKE_IP_RANGE);
+    let ns: serde_yaml::Sequence = TUN_DNS_NAMESERVERS
+        .iter()
+        .map(|s| serde_yaml::Value::String((*s).into()))
+        .collect();
+    dns.insert(
+        serde_yaml::Value::String("nameserver".into()),
+        serde_yaml::Value::Sequence(ns),
+    );
+    dns
+}
+
+/// Add (enable) or remove (disable) the locked-in DNS block.
+///
+/// Asymmetric on purpose:
+/// * `enable` **only fills a hole** — a profile that brings its own `dns:`
+///   is never rewritten, because its `nameserver-policy` / rule-set split
+///   resolution is better than anything we could invent.
+/// * `disable` **only removes our own block** — if the on-disk mapping is
+///   not byte-for-byte what `locked_dns_block()` produces, the user (or a
+///   re-activated subscription) owns it and we leave it alone.
+fn inject_tun_dns(m: &mut serde_yaml::Mapping, enable: bool) {
+    if enable {
+        if m.get("dns").is_none() {
+            m.insert(
+                serde_yaml::Value::String("dns".into()),
+                serde_yaml::Value::Mapping(locked_dns_block()),
+            );
+        }
+        return;
+    }
+    let ours = serde_yaml::Value::Mapping(locked_dns_block());
+    let is_ours = m.get("dns").map(|v| *v == ours).unwrap_or(false);
+    if is_ours {
+        m.remove("dns");
+    }
 }
 
 #[cfg(test)]
@@ -593,6 +668,87 @@ mod tun_yaml_tests {
         assert!(out.contains("inet4-address: 10.0.0.1/30"));
         // And enable is true.
         assert!(out.contains("enable: true"));
+    }
+
+    #[test]
+    fn inject_tun_fills_a_missing_dns_block() {
+        let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
+        let out = toggle_tun_block(yaml, true).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let dns = doc
+            .as_mapping()
+            .unwrap()
+            .get("dns")
+            .expect("tun enable must fill a missing dns block")
+            .as_mapping()
+            .unwrap()
+            .clone();
+        let get = |k: &str| dns.get(serde_yaml::Value::String(k.into())).cloned();
+        assert_eq!(get("enable").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(get("enhanced-mode").and_then(|v| v.as_str().map(String::from)), Some("fake-ip".into()));
+        assert_eq!(get("fake-ip-range").and_then(|v| v.as_str().map(String::from)), Some("198.18.0.1/16".into()));
+        let ns = get("nameserver").unwrap();
+        let ns = ns.as_sequence().unwrap();
+        assert_eq!(ns.len(), 2);
+        assert_eq!(ns[0].as_str(), Some("223.5.5.5"));
+        // Reserved fields still untouched.
+        assert!(out.contains("external-controller: 127.0.0.1:9091"));
+    }
+
+    #[test]
+    fn inject_tun_never_clobbers_a_profile_dns_block() {
+        let yaml = "mixed-port: 7897\n\
+                    dns:\n  enable: true\n  enhanced-mode: fake-ip\n  respect-rules: true\n\
+                    \x20 nameserver:\n    - https://1.1.1.1/dns-query\n";
+        let out = toggle_tun_block(yaml, true).unwrap();
+        assert!(out.contains("respect-rules: true"), "profile dns block was rewritten:\n{out}");
+        assert!(out.contains("https://1.1.1.1/dns-query"), "profile nameserver lost:\n{out}");
+        assert!(!out.contains("119.29.29.29"), "our nameserver leaked into a profile-owned dns block:\n{out}");
+    }
+
+    #[test]
+    fn inject_tun_removes_only_its_own_dns_block() {
+        // Ours goes away again on disable...
+        let on = toggle_tun_block("mixed-port: 7897\n", true).unwrap();
+        let off = toggle_tun_block(&on, false).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&off).unwrap();
+        assert!(doc.as_mapping().unwrap().get("dns").is_none(), "our dns block survived disable:\n{off}");
+
+        // ...but a profile-owned one must survive the round trip.
+        let with_own = "mixed-port: 7897\ndns:\n  enable: true\n  nameserver:\n    - 223.5.5.5\n";
+        let on2 = toggle_tun_block(with_own, true).unwrap();
+        let off2 = toggle_tun_block(&on2, false).unwrap();
+        assert!(off2.contains("nameserver:"), "profile-owned dns removed by disable:\n{off2}");
+    }
+
+    /// Regression guard for the actual defect: the bundled default is what a
+    /// fresh install — and `reset_application` — writes to the active config.
+    /// If it loses its `dns:` block, TUN enables but nothing resolves.
+    #[test]
+    fn bundled_default_config_carries_a_fake_ip_dns_block() {
+        let bundled = include_str!("../../resources/default_mihomo.yaml");
+        let doc: serde_yaml::Value = serde_yaml::from_str(bundled).unwrap();
+        let dns = doc
+            .as_mapping()
+            .unwrap()
+            .get("dns")
+            .expect("default_mihomo.yaml must ship a dns: block")
+            .as_mapping()
+            .unwrap()
+            .clone();
+        let get = |k: &str| dns.get(serde_yaml::Value::String(k.into())).cloned();
+        assert_eq!(get("enable").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            get("enhanced-mode").and_then(|v| v.as_str().map(String::from)),
+            Some("fake-ip".into())
+        );
+        assert!(get("nameserver").is_some(), "default dns block has no nameserver");
+        // And it must not be pointing at a fake-ip range that bypasses the
+        // documented 198.18.0.0/15 test expectation.
+        assert_eq!(
+            get("fake-ip-range").and_then(|v| v.as_str().map(String::from)),
+            Some("198.18.0.1/16".into())
+        );
     }
 }
 
