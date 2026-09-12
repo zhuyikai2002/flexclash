@@ -8,10 +8,26 @@
 
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::core::sidecar::SidecarHandle;
+use crate::core::sidecar;
 use crate::core::tun::{TunManager, TunStatus};
 use crate::error::Result;
 use crate::tray;
+
+/// The active config location, resolved from the Tauri path API.
+///
+/// Deliberately does **not** go through `SidecarHandle::work_dir()`. That
+/// method only knows the real answer once the kernel has been started in
+/// this process; before that it has to guess, and a TUN enable that patches
+/// the wrong `config.yaml` — or hands the elevated mihomo a wrong `-d` —
+/// comes up with no profiles, no rules and no DNS: "TUN is on but nothing is
+/// proxied". `work_dir_for` derives the path from `app.path()` instead, so
+/// it is correct from the very first call.
+fn storage_for<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<crate::config::profile::ProfileStorage> {
+    let work = sidecar::work_dir_for(app)?;
+    Ok(crate::config::profile::ProfileStorage::new(&work))
+}
 
 /// Cheap status read. Frontend polls this on mount + on every
 /// `tun://state-changed` event so the toggle always reflects the
@@ -32,11 +48,7 @@ pub fn enable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
     let mgr = app
         .try_state::<TunManager>()
         .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
-    let sidecar = app
-        .try_state::<SidecarHandle>()
-        .ok_or_else(|| crate::error::AppError::Tun("SidecarHandle not registered".into()))?;
-    let work = sidecar.work_dir();
-    let storage = crate::config::profile::ProfileStorage::new(&work);
+    let storage = storage_for(&app)?;
     let res = mgr.enable(&app, &storage);
     // Refresh the tray icon regardless of success — a Failed transition
     // is still a state change worth reflecting.
@@ -51,11 +63,7 @@ pub fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
     let mgr = app
         .try_state::<TunManager>()
         .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
-    let sidecar = app
-        .try_state::<SidecarHandle>()
-        .ok_or_else(|| crate::error::AppError::Tun("SidecarHandle not registered".into()))?;
-    let work = sidecar.work_dir();
-    let storage = crate::config::profile::ProfileStorage::new(&work);
+    let storage = storage_for(&app)?;
     let res = mgr.disable(&app, &storage);
     let _ = tray::update_tray_icon(&app);
     res

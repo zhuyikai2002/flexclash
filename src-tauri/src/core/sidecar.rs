@@ -102,14 +102,31 @@ impl SidecarHandle {
     }
 
     /// Resolved working directory used by the most recent `start()`.
-    /// `None` before the first start; falls back to a tmp-style path
-    /// when called pre-start so callers (TUN manager, elevate) never
-    /// have to special-case the cold-boot path.
+    ///
+    /// Before the first start this resolves the canonical
+    /// `<app_local_data_dir>/mihomo` through the Tauri path API instead of
+    /// guessing. Every caller downstream derives a real filesystem path from
+    /// this answer — the TUN config injection, the elevated `-d`, the active
+    /// `config.yaml` — so returning `%TEMP%` here is not a harmless default,
+    /// it is a silent misconfiguration (mihomo comes up with no profiles, no
+    /// rules and no DNS, which reads to the user as "TUN on, nothing
+    /// proxied"). `%TEMP%` survives only as a last resort for when the app
+    /// handle itself is already gone, e.g. during teardown.
     pub fn work_dir(&self) -> PathBuf {
-        self.lock()
-            .work_dir
-            .clone()
-            .unwrap_or_else(std::env::temp_dir)
+        if let Some(dir) = self.lock().work_dir.clone() {
+            return dir;
+        }
+        if let Some(app) = crate::core::elevate::current_app_handle() {
+            if let Ok(dir) = work_dir_for(&app) {
+                return dir;
+            }
+        }
+        eprintln!(
+            "[sidecar] WARNING: work_dir() requested before the kernel started and no \
+             app handle is available; falling back to {}",
+            std::env::temp_dir().display()
+        );
+        std::env::temp_dir()
     }
 
     /// Resolved active config path. Same fallback rules as `work_dir()`.

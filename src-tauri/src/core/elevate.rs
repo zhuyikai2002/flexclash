@@ -439,13 +439,18 @@ mod platform {
 /// the new PID on success; on UAC cancel returns `AppError::Tun` with
 /// a message that the UI renders as a toast.
 pub fn spawn_elevated_mihomo<R: Runtime>(app: &AppHandle<R>) -> Result<u32> {
-    use tauri::Manager;
-
-    let work_dir = app
-        .try_state::<crate::core::sidecar::SidecarHandle>()
-        .map(|h| h.work_dir().to_path_buf())
-        .unwrap_or_else(|| std::env::temp_dir());
-
+    // Resolve the canonical work dir from the Tauri path API — deliberately
+    // NOT from `SidecarHandle`, whose cached value is only populated once the
+    // kernel has started (and degrades to `%TEMP%` before that), and
+    // deliberately NOT with a `%TEMP%` fallback of our own.
+    //
+    // This is the difference between working and broken TUN: `-d` and the
+    // `config.yaml` path are both derived from this answer, so a wrong answer
+    // launches the elevated mihomo against `%TEMP%` — no profiles, no rules,
+    // no DNS block — which the user sees as "TUN is on but nothing is
+    // proxied". Failing loudly is strictly better than launching the wrong
+    // binary against the wrong directory.
+    let work_dir = crate::core::sidecar::work_dir_for(app)?;
     let config_path = work_dir.join("config.yaml");
     let binary = platform::resolve_mihomo_binary(app, &work_dir)?;
 
