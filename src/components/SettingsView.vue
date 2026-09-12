@@ -26,7 +26,7 @@ import { useProxyStore } from '@/stores/proxy'
 import { useDesktopStore } from '@/stores/desktop'
 import { useTunStore } from '@/stores/tun'
 import { safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
-import { resetApplication, onResetCompleted, type ResetReport } from '@/services/reset'
+import { resetApplication, onResetCompleted, clearClientState, type ResetReport } from '@/services/reset'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const { t, locale, setLocale, supportedLocales } = useI18n()
@@ -284,7 +284,7 @@ async function performReset() {
 /** Watch for the `app://reset-completed` event from Rust.
  *  When it fires we:
  *   1) close the typing-confirm modal
- *   2) clear the frontend's localStorage (flexclash.*)
+ *   2) clear the frontend's localStorage + in-memory proxies/rules stores
  *   3) show a "Reset complete — restarting" modal
  *   4) trigger an `app.exit(0)` 1.2s later so the user sees the modal. */
 onMounted(() => {
@@ -292,16 +292,10 @@ onMounted(() => {
     lastResetReport.value = report
     resetOpen.value = false
     showResultModal.value = true
-    try {
-      const keysToWipe: string[] = []
-      for (let i = 0; i < localStorage.length; i += 1) {
-        const k = localStorage.key(i)
-        if (k && k.startsWith('flexclash.')) keysToWipe.push(k)
-      }
-      keysToWipe.forEach((k) => localStorage.removeItem(k))
-    } catch {
-      /* private mode — ignore */
-    }
+    // Wipe localStorage + the in-memory proxies/rules stores. Without this
+    // the views keep rendering the pre-reset group list and node delay
+    // measurements until the process actually exits.
+    clearClientState()
     setTimeout(() => {
       try {
         if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
