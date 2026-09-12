@@ -41,11 +41,13 @@ DOWNLOAD_BASE = f"{REPO}/releases/download"
 # to every user and fails silently -- there is no check that catches it.
 # Keep it to a few short clauses; long-form notes belong in release_notes.md.
 NOTES = (
-    "New: the mihomo kernel is now guarded by a Windows Job Object, so a hard "
-    "kill or crash of FlexClash can no longer orphan it and break your network; "
-    "New: UAC-free silent autostart on login via a Task Scheduler task, "
-    "mutually exclusive with the old registry entry; "
-    "Note: no signing key rotation in this release, so v0.2.2 can update in-app."
+    "Fix (TUN): inject the fake-ip dns block TUN needs, so domains resolve "
+    "again instead of black-holing; "
+    "Fix (TUN): the elevated mihomo no longer starts with its work dir in %TEMP%, "
+    "and the residual-route sweep now matches Windows' dotted-quad route table; "
+    "Fix (Reset): wipe cache.db, history.db, runtime.log and the client-side "
+    "group state for a genuinely complete reset; "
+    "Note: no signing key rotation, so v0.2.3 can update in-app."
 )
 
 
