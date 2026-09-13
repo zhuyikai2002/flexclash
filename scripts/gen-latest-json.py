@@ -41,13 +41,12 @@ DOWNLOAD_BASE = f"{REPO}/releases/download"
 # to every user and fails silently -- there is no check that catches it.
 # Keep it to a few short clauses; long-form notes belong in release_notes.md.
 NOTES = (
-    "Fix (TUN): inject the fake-ip dns block TUN needs, so domains resolve "
-    "again instead of black-holing; "
-    "Fix (TUN): the elevated mihomo no longer starts with its work dir in %TEMP%, "
-    "and the residual-route sweep now matches Windows' dotted-quad route table; "
-    "Fix (Reset): wipe cache.db, history.db, runtime.log and the client-side "
-    "group state for a genuinely complete reset; "
-    "Note: no signing key rotation, so v0.2.3 can update in-app."
+    "Feat (TUN): 「严格路由」与「DNS 劫持」进阶开关正式可用，支持状态持久化与"
+    "Mihomo 运行时配置热重载（PUT /configs?force=true）；"
+    "Fix (DNS): 修复 DNS 劫持参数仅拦截 UDP 的漏洞，补齐 tcp://any:53，"
+    "全面防范 DNS 泄漏；"
+    "Fix (UI): 抹除前端组件中的历史硬编码，关于页面与更新模块全面接入 "
+    "Tauri 运行时版本动态校验。"
 )
 
 
