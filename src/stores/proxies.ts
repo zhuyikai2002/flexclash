@@ -1,6 +1,6 @@
 // ============================================================================
 // stores/proxies.ts — Pinia store for proxy groups, node selection, and
-// concurrent delay testing.
+// speed-test result aggregation.
 //
 // Design:
 //   - `groups`  = the Selector/URLTest/Fallback/LoadBalance groups (by name).
@@ -9,11 +9,20 @@
 //   - Per-node delay info is *denormalised* into `groups[name].nodes[name]`
 //     so that the UI can render "ms" badges without re-walking the tree.
 //
-// Concurrency (M6):
-//   - The fixed worker pool size is exposed as `DELAY_CONCURRENCY` (6) so
-//     a 50-node subscription doesn't fire 50 parallel delay tests. The
-//     pool is also cancellable: when the group is refreshed mid-test, the
-//     stale workers drop their result silently.
+// Speed testing (v0.3 — handed to Rust):
+//   - This store no longer probes anything. The old worker pool of 6 lived
+//     here and paid one IPC round-trip per node; the fan-out, timeout budget
+//     and classification now live in `src-tauri/src/core/speedtest.rs`, which
+//     streams results back in batches. See `src/services/speedtest.ts`.
+//   - What remains here is *aggregation*: folding each batch into the group's
+//     node map. That is the only part that has to be on this side of the IPC
+//     line, because it is what the UI renders.
+//   - Batches are keyed by a monotonic run id. `runIds[group]` holds the
+//     newest id seen for that group and anything older is discarded, which is
+//     what makes "test again mid-run" safe. Ids are global and increasing, so
+//     `newer id wins` is exactly the right rule per group — and it also
+//     closes the race where a batch is delivered before the `invoke` promise
+//     that carries the same id resolves.
 //
 // Sorting (M6):
 //   - `sortMode` toggles between `default` (mihomo's order) and
@@ -26,9 +35,18 @@
 import { defineStore } from 'pinia'
 import {
   getProxies,
-  getProxyDelay,
   selectProxy as apiSelectProxy,
 } from '@/services/clash'
+import {
+  startSpeedTest,
+  onDelayBatch,
+  onDelayDone,
+  DEFAULT_TEST_URL,
+  type DelayBatch,
+  type DelayDone,
+  type ProbeStatus,
+} from '@/services/speedtest'
+import type { UnlistenFn } from '@/utils/tauri-bridge'
 import type { Proxy, ProxyType } from '@/types/clash'
 
 export type DelayStatus =
@@ -45,6 +63,13 @@ export interface NodeDelayInfo {
   delay: number | null
   /** Unix ms when this measurement was taken. */
   testedAt: number | null
+  /**
+   * Why a non-`ok` probe ended that way ("probe budget exhausted (HTTP 504)",
+   * "controller unreachable: …"). Surfaced as the node's tooltip — the old
+   * pool collapsed every failure into a bare status, which made a dead node
+   * and a stopped kernel look identical.
+   */
+  message: string | null
 }
 
 export interface ProxyGroupState {
@@ -69,13 +94,12 @@ interface ProxiesStoreState {
   /** Groups currently being delay-tested; re-assigned as a new Set to trigger reactivity. */
   testingGroups: string[]
   sortMode: SortMode
-  /** Monotonic counter per group: latest speed-test run id. */
+  /**
+   * Newest speed-test run id seen per group. A batch/done whose `runId` is
+   * lower than this is from a superseded run and is dropped.
+   */
   runIds: Record<string, number>
 }
-
-const DELAY_CONCURRENCY = 6
-const DELAY_TIMEOUT_MS = 5_000
-const DEFAULT_TEST_URL = 'http://www.gstatic.com/generate_204'
 
 /** Proxy types that are local/binary and cannot be delay-tested. */
 const UNTESTABLE_TYPES = new Set<string>([
@@ -99,7 +123,24 @@ const emptyDelay = (): NodeDelayInfo => ({
   status: 'idle',
   delay: null,
   testedAt: null,
+  message: null,
 })
+
+/** Rust `ProbeStatus` → frontend `DelayStatus`. The former is a strict subset. */
+function probeStatusToDelay(status: ProbeStatus): DelayStatus {
+  switch (status) {
+    case 'ok':
+      return 'ok'
+    case 'timeout':
+      return 'timeout'
+    case 'unreachable':
+      return 'unreachable'
+    case 'error':
+      return 'error'
+    default:
+      return 'error'
+  }
+}
 
 /** A node is considered "fast" (rank 0) only when it has a real RTT. */
 function delayRank(info: NodeDelayInfo | undefined): number {
@@ -123,6 +164,30 @@ function compareLatency(a: NodeDelayInfo, b: NodeDelayInfo): number {
   if (ra === 0 && a.delay !== null && b.delay !== null) return a.delay - b.delay
   // Stable tie-breaker on name.
   return 0
+}
+
+// ---------------------------------------------------------------------------
+// Stream subscription (process-wide, created once)
+// ---------------------------------------------------------------------------
+// Deliberately NOT per component mount. A run keeps streaming while the user
+// is on another tab, and a mount/unmount cycle would drop whatever landed in
+// the gap and leave the group stuck on its spinners. Two listeners for the
+// app's lifetime is a fixed cost, not a leak; `disposeSpeedTestStream()`
+// exists for explicit teardown.
+let batchUnlisten: UnlistenFn | null = null
+let doneUnlisten: UnlistenFn | null = null
+let streamReady: Promise<void> | null = null
+
+/**
+ * Tear the stream subscription down. Not called during normal navigation —
+ * exposed so a teardown path (or a test harness) can release it.
+ */
+export function disposeSpeedTestStream(): void {
+  batchUnlisten?.()
+  doneUnlisten?.()
+  batchUnlisten = null
+  doneUnlisten = null
+  streamReady = null
 }
 
 export const useProxiesStore = defineStore('proxies', {
@@ -243,10 +308,108 @@ export const useProxiesStore = defineStore('proxies', {
       }
     },
 
+    // -----------------------------------------------------------------------
+    // Speed test (Rust engine + streamed batches)
+    // -----------------------------------------------------------------------
+
     /**
-     * Run delay tests against every child of `groupName` using a small
-     * worker pool. Updates each node's delay badge in-place. No-op if a
-     * test for this group is already in flight.
+     * Create the batch/done subscriptions once. Idempotent and cheap, so every
+     * entry point that might need results can call it without coordinating.
+     */
+    initSpeedTestStream(): void {
+      if (streamReady) return
+      const self = this
+      streamReady = (async () => {
+        batchUnlisten = await onDelayBatch((b) => self.applyDelayBatch(b))
+        doneUnlisten = await onDelayDone((d) => self.applyDelayDone(d))
+      })().catch((e: unknown) => {
+        // Never leave a half-registered stream behind: reset both so the next
+        // call retries cleanly, and report it rather than failing silently.
+        batchUnlisten = null
+        doneUnlisten = null
+        streamReady = null
+        self.error = e instanceof Error ? e.message : String(e)
+      })
+    },
+
+    /**
+     * Fold one streamed batch into the group's node map.
+     *
+     * Staleness rule: run ids increase globally, so for a given group a lower
+     * id is always older. Dropping those is what makes "test again mid-run"
+     * safe — the superseded run keeps emitting until it notices, and none of
+     * its results may overwrite the newer run's.
+     */
+    applyDelayBatch(batch: DelayBatch): void {
+      const seen = this.runIds[batch.group] ?? 0
+      if (batch.runId < seen) return
+
+      const group = this.groups[batch.group]
+      if (!group) return
+
+      // Adopt the id before merging. A batch can be delivered *before* the
+      // `invoke` promise that returns this same id resolves; adopting here
+      // means that ordering is harmless instead of a dropped first batch.
+      if (batch.runId > seen) {
+        this.runIds = { ...this.runIds, [batch.group]: batch.runId }
+      }
+
+      const nodes: Record<string, NodeDelayInfo> = { ...group.nodes }
+      for (const r of batch.results) {
+        nodes[r.name] = {
+          status: probeStatusToDelay(r.status),
+          delay: r.delayMs ?? null,
+          testedAt: Date.now(),
+          message: r.message ?? null,
+        }
+      }
+      // Re-assign the group so Pinia sees a new reference.
+      this.groups[batch.group] = { ...group, nodes }
+    },
+
+    /**
+     * Terminal handler for a run. Always arrives exactly once per run, which
+     * is why the "clear the spinners" work happens here rather than being
+     * inferred from result counts.
+     */
+    applyDelayDone(done: DelayDone): void {
+      const seen = this.runIds[done.group] ?? 0
+      if (done.runId < seen) return
+      if (done.runId > seen) {
+        this.runIds = { ...this.runIds, [done.group]: done.runId }
+      }
+
+      const group = this.groups[done.group]
+      if (group) {
+        const nodes: Record<string, NodeDelayInfo> = { ...group.nodes }
+        let patched = false
+        // A cancelled run leaves nodes that were never probed. Give them a
+        // definite "never measured" state — otherwise they would spin forever
+        // once `testingGroups` is cleared below.
+        for (const [name, info] of Object.entries(nodes)) {
+          if (info.status === 'testing') {
+            nodes[name] = {
+              status: 'idle',
+              delay: null,
+              testedAt: null,
+              message: done.cancelled ? 'cancelled' : 'not probed',
+            }
+            patched = true
+          }
+        }
+        if (patched) this.groups[done.group] = { ...group, nodes }
+      }
+
+      this.testingGroups = this.testingGroups.filter((g) => g !== done.group)
+    },
+
+    /**
+     * Start a speed test over every child of `groupName`.
+     *
+     * Resolves as soon as the Rust engine accepts the run — results arrive
+     * later via `applyDelayBatch`. Calling it again while a run is in flight
+     * supersedes that run rather than being ignored, so the user's most recent
+     * intent always wins.
      */
     async speedTestGroup(
       groupName: string,
@@ -254,82 +417,69 @@ export const useProxiesStore = defineStore('proxies', {
     ): Promise<void> {
       const group = this.groups[groupName]
       if (!group) throw new Error(`Unknown group: ${groupName}`)
-      if (this.testingGroups.includes(groupName)) return
 
-      this.testingGroups = [...this.testingGroups, groupName]
+      // Must be listening before the run starts, or early batches are lost.
+      this.initSpeedTestStream()
 
-      // Snapshot the children so the worker queue is stable across the
-      // multiple state mutations done by the workers.
       const children = [...group.all]
+      const probeable = children.filter((c) => {
+        const p = this.byName[c]
+        return Boolean(p) && !UNTESTABLE_TYPES.has(p.type)
+      })
+
+      // Give every child a definite state up front: probeable ones spin, the
+      // rest are terminal immediately (mihomo cannot delay-test Direct/Reject).
+      const nodes: Record<string, NodeDelayInfo> = { ...group.nodes }
       for (const child of children) {
-        group.nodes[child] = {
-          status: 'testing',
-          delay: null,
-          testedAt: null,
-        }
-      }
-
-      const queue: string[] = [...children]
-      // Tag this run with a monotonic id so we can drop late results
-      // when the group is refreshed mid-test.
-      const myRun = (this.runIds[groupName] ?? 0) + 1
-      this.runIds = { ...this.runIds, [groupName]: myRun }
-      const isStale = () => this.runIds[groupName] !== myRun
-
-      const results: Record<string, NodeDelayInfo> = {}
-
-      const worker = async (): Promise<void> => {
-        while (queue.length > 0) {
-          if (isStale()) return
-          const child = queue.shift() as string
-          const childProxy = this.byName[child]
-          if (!childProxy || UNTESTABLE_TYPES.has(childProxy.type)) {
-            results[child] = {
+        nodes[child] = probeable.includes(child)
+          ? { status: 'testing', delay: null, testedAt: null, message: null }
+          : {
               status: 'unreachable',
               delay: null,
               testedAt: Date.now(),
+              message: 'type cannot be delay-tested',
             }
-            continue
-          }
-          try {
-            const delay = await getProxyDelay(child, testUrl, DELAY_TIMEOUT_MS)
-            if (isStale()) return
-            results[child] = {
-              status: delay === 0 ? 'timeout' : 'ok',
-              delay: delay === 0 ? null : delay,
-              testedAt: Date.now(),
-            }
-          } catch {
-            if (isStale()) return
-            results[child] = {
+      }
+      this.groups[groupName] = { ...group, nodes }
+
+      if (!this.testingGroups.includes(groupName)) {
+        this.testingGroups = [...this.testingGroups, groupName]
+      }
+
+      if (probeable.length === 0) {
+        // No run is created, so no terminal event will ever arrive. Clear the
+        // spinner here instead of leaving it up forever.
+        this.testingGroups = this.testingGroups.filter((g) => g !== groupName)
+        return
+      }
+
+      try {
+        const runId = await startSpeedTest(groupName, probeable, { url: testUrl })
+        // Keep the newest id. `applyDelayBatch` may already have adopted this
+        // same id (it can be delivered first) — only ever move forward.
+        if (runId > (this.runIds[groupName] ?? 0)) {
+          this.runIds = { ...this.runIds, [groupName]: runId }
+        }
+      } catch (e) {
+        // The run never started, so no `done` event is coming: roll the
+        // spinners back ourselves.
+        this.testingGroups = this.testingGroups.filter((g) => g !== groupName)
+        const current = this.groups[groupName]
+        if (current) {
+          const rolled: Record<string, NodeDelayInfo> = { ...current.nodes }
+          for (const child of probeable) {
+            rolled[child] = {
               status: 'error',
               delay: null,
               testedAt: Date.now(),
+              message: 'speed test failed to start',
             }
           }
+          this.groups[groupName] = { ...current, nodes: rolled }
         }
+        this.error = e instanceof Error ? e.message : String(e)
+        throw e
       }
-
-      const workers = Array.from(
-        { length: Math.min(DELAY_CONCURRENCY, children.length) },
-        () => worker(),
-      )
-      await Promise.all(workers)
-
-      // Bail out if a newer run has started.
-      if (isStale()) return
-
-      // Commit results. Re-assign to keep Pinia reactive.
-      const updatedNodes: Record<string, NodeDelayInfo> = { ...group.nodes }
-      for (const [child, info] of Object.entries(results)) {
-        updatedNodes[child] = info
-      }
-      this.groups[groupName] = {
-        ...group,
-        nodes: updatedNodes,
-      }
-
-      this.testingGroups = this.testingGroups.filter((g) => g !== groupName)
     },
   },
 })

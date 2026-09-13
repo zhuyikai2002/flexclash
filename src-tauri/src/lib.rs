@@ -14,9 +14,11 @@ pub mod tray;
 
 use crate::core::shutdown::ExitFlag;
 use crate::core::sidecar::SidecarHandle;
+use crate::core::speedtest::SpeedTestRegistry;
 use crate::core::startup::{self, SilentFlag};
 use crate::core::tun::TunManager;
 use crate::store::queries::HistoryDb;
+use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -30,6 +32,19 @@ pub fn run() {
     // Phase R2: export typed IPC bindings (commands → src/bindings.ts).
     // Debug/dev builds rewrite the file on every start so the frontend
     // types never drift; release keeps the last generated copy.
+    //
+    // NOTE: only the Mihomo façade + updater are registered here. The
+    // speed-test commands deliberately are **not** — they follow the plain
+    // `#[tauri::command]` + `safeInvoke` convention that tun / profile / proxy
+    // / kernel already use, with their payload types declared in
+    // `src/services/speedtest.ts`.
+    //
+    // The deciding factor is that this list is what generates
+    // `src/bindings.ts`, and that file is only rewritten when the app starts —
+    // so a command added here cannot be typechecked until someone launches the
+    // GUI. Commands whose results arrive over *events* (as the speed test's do)
+    // gain little from it anyway: specta types the command signature, not the
+    // event payloads. Keep the two conventions separate.
     {
         use tauri_specta::{collect_commands, Builder};
 
@@ -89,6 +104,10 @@ pub fn run() {
         .manage(ExitFlag::default())
         .manage(silent_flag)
         .manage(TunManager::new())
+        // `Arc` (not the bare struct) so the spawned probe pool can own a
+        // handle to the run registry instead of borrowing `State<'_, _>`
+        // across a `'static` future.
+        .manage(Arc::new(SpeedTestRegistry::new()))
         .setup(move |app| {
             let handle = app.handle().clone();
             crate::core::shutdown::install(&handle);
@@ -267,6 +286,10 @@ pub fn run() {
             commands::mihomo::close_mihomo_connection,
             commands::mihomo::close_all_mihomo_connections,
             commands::mihomo::get_mihomo_rules,
+            // v0.3: Rust-native concurrent speed test (results stream over
+            // `proxy://delay-batch` / `proxy://delay-done`).
+            commands::speedtest::speed_test_group,
+            commands::speedtest::cancel_speed_test,
             commands::updater::check_update,
             commands::updater::install_update,
             commands::profile::list_profiles,

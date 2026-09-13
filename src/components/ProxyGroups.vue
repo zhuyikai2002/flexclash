@@ -17,7 +17,7 @@ import {
   CheckCircle2, Loader2, Zap,
   ArrowDownNarrowWide, ArrowDownWideNarrow, RefreshCw, ChevronDown, ChevronRight,
 } from 'lucide-vue-next'
-import { useProxiesStore, type DelayStatus } from '@/stores/proxies'
+import { useProxiesStore, type DelayStatus, type NodeDelayInfo } from '@/stores/proxies'
 import { useKernelStore } from '@/stores/kernel'
 import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { useI18n } from '@/composables/useI18n'
@@ -33,6 +33,11 @@ const unlistens: UnlistenFn[] = []
 // while the user was on the Profiles tab won't be visible otherwise.
 onMounted(() => {
   void proxies.fetchProxies()
+
+  // Subscribe to the Rust speed-test stream before anything can start a run,
+  // so batches that land while this view is unmounted are still folded in.
+  // Idempotent — every entry point calls it.
+  proxies.initSpeedTestStream()
 
   // React to profile (re)loads / kernel state flips while this view is
   // alive: a toast-triggered reload should also refresh the tree.
@@ -85,6 +90,17 @@ function latencyText(delay: number | null, status: DelayStatus): string {
   if (status === 'error') return 'err'
   if (status === 'ok' && delay !== null) return t('proxies.latency.ms', { n: delay })
   return '—'
+}
+
+/**
+ * Tooltip for a node card: its name, plus why the last probe ended the way it
+ * did. The Rust engine reports a specific reason per failure, so surfacing it
+ * here is what distinguishes "this node is dead" from "the kernel is down" —
+ * both of which used to render as the same grey pill.
+ */
+function nodeTitle(name: string, info?: NodeDelayInfo): string {
+  const reason = info?.message
+  return reason ? `${name}\n${reason}` : name
 }
 
 function latencyPillClass(delay: number | null, status: DelayStatus): string {
@@ -215,7 +231,7 @@ function groupTypeLabel(type: string): string {
               proxies.isGroupTesting(group.name) ||
               selecting[`${group.name}::${node}`] === true
             "
-            :title="node"
+            :title="nodeTitle(node, group.nodes[node])"
             :class="[
               'group relative flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all duration-200',
               'hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0',

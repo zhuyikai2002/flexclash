@@ -1057,6 +1057,7 @@ name = "flexclash"
 version = "0.2.5"
 dependencies = [
  "chrono",
+ "futures-util",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

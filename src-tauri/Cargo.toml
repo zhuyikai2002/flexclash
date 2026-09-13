@@ -28,6 +28,11 @@ serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "sync"] }
+# `StreamExt::buffer_unordered` — the bounded fan-out used by the native
+# speed-test engine (`core/speedtest.rs`). That trait is *defined* in
+# `futures-util`, which is the crate pulling it in directly avoids the
+# umbrella `futures` crate and its extra `futures-executor` weight.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }

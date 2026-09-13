@@ -17,7 +17,6 @@ import type {
   MihomoVersion,
   ProxiesResponse,
   Proxy,
-  ProxyDelayResponse,
   RulesResponse,
   TrafficSample,
 } from '@/types/clash'
@@ -144,15 +143,14 @@ export async function selectProxy(group: string, name: string): Promise<Proxy> {
   return (v ?? { name: group, now: name }) as unknown as Proxy
 }
 
-export async function getProxyDelay(
-  name: string,
-  url = 'http://www.gstatic.com/generate_204',
-  timeoutMs = 5_000,
-): Promise<number> {
-  guardTauri('get_mihomo_proxy_delay')
-  const v = await getJson(commands.getMihomoProxyDelay(name, url, timeoutMs))
-  return ((v as ProxyDelayResponse | null)?.delay ?? 0) as number
-}
+// NOTE: `getProxyDelay` used to live here — a single-node
+// `GET /proxies/{name}/delay` wrapper that `stores/proxies.ts` fanned out with
+// a 6-wide pool in the renderer. v0.3 moved the whole probe loop below the IPC
+// line (`src/services/speedtest.ts` → `core/speedtest.rs`), so there is no
+// longer a caller: probing one node at a time from the UI is exactly the
+// pattern this replaced. The Rust command `get_mihomo_proxy_delay` is still
+// registered — it remains a valid primitive — but nothing in the renderer
+// drives it.
 
 // ============================================================================
 // Connections

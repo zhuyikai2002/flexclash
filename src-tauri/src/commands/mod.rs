@@ -5,5 +5,6 @@ pub mod mihomo;
 pub mod profile;
 pub mod proxy;
 pub mod reset;
+pub mod speedtest;
 pub mod tun;
 pub mod updater;

@@ -34,3 +34,18 @@ pub const NATIVE_FILE_DRAG_ENTER: &str = "native-file-drag-enter";
 pub const NATIVE_FILE_DRAG_LEAVE: &str = "native-file-drag-leave";
 pub const NATIVE_FILE_DROP: &str = "native-file-drop";
 
+/// Rust-native speed test: incremental progress. Payload = `DelayBatch`.
+///
+/// Emitted once per `BATCH_SIZE` completed probes (and once more for the
+/// trailing partial batch), so the UI paints latency pills as the pool drains
+/// instead of waiting for the slowest node in a several-hundred-node group.
+pub const PROXY_DELAY_BATCH: &str = "proxy://delay-batch";
+
+/// Rust-native speed test: terminal event. Payload = `DelayDone`.
+///
+/// Exactly one per run — including a cancelled run and one that failed to
+/// start — so the renderer can always clear its "testing" state. Without a
+/// guaranteed terminal event a cancelled run would leave every node spinner
+/// stuck forever.
+pub const PROXY_DELAY_DONE: &str = "proxy://delay-done";
+

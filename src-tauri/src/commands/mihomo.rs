@@ -18,6 +18,7 @@ use specta::specta;
 
 
 use crate::config::profile::RESERVED_CONTROLLER;
+use crate::core::urlenc::percent_encode;
 use crate::error::AppError;
 
 type CmdResult<T> = Result<T, AppError>;
@@ -260,19 +261,4 @@ pub async fn get_mihomo_rules(
     
 ) -> CmdResult<String> {
     mihomo_request(reqwest::Method::GET, "/rules", None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
-}
-
-/// Minimal RFC-3986 path/query segment encoding (keeps letters/digits and
-/// the unreserved set, percent-encodes everything else).
-fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
