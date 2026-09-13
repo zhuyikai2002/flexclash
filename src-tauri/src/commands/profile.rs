@@ -334,7 +334,12 @@ fn storage_for<R: Runtime>(app: &AppHandle<R>) -> CmdResult<ProfileStorage> {
 }
 
 /// `PUT http://127.0.0.1:9091/configs?force=true` with body `{"path":"..."}`.
-async fn reload_via_controller(file_path: &str) -> Result<(), String> {
+///
+/// `pub(crate)` because the TUN path reuses it: `apply_tun_advanced` rewrites
+/// the `tun:` block and then needs the same "make mihomo re-read the file"
+/// call. The elevated mihomo TUN spawns listens on the same reserved
+/// controller, so one helper covers both.
+pub(crate) async fn reload_via_controller(file_path: &str) -> Result<(), String> {
     let url = format!("http://{}/configs?force=true", profile_ops::RESERVED_CONTROLLER);
     let body = serde_json::json!({ "path": file_path }).to_string();
     let client = reqwest::Client::builder()

@@ -25,6 +25,11 @@ import { useKernelStore } from '@/stores/kernel'
 import { useProxyStore } from '@/stores/proxy'
 import { useDesktopStore } from '@/stores/desktop'
 import { useTunStore } from '@/stores/tun'
+import { useSettingsStore } from '@/stores/settings'
+import {
+  applyTunAdvanced,
+  type TunAdvancedOptions,
+} from '@/services/tun'
 import { getAppVersion, safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { resetApplication, onResetCompleted, clearClientState, type ResetReport } from '@/services/reset'
 import ConfirmModal from '@/components/ConfirmModal.vue'
@@ -34,6 +39,7 @@ const kernel = useKernelStore()
 const sysproxy = useProxyStore()
 const desktop = useDesktopStore()
 const tun = useTunStore()
+const settings = useSettingsStore()
 
 // ---------------------------------------------------------------------------
 // Local UI state
@@ -69,6 +75,40 @@ const closeBehavior = ref<CloseBehavior>(
 function setCloseBehavior(v: CloseBehavior) {
   closeBehavior.value = v
   if (typeof localStorage !== 'undefined') localStorage.setItem(CLOSE_BEHAVIOR_KEY, v)
+}
+
+// ---------------------------------------------------------------------------
+// TUN Advanced switches (strict-route / dns-hijack)
+//
+// The values themselves live in the settings store (persisted). This block
+// only owns the *side effect*: once TUN is already up, a flipped switch has
+// to reach the running kernel, otherwise the card would happily show "on"
+// while config.yaml still says otherwise.
+// ---------------------------------------------------------------------------
+
+/** A push to the running kernel is in flight. */
+const advancedBusy = ref(false)
+/** Non-fatal failure of that push — the value is still persisted. */
+const advancedError = ref<string | null>(null)
+
+async function onAdvancedToggle(which: keyof TunAdvancedOptions) {
+  if (advancedBusy.value) return
+  if (which === 'strictRoute') settings.toggleStrictRoute()
+  else settings.toggleDnsHijack()
+
+  advancedError.value = null
+  // With TUN off there is no kernel holding the old yaml: the switch is
+  // persisted and `enableTun()` stamps it on the way up.
+  if (!tun.isOn) return
+
+  advancedBusy.value = true
+  try {
+    await applyTunAdvanced(settings.tunAdvancedSnapshot)
+  } catch (e) {
+    advancedError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    advancedBusy.value = false
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -504,35 +544,86 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Strict route + DNS (read-only preview) -->
+      <!-- Strict route + DNS hijack: live switches stamped onto `tun:`
+           when TUN is enabled (see config/profile.rs::toggle_tun_block). -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div class="rounded-xl border border-white/5 bg-white/[0.03] p-4">
-          <div class="flex items-center justify-between">
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="settings.tunAdvanced.strictRoute"
+          :disabled="advancedBusy"
+          :class="[
+            'text-left rounded-xl border p-4 transition-colors',
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50',
+            advancedBusy && 'cursor-wait',
+            settings.tunAdvanced.strictRoute
+              ? 'border-indigo-400/40 bg-indigo-500/15'
+              : 'border-white/5 bg-white/[0.03] hover:bg-white/[0.06]',
+          ]"
+          @click="onAdvancedToggle('strictRoute')"
+        >
+          <div class="flex items-center justify-between gap-2">
             <div class="text-xs text-zinc-300 font-medium">
               {{ t('settings.tun.strict_route') }}
             </div>
-            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-              {{ t('settings.tun.coming_soon') }}
+            <span
+              :class="[
+                'shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded',
+                settings.tunAdvanced.strictRoute
+                  ? 'bg-indigo-500/25 text-indigo-200'
+                  : 'bg-zinc-800 text-zinc-400',
+              ]"
+            >
+              {{ t(settings.tunAdvanced.strictRoute ? 'common.on' : 'common.off') }}
             </span>
           </div>
           <p class="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
             {{ t('settings.tun.strict_route_desc') }}
           </p>
-        </div>
-        <div class="rounded-xl border border-white/5 bg-white/[0.03] p-4">
-          <div class="flex items-center justify-between">
+        </button>
+
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="settings.tunAdvanced.dnsHijack"
+          :disabled="advancedBusy"
+          :class="[
+            'text-left rounded-xl border p-4 transition-colors',
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50',
+            advancedBusy && 'cursor-wait',
+            settings.tunAdvanced.dnsHijack
+              ? 'border-indigo-400/40 bg-indigo-500/15'
+              : 'border-white/5 bg-white/[0.03] hover:bg-white/[0.06]',
+          ]"
+          @click="onAdvancedToggle('dnsHijack')"
+        >
+          <div class="flex items-center justify-between gap-2">
             <div class="text-xs text-zinc-300 font-medium">
               {{ t('settings.tun.dns_hijack') }}
             </div>
-            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-              {{ t('settings.tun.coming_soon') }}
+            <span
+              :class="[
+                'shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded',
+                settings.tunAdvanced.dnsHijack
+                  ? 'bg-indigo-500/25 text-indigo-200'
+                  : 'bg-zinc-800 text-zinc-400',
+              ]"
+            >
+              {{ t(settings.tunAdvanced.dnsHijack ? 'common.on' : 'common.off') }}
             </span>
           </div>
           <p class="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
             {{ t('settings.tun.dns_hijack_desc') }}
           </p>
-        </div>
+        </button>
       </div>
+
+      <p v-if="advancedError" class="text-[11px] text-rose-300">
+        {{ t('settings.tun.apply_failed', { error: advancedError }) }}
+      </p>
+      <p v-else-if="!tun.isOn" class="text-[11px] text-zinc-500">
+        {{ t('settings.tun.apply_on_enable') }}
+      </p>
     </section>
 
     <!-- ==================== General ==================== -->

@@ -37,7 +37,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime};
 
-use crate::config::profile::{self, ProfileStorage, TunPatchOutcome};
+use crate::config::profile::{self, ProfileStorage, TunAdvanced, TunPatchOutcome};
 use crate::core::route_guard;
 use crate::error::{AppError, Result};
 use crate::events::TUN_STATE_CHANGED;
@@ -155,8 +155,32 @@ impl TunManager {
         &self,
         storage: &ProfileStorage,
         enable: bool,
+        advanced: TunAdvanced,
     ) -> Result<TunPatchOutcome> {
-        profile::inject_tun_config(storage, enable)
+        profile::inject_tun_config(storage, enable, advanced)
+    }
+
+    /// Re-stamp the `tun:` block for the "TUN Advanced" switches while TUN
+    /// is already up, so a flipped switch does not have to wait for the
+    /// next enable/disable cycle.
+    ///
+    /// Returns `Ok(None)` when TUN is not in the `On` state: there is then
+    /// no running kernel to reload, and the caller should simply leave the
+    /// persisted switch to be applied by the next [`Self::enable`].
+    ///
+    /// Takes the transition gate so this cannot interleave with an
+    /// in-flight enable/disable — the write is a single small file, so
+    /// holding it briefly is cheaper than reasoning about the race.
+    pub fn repatch_for_advanced(
+        &self,
+        storage: &ProfileStorage,
+        advanced: TunAdvanced,
+    ) -> Result<Option<TunPatchOutcome>> {
+        let _gate = self.gate.lock().expect("tun gate poisoned");
+        if !matches!(self.snapshot().state, TunState::On) {
+            return Ok(None);
+        }
+        profile::inject_tun_config(storage, true, advanced).map(Some)
     }
 
     /// Drive a full enable transition. Must NOT be called re-entrantly
@@ -165,6 +189,7 @@ impl TunManager {
         &self,
         app: &AppHandle<R>,
         storage: &ProfileStorage,
+        advanced: TunAdvanced,
     ) -> Result<TunStatus> {
         let _gate = self.gate.lock().expect("tun gate poisoned");
 
@@ -182,7 +207,7 @@ impl TunManager {
         self.record_sweep(pre_sweep);
 
         // 2. Patch the active config.
-        if let Err(e) = profile::inject_tun_config(storage, true) {
+        if let Err(e) = profile::inject_tun_config(storage, true, advanced) {
             self.set_state(TunState::Failed, Some(format!("config inject: {e}")));
             return Err(e);
         }
@@ -211,7 +236,7 @@ impl TunManager {
                     Err(e) => {
                         // Roll back: stop child, strip tun, sweep, fail.
                         let _ = crate::core::elevate::stop_elevated_mihomo();
-                        let _ = profile::inject_tun_config(storage, false);
+                        let _ = profile::inject_tun_config(storage, false, advanced);
                         let post = route_guard::sweep_residual_routes();
                         self.record_sweep(post);
                         let msg = format!("elevated mihomo not healthy: {e}");
@@ -222,7 +247,7 @@ impl TunManager {
             }
             Err(e) => {
                 // UAC cancel or runas failure: roll back.
-                let _ = profile::inject_tun_config(storage, false);
+                let _ = profile::inject_tun_config(storage, false, advanced);
                 let post = route_guard::sweep_residual_routes();
                 self.record_sweep(post);
                 let msg = format!("elevation failed: {e}");
@@ -250,8 +275,9 @@ impl TunManager {
         // 2. Strip the tun block. The active kernel (if any) will
         //    reload on next request; for the TUN disable path we
         //    don't auto-restart the kernel — the user can decide
-        //    whether to keep the regular kernel running.
-        if let Err(e) = profile::inject_tun_config(storage, false) {
+        //    whether to keep the regular kernel running. `advanced`
+        //    is irrelevant here: disabling removes the whole block.
+        if let Err(e) = profile::inject_tun_config(storage, false, TunAdvanced::default()) {
             self.set_state(TunState::Failed, Some(format!("config strip: {e}")));
             return Err(e);
         }

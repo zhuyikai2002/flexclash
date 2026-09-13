@@ -291,10 +291,11 @@
       "title": "TUN 进阶",
       "stack": "驱动栈",
       "strict_route": "严格路由",
-      "strict_route_desc": "仅允许指定 UID 走 TUN，避免被本机其他进程干扰",
+      "strict_route_desc": "强制所有连接走隧道，拒绝任何试图绕过 TUN 的流量，防止泄漏",
       "dns_hijack": "DNS 劫持",
-      "dns_hijack_desc": "劫持系统 DNS 53 端口以避免 DNS 泄露",
-      "coming_soon": "即将推出"
+      "dns_hijack_desc": "劫持 53 端口的 DNS 查询（UDP + TCP），防止 DNS 泄漏",
+      "apply_on_enable": "开启后将在启用 TUN 时写入内核配置",
+      "apply_failed": "开关已保存，但同步到运行中的内核失败：{error}"
     },
     "general": {
       "title": "常规与桌面行为",

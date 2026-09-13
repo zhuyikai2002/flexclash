@@ -291,10 +291,11 @@
       "title": "TUN Advanced",
       "stack": "Driver Stack",
       "strict_route": "Strict Route",
-      "strict_route_desc": "Restrict TUN to specific UIDs to avoid interference from other host processes",
+      "strict_route_desc": "Force every connection through the tunnel and reject any traffic that tries to bypass it",
       "dns_hijack": "DNS Hijack",
-      "dns_hijack_desc": "Hijack the system DNS port (53) to prevent DNS leaks",
-      "coming_soon": "Coming soon"
+      "dns_hijack_desc": "Hijack port 53 (UDP + TCP) so DNS queries cannot leak around the tunnel",
+      "apply_on_enable": "Written to the kernel config the next time TUN is enabled",
+      "apply_failed": "Switch saved, but pushing it to the running kernel failed: {error}"
     },
     "general": {
       "title": "General & Desktop",

@@ -417,17 +417,52 @@ fn count_nodes(yaml: &str) -> u32 {
 
 /// TUN-specific keys we stamp onto the active config when the user enables
 /// transparent proxy. These values are the locked-in Mihomo v1.19.30
-/// schema. Any change must be reflected in `verify-m9` (T2 unit test).
+/// schema; the two *user-facing* switches live in [`TunAdvanced`].
 pub const TUN_DEVICE: &str = "flexclash-tun";
 pub const TUN_STACK: &str = "mixed";
 pub const TUN_AUTO_DETECT_INTERFACE: bool = true;
-pub const TUN_STRICT_ROUTE: bool = true;
-/// DNS hijack: rewrite all UDP/53 queries to local. Mihomo 1.19.30 expects
-/// this list as plain `["0.0.0.0:53"]` (no scheme).
-pub const TUN_DNS_HIJACK: &[&str] = &["0.0.0.0:53"];
+/// `tun.dns-hijack` targets used when the user leaves "DNS Hijack" on.
+///
+/// Both entries are load-bearing. Mihomo treats a scheme-less target as
+/// `udp://`, so the previous single-entry `["0.0.0.0:53"]` captured **only**
+/// UDP: a resolver answering over TCP — which is exactly what a censoring
+/// resolver falls back to — still reached the host's own resolver, i.e. a
+/// silent DNS leak that `dns-hijack: true` purported to close. `any:53`
+/// binds every local address (not just `0.0.0.0`) and the explicit
+/// `tcp://` entry closes the TCP hole.
+pub const TUN_DNS_HIJACK: &[&str] = &["any:53", "tcp://any:53"];
 /// Loopback we want to skip in auto-route (otherwise the local API is
 /// captured by TUN and loops back through mihomo).
 pub const TUN_AUTO_ROUTE_EXCLUDE: &[&str] = &["127.0.0.0/8"];
+
+/// The two user-facing switches from Settings -> "TUN Advanced".
+///
+/// Authored by the renderer (`src/stores/settings.ts`), threaded through
+/// `enable_tun` / `apply_tun_advanced` down to [`toggle_tun_block`]. The
+/// [`Default`] impl is the canonical fallback for any caller that does not
+/// supply them, and must stay in sync with `TUN_ADVANCED_DEFAULTS` on the
+/// frontend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TunAdvanced {
+    /// `tun.strict-route` — reject traffic that would escape the tunnel
+    /// instead of leaking it out of the physical interface.
+    pub strict_route: bool,
+    /// `tun.dns-hijack` — capture :53 over both UDP and TCP.
+    pub dns_hijack: bool,
+}
+
+impl Default for TunAdvanced {
+    fn default() -> Self {
+        Self {
+            // Off by default: the more opinionated of the two, and it
+            // breaks LAN / nested-virtualisation setups.
+            strict_route: false,
+            // On by default: without it the host resolver sees every
+            // domain the user visits, which defeats the tunnel.
+            dns_hijack: true,
+        }
+    }
+}
 
 /// DNS block stamped onto the active config when TUN is enabled and the
 /// config has no `dns:` block of its own.
@@ -468,10 +503,11 @@ pub struct TunPatchOutcome {
 /// Toggle the `tun:` block on the active config and persist it.
 ///
 /// * `enable = true`  → insert (or replace) the `tun:` block with our
-///   locked-in schema. If a `tun:` block already exists, only `enable`
-///   and the device/stack/etc. fields are overwritten; user overrides
-///   such as `inet4-address` are preserved.
-/// * `enable = false` → remove the `tun:` block entirely.
+///   locked-in schema, with `strict-route` / `dns-hijack` stamped from
+///   `advanced`. If a `tun:` block already exists, only the fields we own
+///   are overwritten; user overrides such as `inet4-address` are preserved.
+/// * `enable = false` → remove the `tun:` block entirely (`advanced` is
+///   then irrelevant and only carried for call-site symmetry).
 ///
 /// Reserved fields (external-controller, secret, mode, etc.) are *not*
 /// touched here — call `patch_and_sanitize_yaml` separately if the
@@ -479,6 +515,7 @@ pub struct TunPatchOutcome {
 pub fn inject_tun_config(
     storage: &ProfileStorage,
     enable: bool,
+    advanced: TunAdvanced,
 ) -> Result<TunPatchOutcome, AppError> {
     let path = storage.active_config();
     let raw = if path.exists() {
@@ -489,7 +526,7 @@ pub fn inject_tun_config(
         include_str!("../../resources/default_mihomo.yaml").to_string()
     };
 
-    let patched = toggle_tun_block(&raw, enable)?;
+    let patched = toggle_tun_block(&raw, enable, advanced)?;
 
     let changed = patched != raw;
     if changed {
@@ -508,7 +545,11 @@ pub fn inject_tun_config(
 
 /// Pure function: toggle the `tun:` block in `yaml`. Exposed for unit
 /// testing in `tests/tun_yaml.rs`.
-pub fn toggle_tun_block(yaml: &str, enable: bool) -> Result<String, AppError> {
+pub fn toggle_tun_block(
+    yaml: &str,
+    enable: bool,
+    advanced: TunAdvanced,
+) -> Result<String, AppError> {
     let mut root: serde_yaml::Value = serde_yaml::from_str(yaml)
         .map_err(|e| AppError::Config(format!("active config not valid YAML: {e}")))?;
     let mapping = root
@@ -530,13 +571,23 @@ pub fn toggle_tun_block(yaml: &str, enable: bool) -> Result<String, AppError> {
         insert_str_map(&mut tun, "device", TUN_DEVICE);
         insert_bool_map(&mut tun, "auto-route", true);
         insert_bool_map(&mut tun, "auto-detect-interface", TUN_AUTO_DETECT_INTERFACE);
-        insert_bool_map(&mut tun, "strict-route", TUN_STRICT_ROUTE);
+        // Documented explicitly in both directions rather than omitted when
+        // off: a profile may ship its own `strict-route: true`, and "the
+        // switch is off" has to mean false, not "leave whatever was there".
+        insert_bool_map(&mut tun, "strict-route", advanced.strict_route);
 
-        // dns-hijack: ["0.0.0.0:53"]
-        let hijack: serde_yaml::Sequence = TUN_DNS_HIJACK
-            .iter()
-            .map(|s| serde_yaml::Value::String((*s).into()))
-            .collect();
+        // dns-hijack: ["any:53", "tcp://any:53"] when on, `[]` when off.
+        // The empty sequence is the explicit "do not capture :53" — writing
+        // it (instead of deleting the key) keeps the outcome deterministic
+        // even for a profile that shipped its own list.
+        let hijack: serde_yaml::Sequence = if advanced.dns_hijack {
+            TUN_DNS_HIJACK
+                .iter()
+                .map(|s| serde_yaml::Value::String((*s).into()))
+                .collect()
+        } else {
+            serde_yaml::Sequence::new()
+        };
         tun.insert(
             serde_yaml::Value::String("dns-hijack".into()),
             serde_yaml::Value::Sequence(hijack),
@@ -625,26 +676,73 @@ fn inject_tun_dns(m: &mut serde_yaml::Mapping, enable: bool) {
 mod tun_yaml_tests {
     use super::*;
 
+    /// Default switches: strict-route off, dns-hijack on (UDP **and** TCP).
     #[test]
     fn inject_tun_adds_block_when_missing() {
         let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
-        let out = toggle_tun_block(yaml, true).unwrap();
+        let out = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
         assert!(out.contains("tun:"));
         assert!(out.contains("device: flexclash-tun"));
         assert!(out.contains("stack: mixed"));
         assert!(out.contains("auto-route: true"));
         assert!(out.contains("auto-detect-interface: true"));
-        assert!(out.contains("strict-route: true"));
-        assert!(out.contains("- 0.0.0.0:53"));
+        // The default is deliberately OFF — see `TunAdvanced::default()`.
+        assert!(out.contains("strict-route: false"));
+        // Both families are hijacked; a lone `0.0.0.0:53` only covered UDP.
+        assert!(out.contains("- any:53"));
+        assert!(out.contains("- tcp://any:53"));
         assert!(out.contains("enable: true"));
         // Reserved fields untouched.
         assert!(out.contains("external-controller: 127.0.0.1:9091"));
     }
 
+    /// The two switches must actually reach the yaml, in both directions.
+    #[test]
+    fn inject_tun_honours_the_advanced_switches() {
+        let yaml = "mixed-port: 7897\n";
+
+        let on = toggle_tun_block(
+            yaml,
+            true,
+            TunAdvanced { strict_route: true, dns_hijack: true },
+        )
+        .unwrap();
+        assert!(on.contains("strict-route: true"), "{on}");
+        assert!(on.contains("- any:53"), "{on}");
+        assert!(on.contains("- tcp://any:53"), "{on}");
+
+        let off = toggle_tun_block(
+            yaml,
+            true,
+            TunAdvanced { strict_route: false, dns_hijack: false },
+        )
+        .unwrap();
+        assert!(off.contains("strict-route: false"), "{off}");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&off).unwrap();
+        let hijack = doc
+            .as_mapping()
+            .unwrap()
+            .get("tun")
+            .and_then(|t| t.as_mapping())
+            .and_then(|t| t.get("dns-hijack"))
+            .and_then(|v| v.as_sequence())
+            .expect("dns-hijack must still be present while the switch is off");
+        assert!(hijack.is_empty(), "dns-hijack must be empty when off: {hijack:?}");
+    }
+
+    /// Turning strict-route off has to *override* a profile that turned it
+    /// on, otherwise the switch would silently lie about the live config.
+    #[test]
+    fn inject_tun_overrides_a_profile_strict_route() {
+        let yaml = "mixed-port: 7897\ntun:\n  enable: false\n  strict-route: true\n";
+        let out = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
+        assert!(out.contains("strict-route: false"), "{out}");
+    }
+
     #[test]
     fn inject_tun_toggle_off_removes_block() {
-        let with = toggle_tun_block("mixed-port: 7897\n", true).unwrap();
-        let without = toggle_tun_block(&with, false).unwrap();
+        let with = toggle_tun_block("mixed-port: 7897\n", true, TunAdvanced::default()).unwrap();
+        let without = toggle_tun_block(&with, false, TunAdvanced::default()).unwrap();
         assert!(!without.contains("tun:"));
         assert!(!without.contains("flexclash-tun"));
     }
@@ -652,8 +750,8 @@ mod tun_yaml_tests {
     #[test]
     fn inject_tun_round_trip_is_idempotent() {
         let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
-        let once = toggle_tun_block(yaml, true).unwrap();
-        let twice = toggle_tun_block(&once, true).unwrap();
+        let once = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
+        let twice = toggle_tun_block(&once, true, TunAdvanced::default()).unwrap();
         assert_eq!(once, twice, "toggling enable twice must not mutate the yaml");
     }
 
@@ -661,7 +759,7 @@ mod tun_yaml_tests {
     fn inject_tun_preserves_user_overrides() {
         let mut yaml = String::from("mixed-port: 7897\n");
         yaml.push_str("tun:\n  enable: false\n  inet4-address: 10.0.0.1/30\n");
-        let out = toggle_tun_block(&yaml, true).unwrap();
+        let out = toggle_tun_block(&yaml, true, TunAdvanced::default()).unwrap();
         // Our lock-in keys should be on.
         assert!(out.contains("device: flexclash-tun"));
         // User override preserved.
@@ -673,7 +771,7 @@ mod tun_yaml_tests {
     #[test]
     fn inject_tun_fills_a_missing_dns_block() {
         let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
-        let out = toggle_tun_block(yaml, true).unwrap();
+        let out = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
         let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         let dns = doc
             .as_mapping()
@@ -700,7 +798,7 @@ mod tun_yaml_tests {
         let yaml = "mixed-port: 7897\n\
                     dns:\n  enable: true\n  enhanced-mode: fake-ip\n  respect-rules: true\n\
                     \x20 nameserver:\n    - https://1.1.1.1/dns-query\n";
-        let out = toggle_tun_block(yaml, true).unwrap();
+        let out = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
         assert!(out.contains("respect-rules: true"), "profile dns block was rewritten:\n{out}");
         assert!(out.contains("https://1.1.1.1/dns-query"), "profile nameserver lost:\n{out}");
         assert!(!out.contains("119.29.29.29"), "our nameserver leaked into a profile-owned dns block:\n{out}");
@@ -709,15 +807,15 @@ mod tun_yaml_tests {
     #[test]
     fn inject_tun_removes_only_its_own_dns_block() {
         // Ours goes away again on disable...
-        let on = toggle_tun_block("mixed-port: 7897\n", true).unwrap();
-        let off = toggle_tun_block(&on, false).unwrap();
+        let on = toggle_tun_block("mixed-port: 7897\n", true, TunAdvanced::default()).unwrap();
+        let off = toggle_tun_block(&on, false, TunAdvanced::default()).unwrap();
         let doc: serde_yaml::Value = serde_yaml::from_str(&off).unwrap();
         assert!(doc.as_mapping().unwrap().get("dns").is_none(), "our dns block survived disable:\n{off}");
 
         // ...but a profile-owned one must survive the round trip.
         let with_own = "mixed-port: 7897\ndns:\n  enable: true\n  nameserver:\n    - 223.5.5.5\n";
-        let on2 = toggle_tun_block(with_own, true).unwrap();
-        let off2 = toggle_tun_block(&on2, false).unwrap();
+        let on2 = toggle_tun_block(with_own, true, TunAdvanced::default()).unwrap();
+        let off2 = toggle_tun_block(&on2, false, TunAdvanced::default()).unwrap();
         assert!(off2.contains("nameserver:"), "profile-owned dns removed by disable:\n{off2}");
     }
 

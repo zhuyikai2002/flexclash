@@ -292,6 +292,7 @@ pub fn run() {
             commands::desktop::sweep_residual_routes,
             commands::tun::get_tun_state,
             commands::tun::enable_tun,
+            commands::tun::apply_tun_advanced,
             commands::tun::disable_tun,
             commands::tun::sweep_tun_routes,
             // M10: traffic history (SQLite-backed)

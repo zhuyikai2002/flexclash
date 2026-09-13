@@ -17,7 +17,9 @@ import {
   type TunState,
   type TunStatus,
   type SweepResultFull,
+  type TunAdvancedOptions,
 } from '@/services/tun'
+import { useSettingsStore } from '@/stores/settings'
 
 interface TunState_ {
   state: TunState
@@ -90,7 +92,7 @@ export const useTunStore = defineStore('tun', {
       this.applyStatus(s)
     },
 
-    async setEnabled(enabled: boolean): Promise<void> {
+    async setEnabled(enabled: boolean, advanced?: TunAdvancedOptions): Promise<void> {
       if (this.busy) return
       this.busy = true
       this.lastError = null
@@ -98,7 +100,12 @@ export const useTunStore = defineStore('tun', {
       // snapshot returned by the invoke() result.
       this.suppressNextEvent = true
       try {
-        const s = enabled ? await enableTun() : await disableTun()
+        // The "TUN Advanced" switches live in the settings store; resolve
+        // them here so every enable path (toggle card, tray, restore-on-boot)
+        // stamps the same tun: block without each call site remembering to.
+        const settings = useSettingsStore()
+        const adv = advanced ?? settings.tunAdvancedSnapshot
+        const s = enabled ? await enableTun(adv) : await disableTun()
         this.applyStatus(s)
       } catch (e) {
         this.lastError = e instanceof Error ? e.message : String(e)
