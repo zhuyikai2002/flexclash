@@ -25,7 +25,7 @@ import { useKernelStore } from '@/stores/kernel'
 import { useProxyStore } from '@/stores/proxy'
 import { useDesktopStore } from '@/stores/desktop'
 import { useTunStore } from '@/stores/tun'
-import { safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { getAppVersion, safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { resetApplication, onResetCompleted, clearClientState, type ResetReport } from '@/services/reset'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
@@ -89,7 +89,15 @@ const updateState = ref<UpdatePhase>('idle')
 const updateMessage = ref<string | null>(null)
 const updateInfo = ref<UpdateInfo | null>(null)
 const dlPercent = ref(0)
-const appVersion = '0.1.2' // mirrors package.json (bumped at release time)
+/** Installed app version, read from the Tauri bundle at mount time
+ *  (`tauri.conf.json > version`). Null until the IPC call resolves, and
+ *  in plain browser preview where there is no bundle to ask. Never
+ *  hard-code this — a literal silently drifts behind the manifest. */
+const appVersion = ref<string | null>(null)
+
+/** Display form of {@link appVersion}. Falls back to an em dash rather
+ *  than a stale/guessed number when the version is not (yet) known. */
+const versionLabel = computed(() => (appVersion.value ? `v${appVersion.value}` : '—'))
 let updateUnlisten: UnlistenFn | null = null
 
 /** Attach a live progress listener for `updater://progress`. */
@@ -119,7 +127,7 @@ async function checkForUpdate() {
       updateState.value = 'available'
     } else {
       updateState.value = 'uptodate'
-      updateMessage.value = `v${appVersion} (latest)`
+      updateMessage.value = `${versionLabel.value} (latest)`
     }
   } catch (e) {
     updateState.value = 'error'
@@ -311,6 +319,15 @@ onMounted(() => {
     }, 1200)
   }).then((u) => { unlistenReset = u })
 })
+
+// Read the installed version once at mount. `getAppVersion()` asks the
+// Tauri bundle (i.e. `tauri.conf.json`), so the About card and the
+// "already up to date" message track the manifest automatically instead
+// of drifting behind a hand-maintained literal.
+onMounted(() => {
+  void getAppVersion().then((v) => { appVersion.value = v })
+})
+
 onUnmounted(() => {
   if (unlistenReset) unlistenReset()
 })
@@ -642,7 +659,7 @@ onUnmounted(() => {
           <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
             {{ t('settings.about.client_version') }}
           </div>
-          <div class="mt-1.5 text-xl font-mono text-zinc-100">v{{ appVersion }}</div>
+          <div class="mt-1.5 text-xl font-mono text-zinc-100">{{ versionLabel }}</div>
           <div class="mt-1 text-[10px] text-zinc-500 font-mono">
             {{ t('app.tagline') }}
           </div>

@@ -37,6 +37,7 @@
 
 import { invoke, type InvokeArgs } from '@tauri-apps/api/core'
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event'
+import { getVersion } from '@tauri-apps/api/app'
 
 /** True iff the renderer is hosted inside a Tauri webview. */
 export function isTauri(): boolean {
@@ -114,3 +115,27 @@ export async function safeListen<T>(
  *  exist so `services/*` can `import { safeInvoke as invoke }` and
  *  the diff stays small.) */
 export { invoke, listen, type UnlistenFn, type EventCallback, type InvokeArgs }
+
+/**
+ * Read the version of the running application bundle — i.e. the `version`
+ * field of `src-tauri/tauri.conf.json`, baked into the binary at build
+ * time. This is the single source of truth for "客户端版本"; never mirror
+ * it with a literal, which silently goes stale the moment you bump the
+ * manifest (a hard-coded `0.1.2` survived four releases that way).
+ *
+ * Returns `null` outside the Tauri runtime (plain browser preview) or if
+ * the IPC call fails, so callers can render a neutral placeholder instead
+ * of inventing a version.
+ */
+export async function getAppVersion(): Promise<string | null> {
+  if (!isTauri()) {
+    if (isDev) console.debug('[tauri-bridge] skip getVersion — not in Tauri runtime')
+    return null
+  }
+  try {
+    return await getVersion()
+  } catch (e) {
+    if (isDev) console.debug('[tauri-bridge] getVersion failed', e)
+    return null
+  }
+}
