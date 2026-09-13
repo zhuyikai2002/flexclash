@@ -167,6 +167,25 @@ impl ProfileStorage {
 // Public CRUD
 // ----------------------------------------------------------------------------
 
+/// Display name substituted when a caller supplies a blank one.
+///
+/// Shared rather than inlined because the override pipeline keys its
+/// per-profile layer on the *stored* name: if this fallback and the one used
+/// when locating `overrides/profiles/<name>.yaml` ever disagreed, an unnamed
+/// profile's override would silently never apply.
+pub const DEFAULT_PROFILE_NAME: &str = "Untitled";
+
+/// The name a profile will actually be stored under. Callers that need to
+/// resolve name-keyed side files (e.g. overrides) must use this, not the raw
+/// argument.
+pub fn normalize_profile_name(name: &str) -> String {
+    if name.trim().is_empty() {
+        DEFAULT_PROFILE_NAME.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 /// Sanitise a raw YAML and persist it as a new profile. Returns the resulting
 /// `ProfileMeta`. Pass an existing `id` to overwrite.
 pub fn save_profile(
@@ -193,7 +212,7 @@ pub fn save_profile(
 
     let meta = ProfileMeta {
         id: id.clone(),
-        name: if name.trim().is_empty() { "Untitled".into() } else { name },
+        name: normalize_profile_name(&name),
         url,
         node_count,
         updated_at: Utc::now(),

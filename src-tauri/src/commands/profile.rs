@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use crate::config::overrides as override_ops;
 use crate::config::profile as profile_ops;
 use crate::config::profile::ProfileStorage;
 use crate::config::subscription as sub_ops;
@@ -120,6 +121,9 @@ pub async fn import_profile_url<R: Runtime>(
     );
 
     let storage = storage_for(&app)?;
+    // User overrides are merged in *before* the profile is written, so an
+    // import and a later refresh both produce the same document.
+    let body = apply_overrides(&app, &name, body);
     let mut meta =
         profile_ops::save_profile(&storage, None, name.clone(), body, url.clone())?;
 
@@ -188,7 +192,12 @@ pub async fn update_subscription<R: Runtime>(
         .await
         .map_err(|e| AppError::Subscription(e.to_string()))?;
 
-    // 2) Persist. Pass `id` to overwrite the existing profile on disk.
+    // 2) Re-apply the user's override layers, then persist. Pass `id` to
+    //    overwrite the existing profile on disk. This is the step that makes a
+    //    refresh safe: the airport's new nodes land, and the hand-tuned
+    //    `proxy-groups` / `rules` / `dns` edits are re-stitched on top rather
+    //    than being thrown away with the previous fetch.
+    let body = apply_overrides(&app, &meta.name, body);
     let mut updated =
         profile_ops::save_profile(&storage, Some(id.clone()), meta.name.clone(), body, url.clone())?;
 
@@ -331,6 +340,59 @@ pub async fn set_active_profile<R: Runtime>(
 fn storage_for<R: Runtime>(app: &AppHandle<R>) -> CmdResult<ProfileStorage> {
     let work_dir = sidecar::work_dir_for(app)?;
     Ok(ProfileStorage::new(&work_dir))
+}
+
+/// Run the subscription-override pipeline over freshly fetched YAML and report
+/// what happened to the kernel-log stream.
+///
+/// **The return value is always usable YAML.** `overrides::apply` cannot fail —
+/// a broken override degrades to the input plus a warning — and even the
+/// failure to *resolve* the overrides directory falls back to the input, since
+/// losing contact with `app_local_data_dir` is not a reason to refuse a
+/// subscription update. Neither branch is an error path for the caller and
+/// neither changes what the command returns.
+///
+/// `profile_name` is the fetched profile's display name, passed through
+/// [`crate::config::profile::normalize_profile_name`] so it matches the name
+/// `save_profile` will store — the per-profile layer is keyed on that name.
+fn apply_overrides<R: Runtime>(
+    app: &AppHandle<R>,
+    profile_name: &str,
+    raw_yaml: String,
+) -> String {
+    let dir = match override_ops::dir_for(app) {
+        Ok(dir) => dir,
+        Err(e) => {
+            let _ = app.emit(
+                crate::events::KERNEL_LOG,
+                format!("[override] cannot locate the overrides dir ({e}); none applied"),
+            );
+            return raw_yaml;
+        }
+    };
+
+    let name = profile_ops::normalize_profile_name(profile_name);
+    let outcome = override_ops::apply(&dir, &name, &raw_yaml);
+
+    for warning in &outcome.warnings {
+        let _ = app.emit(
+            crate::events::KERNEL_LOG,
+            format!("[override] {warning}"),
+        );
+    }
+    if !outcome.applied.is_empty() {
+        let _ = app.emit(
+            crate::events::KERNEL_LOG,
+            format!(
+                "[override] applied {} layer(s) for '{}': {}",
+                outcome.applied.len(),
+                name,
+                outcome.applied.join(", ")
+            ),
+        );
+    }
+
+    outcome.yaml
 }
 
 /// `PUT http://127.0.0.1:9091/configs?force=true` with body `{"path":"..."}`.
