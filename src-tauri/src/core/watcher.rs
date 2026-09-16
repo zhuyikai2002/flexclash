@@ -4,14 +4,22 @@
 // A single long-lived task pushes a compact `AppStateSnapshot` to the
 // renderer once per second on `app-state://sync`. The frontend *projects*
 // the snapshot into its stores; it no longer needs background timers /
-// probes for kernel health, system-proxy state, outbound mode, or speed.
+// probes for kernel health, system-proxy state, or outbound mode.
 //
 // Collection strategy (all cheap, all local):
 //   * kernel_online        — from the sidecar lifecycle state (no probe).
 //   * system_proxy_active  — platform registry/gsettings read (µs-scale).
 //   * current_mode         — GET /configs `mode` (only while online).
-//   * upload/download_speed — diff of /connections byte totals per tick
-//                             (only while online; 0 when offline).
+//
+// SCOPE — what this deliberately does NOT do any more
+// --------------------------------------------------
+// Until Phase 2 this also derived `upload_speed` / `download_speed` by
+// diffing `/connections` byte totals *once per second*, which meant a second
+// HTTP poll per tick competing with the WebSocket ingest and a second,
+// disagreeing notion of "current speed". The kernel's own `/traffic` stream is
+// the authoritative source for those rates, and `core::ingest` now owns it, so
+// the derivation is gone: one source, no duplicate poll, one fewer field pair
+// to keep in step.
 // ============================================================================
 
 use std::sync::OnceLock;
@@ -48,25 +56,8 @@ pub struct AppStateSnapshot {
     pub kernel_online: bool,
     /// System proxy currently active (platform query).
     pub system_proxy_active: bool,
-    /// Instantaneous egress bytes/sec (derived from /connections totals).
-    pub upload_speed: u32,
-    /// Instantaneous ingress bytes/sec.
-    pub download_speed: u32,
     /// Outbound mode: rule / global / direct.
     pub current_mode: String,
-}
-
-async fn fetch_totals() -> Option<(u64, u64)> {
-    let url = format!("http://{RESERVED_CONTROLLER}/connections");
-    let resp = http().get(&url).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let v: serde_json::Value = resp.json().await.ok()?;
-    Some((
-        v.get("uploadTotal").and_then(|x| x.as_u64()).unwrap_or(0),
-        v.get("downloadTotal").and_then(|x| x.as_u64()).unwrap_or(0),
-    ))
 }
 
 async fn fetch_mode() -> Option<String> {
@@ -79,13 +70,6 @@ async fn fetch_mode() -> Option<String> {
     v.get("mode").and_then(|x| x.as_str()).map(String::from)
 }
 
-/// Delta of a monotonic counter vs the previous sample, clamped ≥ 0.
-fn delta(cur: u64, prev: &mut u64) -> u32 {
-    let d = cur.saturating_sub(*prev);
-    *prev = cur;
-    d.min(u32::MAX as u64) as u32
-}
-
 /// Spawn the once-per-second state broadcaster. `sidecar` drives the
 /// online flag; `app` is used to emit events to every webview.
 pub fn spawn_state_watcher<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandle) {
@@ -93,8 +77,6 @@ pub fn spawn_state_watcher<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandl
     let sidecar = sidecar.clone();
 
     tauri::async_runtime::spawn(async move {
-        let mut last_up: u64 = 0;
-        let mut last_down: u64 = 0;
         let mut mode = String::from("rule");
 
         loop {
@@ -105,26 +87,6 @@ pub fn spawn_state_watcher<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandl
                 .map(|s| s.enabled)
                 .unwrap_or(false);
 
-            let (up_speed, down_speed) = if online {
-                match fetch_totals().await {
-                    Some((up, down)) => {
-                        let ups = delta(up, &mut last_up);
-                        let downs = delta(down, &mut last_down);
-                        (ups, downs)
-                    }
-                    None => {
-                        // First tick after start or a transient fetch miss.
-                        (0u32, 0u32)
-                    }
-                }
-            } else {
-                // Kernel down — reset baselines so re-connect doesn't
-                // report one giant delta on the next tick.
-                last_up = 0;
-                last_down = 0;
-                (0u32, 0u32)
-            };
-
             if online {
                 if let Some(m) = fetch_mode().await {
                     mode = m;
@@ -134,8 +96,6 @@ pub fn spawn_state_watcher<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandl
             let snap = AppStateSnapshot {
                 kernel_online: online,
                 system_proxy_active: proxy_active,
-                upload_speed: up_speed,
-                download_speed: down_speed,
                 current_mode: mode.clone(),
             };
             let _ = app.emit(APP_STATE_SYNC, snap);

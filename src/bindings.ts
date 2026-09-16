@@ -281,10 +281,6 @@ export type AppStateSnapshot = {
 	kernelOnline: boolean,
 	/**  System proxy currently active (platform query). */
 	systemProxyActive: boolean,
-	/**  Instantaneous egress bytes/sec (derived from /connections totals). */
-	uploadSpeed: number,
-	/**  Instantaneous ingress bytes/sec. */
-	downloadSpeed: number,
 	/**  Outbound mode: rule / global / direct. */
 	currentMode: string,
 };

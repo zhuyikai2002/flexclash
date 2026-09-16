@@ -71,6 +71,24 @@ pub enum KernelLogLevel {
     Error,
 }
 
+impl KernelLogLevel {
+    /// Map Mihomo's wire spelling onto the enum, defaulting to `Info` for
+    /// anything unrecognised.
+    ///
+    /// Deliberately total: a severity a future kernel invents must not be able
+    /// to fail the ingest loop, and under `panic = "abort"` a failure here
+    /// would take the whole process with it.
+    pub(crate) fn from_wire(raw: &str) -> Self {
+        match raw {
+            "debug" => Self::Debug,
+            // Mihomo writes "warning"; `warn` is accepted defensively.
+            "warning" | "warn" => Self::Warning,
+            "error" => Self::Error,
+            _ => Self::Info,
+        }
+    }
+}
+
 /// A single structured kernel log line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

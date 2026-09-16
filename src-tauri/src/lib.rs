@@ -85,6 +85,13 @@ pub fn run() {
                 app.state::<SidecarHandle>().inner().clone(),
             );
 
+            // Phase 2: Rust owns the kernel data plane. One supervisor task
+            // dials mihomo's `/traffic` and `/logs` WebSockets, throttles them
+            // into the typed `TrafficPayload` / `LogBatch` events, and heals
+            // itself across kernel restarts. Must come after `mount_events`
+            // above, which installs the registry those emits resolve through.
+            crate::core::ingest::spawn(&handle, app.state::<SidecarHandle>().inner().clone());
+
             // M10: open the history DB at
             //   %LOCALAPPDATA%\com.flexclash.app\history.db
             // and register it as managed state so the Tauri commands
