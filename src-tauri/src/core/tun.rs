@@ -44,7 +44,7 @@ use crate::events::TUN_STATE_CHANGED;
 
 /// Public TUN state, serialised both to the frontend (event payload) and
 /// the `get_tun_state` Tauri command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum TunState {
     /// User has TUN off (default).
@@ -76,7 +76,7 @@ impl TunState {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TunStatus {
     pub state: TunState,
     pub enabled: bool,
@@ -85,7 +85,7 @@ pub struct TunStatus {
     pub last_changed_at_ms: i64,
     /// Last sweep outcome (richer than the M7 contract; UI may use the
     /// `message` field to render a small status hint).
-    pub last_sweep: Option<route_guard::SweepResult>,
+    pub last_sweep: Option<route_guard::SweepResultFull>,
 }
 
 impl Default for TunStatus {
@@ -138,7 +138,7 @@ impl TunManager {
         crate::core::tun::tun_events::broadcast_state(&snap);
     }
 
-    fn record_sweep(&self, r: route_guard::SweepResult) {
+    fn record_sweep(&self, r: route_guard::SweepResultFull) {
         let mut g = self.inner.lock().expect("tun mutex poisoned");
         g.last_sweep = Some(r);
     }

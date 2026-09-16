@@ -48,7 +48,7 @@ pub fn parse_proxy_server(s: &str) -> Option<(&str, u16)> {
     Some((h, port))
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct ProxyStatus {
     /// Whether the user has the system proxy enabled (ProxyEnable=1).
     pub enabled: bool,

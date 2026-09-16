@@ -30,10 +30,17 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Result of a sweep. Mirrors the M7 stub `SweepResult` so the verify
-/// suite can assert the field layout stayed compatible.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct SweepResult {
+/// Result of a full route/adapter sweep — the rich shape, carrying the
+/// per-kind breakdown plus a diagnostic message.
+///
+/// Named `SweepResultFull`, not `SweepResult`, because `core::startup`
+/// already exports a `SweepResult` (the M7-era `{ deleted, ok }`
+/// projection kept for the `sweep_residual_routes` command). Two IPC
+/// types cannot share one name — specta refuses to export them both —
+/// and `Full` is the suffix the renderer has always used for this shape
+/// (`src/services/tun.ts`), so the generated name matches it.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub struct SweepResultFull {
     /// How many routing-table entries were removed.
     pub deleted_routes: u32,
     /// How many virtual NICs were removed (0 on non-Windows).
@@ -48,9 +55,9 @@ pub struct SweepResult {
 /// `config::profile::TUN_DEVICE` so the GUI label is consistent.
 pub const TUN_DEVICE_NAME: &str = "flexclash-tun";
 
-/// Top-level entry point. Always returns a `SweepResult`; never panics.
-pub fn sweep_residual_routes() -> SweepResult {
-    let mut result = SweepResult {
+/// Top-level entry point. Always returns a `SweepResultFull`; never panics.
+pub fn sweep_residual_routes() -> SweepResultFull {
+    let mut result = SweepResultFull {
         deleted_routes: 0,
         deleted_adapters: 0,
         ok: true,
@@ -156,7 +163,7 @@ pub fn parse_auto_route_rows(text: &str) -> Vec<AutoRoute> {
 }
 
 #[cfg(target_os = "windows")]
-fn sweep_routes_windows(result: &mut SweepResult) -> std::io::Result<()> {
+fn sweep_routes_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     // Look for the two split-default routes mihomo adds when auto-route is
     // on, then issue one `route delete` per matching row.
     let out = Command::new("route").creation_flags(CREATE_NO_WINDOW)
@@ -185,7 +192,7 @@ fn sweep_routes_windows(result: &mut SweepResult) -> std::io::Result<()> {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
-fn sweep_adapter_windows(result: &mut SweepResult) -> std::io::Result<()> {
+fn sweep_adapter_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     // Use `netsh interface show interface` to find a row whose name is
     // exactly "flexclash-tun". If found and the device is administratively
     // down, we delete it via `netsh interface set interface ... disabled`
@@ -232,8 +239,8 @@ fn sweep_adapter_windows(result: &mut SweepResult) -> std::io::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests (do not actually call netsh; just construct a fake SweepResult
-// to prove the contract is stable across the M7 -> M9 transition).
+// Tests (do not actually call netsh; just construct a fake SweepResultFull
+// to prove the wire contract is stable).
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -255,10 +262,12 @@ mod tests {
     }
 
     #[test]
-    fn sweep_result_field_layout_matches_m7() {
-        // The M7 frontend already keys off `ok` and `deleted`. Guard
-        // against accidental renames.
-        let r = SweepResult {
+    fn sweep_result_full_serialises_with_the_keys_the_ui_reads() {
+        // The renderer reads `deleted_routes` / `deleted_adapters` /
+        // `message` off `sweep_tun_routes` and `TunStatus.last_sweep`
+        // (`src/services/tun.ts`). Guard the field names against an
+        // accidental rename.
+        let r = SweepResultFull {
             deleted_routes: 0,
             deleted_adapters: 0,
             ok: true,
@@ -268,7 +277,7 @@ mod tests {
         assert!(v.get("deleted_routes").is_some());
         assert!(v.get("deleted_adapters").is_some());
         assert!(v.get("ok").is_some());
-        // Backward-compat alias for M7.
+        assert!(v.get("message").is_some());
         assert!(v.get("ok").unwrap().as_bool().unwrap());
     }
 

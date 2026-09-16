@@ -18,7 +18,7 @@ use crate::error::{AppError, Result};
 use crate::store::migrations;
 
 /// One row of aggregated history data. `ts` is the bucket START (epoch ms).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, specta::Type)]
 pub struct HistoryPoint {
     pub ts: i64,
     pub upload: i64,
@@ -27,7 +27,7 @@ pub struct HistoryPoint {
 
 /// Result of `query_history()`. The frontend renders `buckets` directly
 /// onto the chart; `totals` are shown as headline numbers.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TrafficHistory {
     pub range: String,
     pub bucket_ms: i64,

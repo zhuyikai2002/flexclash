@@ -35,7 +35,7 @@ pub const EXPECTED_CONTROLLER_PORT: u16 = 9091;
 // State types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum KernelState {
     #[default]

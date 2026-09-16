@@ -94,7 +94,7 @@ pub fn dir_for<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, AppError> {
 // ---------------------------------------------------------------------------
 
 /// Outcome of running the pipeline. Always carries usable YAML.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, specta::Type)]
 pub struct OverrideOutcome {
     /// What the caller should persist. Equal to the input when nothing applied
     /// or when the chain was discarded.

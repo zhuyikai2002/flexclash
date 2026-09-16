@@ -20,7 +20,7 @@ pub const DEFAULT_USER_AGENT: &str = "clash.meta/v1.18.0 FlexClash/0.1.0";
 
 /// Standard clash-meta / mihomo `subscription-userinfo` response header.
 /// Shape (per spec): `upload=NN; download=NN; total=NN; expire=UNIX_TS`
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, specta::Type)]
 pub struct SubscriptionUserInfo {
     pub upload: Option<u64>,
     pub download: Option<u64>,

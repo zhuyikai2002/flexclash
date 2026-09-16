@@ -155,23 +155,23 @@ pub fn apply_native_backdrop(_window: &tauri::WebviewWindow) {
 // `crate::core::route_guard`. The M7-era frontend contract (M7
 // `SweepResult { deleted: u32, ok: bool }`) is preserved so the existing
 // `sweep_residual_routes` Tauri command keeps returning the same shape.
-// The richer M9 SweepResult (routes + adapters + message) is also
+// The richer M9 `SweepResultFull` (routes + adapters + message) is also
 // re-exported here for any in-process Rust consumer (TUN manager) that
 // needs the full breakdown.
 // ============================================================================
 
-pub use crate::core::route_guard::SweepResult as SweepResultFull;
+pub use crate::core::route_guard::SweepResultFull;
 
 /// M7-shape sweep result kept stable for the `sweep_residual_routes`
 /// Tauri command. `deleted = deleted_routes + deleted_adapters`.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct SweepResult {
     pub deleted: u32,
     pub ok: bool,
 }
 
-impl From<crate::core::route_guard::SweepResult> for SweepResult {
-    fn from(r: crate::core::route_guard::SweepResult) -> Self {
+impl From<crate::core::route_guard::SweepResultFull> for SweepResult {
+    fn from(r: crate::core::route_guard::SweepResultFull) -> Self {
         SweepResult {
             deleted: r.deleted_routes.saturating_add(r.deleted_adapters),
             ok: r.ok,

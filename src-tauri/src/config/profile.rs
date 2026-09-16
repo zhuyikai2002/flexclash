@@ -17,7 +17,23 @@ use crate::events::KERNEL_LOG;
 // Wire types (serialised both to disk and to the frontend via Tauri)
 // ----------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A profile as the renderer sees it.
+///
+/// Serves double duty: it is the shape persisted in `index.json` **and** the
+/// return type of five Tauri commands (`list_profiles`, `get_active_profile`,
+/// `save_profile`, `import_profile_url` / `import_profile_file`,
+/// `rename_profile`).
+///
+/// The four quota/expiry fields used to carry
+/// `skip_serializing_if = "Option::is_none"`. That is gone: those attributes
+/// make serde emit a *different* shape depending on the value, which
+/// `tauri-specta` can only describe by splitting the type into
+/// `ProfileMeta_Serialize | ProfileMeta_Deserialize` — and that union is what
+/// `Option<ProfileMeta>` then inlines anonymously, leaving the renderer unable
+/// to name the result of `get_active_profile` at all. Plain `Option` writes an
+/// explicit `null` instead of dropping the key, which `#[serde(default)]`
+/// reads back as `None`, so old and new `index.json` files both round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ProfileMeta {
     /// Stable id (UUID v4 string) used in directory names and as the
     /// identifier in Tauri commands.
@@ -35,16 +51,16 @@ pub struct ProfileMeta {
     /// Absolute path to the on-disk yaml.
     pub file_path: String,
     /// Bytes used (download), if the subscription header reported it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub used_bytes: Option<u64>,
     /// Bytes remaining (total - used), if available.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub remaining_bytes: Option<u64>,
     /// Total quota, if available.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub total_bytes: Option<u64>,
     /// Expire timestamp (UTC), if the header reported one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expire_at: Option<DateTime<Utc>>,
 }
 
@@ -461,7 +477,7 @@ pub const TUN_AUTO_ROUTE_EXCLUDE: &[&str] = &["127.0.0.0/8"];
 /// [`Default`] impl is the canonical fallback for any caller that does not
 /// supply them, and must stay in sync with `TUN_ADVANCED_DEFAULTS` on the
 /// frontend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, specta::Type)]
 pub struct TunAdvanced {
     /// `tun.strict-route` — reject traffic that would escape the tunnel
     /// instead of leaking it out of the physical interface.
@@ -512,7 +528,7 @@ pub const TUN_DNS_NAMESERVERS: &[&str] = &["223.5.5.5", "119.29.29.29"];
 /// sees this — it is consumed by `core::tun::TunManager`. `changed: true`
 /// means a write to disk happened, `false` means the yaml was already in
 /// the desired state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TunPatchOutcome {
     pub changed: bool,
     pub enabled: bool,

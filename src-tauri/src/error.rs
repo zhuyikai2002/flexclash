@@ -1,8 +1,21 @@
 //! Unified application error type. Serializes to a plain string for the frontend.
+//!
+//! The `#[specta(type = String)]` below is load-bearing, not cosmetic. The
+//! hand-written `Serialize` at the bottom of this file emits
+//! `serialize_str(&self.to_string())` -- i.e. on the wire an `AppError` is a
+//! *string*, never a tagged object. Without this attribute specta would derive
+//! the shape from the enum itself and publish a tagged union
+//! (`{ Io: string } | ... | "NotRunning"`), so `bindings.ts` would describe a
+//! payload the backend never sends and every `typeof e === 'string'` guard in
+//! the renderer would look like dead code to the typechecker.
+//!
+//! If variant-level discrimination is ever wanted, change the wire format and
+//! this attribute together -- never one without the other.
 
 use serde::{Serialize, Serializer};
 
 #[derive(Debug, thiserror::Error, specta::Type)]
+#[specta(type = String)]
 pub enum AppError {
     #[error("io error: {0}")]
     Io(String),
