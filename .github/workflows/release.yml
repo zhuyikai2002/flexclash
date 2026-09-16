@@ -164,12 +164,15 @@ jobs:
           # to every existing install.
           draft: false
           prerelease: false
-          # Auto-generated from commits and merged PRs, so it can never ship a
-          # previous version's changelog. To publish the hand-written
-          # release_notes.md instead, drop this line and add
-          # `body_path: release_notes.md` -- but then it must be updated before
-          # every tag, since a stale file fails silently.
-          generate_release_notes: true
+          # Hand-written, curated release body. This workflow used to
+          # auto-generate it from commits (`generate_release_notes: true`);
+          # it now publishes the checked-in `release_notes.md` instead, so a
+          # release leads with the narrative that matters rather than a raw
+          # commit list. TRADE-OFF, stated plainly: this file MUST be updated
+          # before every tag -- a stale file fails *silently* and ships the
+          # previous release's notes. (To revert: drop this key and restore
+          # the line `generate_release_notes: true`.)
+          body_path: release_notes.md
           files: |
             src-tauri/target/release/bundle/nsis/FlexClash_*_x64-setup.exe
             src-tauri/target/release/bundle/nsis/FlexClash_*_x64-setup.exe.sig

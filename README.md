@@ -11,7 +11,7 @@
 [![Specta](https://img.shields.io/badge/IPC-Specta%20Type--Safe-blueviolet)](https://github.com/oscartbeaumont/specta)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4?logo=windows&logoColor=white)](#平台支持)
-[![Version](https://img.shields.io/badge/release-v0.3.0-success)](https://github.com/zhuyikai2002/flexclash/releases)
+[![Version](https://img.shields.io/badge/release-v0.4.0-success)](https://github.com/zhuyikai2002/flexclash/releases)
 
 <strong>Web 前端打包 ~100 KB gzip · 待机 CPU 趋近 0% · 编译期类型强契约 · 0 警告 0 类型错误</strong>
 
@@ -29,7 +29,7 @@
 
 ### 为什么选择 FlexClash？
 
-| 痛点 | 传统方案 | FlexClash (v0.3.0) |
+| 痛点 | 传统方案 | FlexClash (v0.4.0) |
 |------|----------|-------------------|
 | 资源常驻 | Electron 内存 ≥ 300 MB，后台易 OOM | Tauri 架构，待机内存低，CPU 趋近 0.0% |
 | 系统代理 | 单一系统绑定，切换易断网 | WinINET / GNOME gsettings 双平台原子切换 |
@@ -203,10 +203,10 @@ cd src-tauri && cargo check
 npm run tauri build
 ```
 
-### 产物参考 (v0.3.0)
+### 产物参考 (v0.4.0)
 
-- Windows NSIS 安装包：`src-tauri/target/release/bundle/nsis/FlexClash_0.3.0_x64-setup.exe` (~15.8 MB)
-- Windows MSI 企业包：`src-tauri/target/release/bundle/msi/FlexClash_0.3.0_x64_en-US.msi` (~22.1 MB)
+- Windows NSIS 安装包：`src-tauri/target/release/bundle/nsis/FlexClash_0.4.0_x64-setup.exe` (~15.8 MB)
+- Windows MSI 企业包：`src-tauri/target/release/bundle/msi/FlexClash_0.4.0_x64_en-US.msi` (~22.1 MB)
 
 ---
 
