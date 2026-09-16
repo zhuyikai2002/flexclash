@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlexClash — proxy-list bench (dev only)</title>
+    <script>
+      // Mirrors index.html: the app is dark-only and the dark canvas comes from
+      // `color-scheme`, so without this the bench renders on white and every
+      // translucent surface reads wrong.
+      document.documentElement.classList.add('dark')
+      document.documentElement.style.colorScheme = 'dark'
+    </script>
+  </head>
+  <body>
+    <div id="bench"></div>
+    <script type="module" src="/src/dev/proxy-bench.ts"></script>
+  </body>
+</html>
