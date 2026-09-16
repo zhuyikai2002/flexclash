@@ -35,16 +35,9 @@ on:
 permissions:
   contents: write
 
-env:
-  # Kept in one place. Update together with the digest below.
-  # See CONTRIBUTING.md > Development Setup: FlexClash does not redistribute
-  # mihomo, the sidecar is fetched at build time.
-  MIHOMO_VERSION: v1.19.30
-  # sha256 of the exe inside mihomo-windows-amd64-compatible-<version>.zip.
-  # The sidecar is a ~50MB third-party binary that ends up *inside* the
-  # installer, so a re-uploaded or substituted release asset must fail the
-  # build here instead of shipping to users.
-  MIHOMO_SHA256: 6ac25fcb26afe8e1bea24b6e6e80805bf884a33232d12e2d78dfa0b6c529ac14
+# The mihomo sidecar's pinned version and digest live in
+# `.github/actions/fetch-mihomo/action.yml`, which this workflow and `ci.yml`
+# both call. One pin, one place to audit.
 
 jobs:
   release:
@@ -98,44 +91,13 @@ jobs:
           # Keep the cache even when the build fails, so a fixed re-run is fast.
           cache-on-failure: true
 
+      # `cargo` (and therefore `tauri build`) fails with ResourcePathNotFound
+      # when `externalBin` resolves to a file that is not there, and the sidecar
+      # is gitignored, so it MUST be fetched on every run. Shared with `ci.yml`
+      # via this composite action so the pinned version + digest live in exactly
+      # one auditable place.
       - name: Fetch the mihomo sidecar
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $asset = "mihomo-windows-amd64-compatible-$env:MIHOMO_VERSION"
-          $url    = "https://github.com/MetaCubeX/mihomo/releases/download/$env:MIHOMO_VERSION/$asset.zip"
-          $dest   = 'src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe'
-
-          New-Item -ItemType Directory -Force -Path 'src-tauri/binaries' | Out-Null
-
-          Write-Host "downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile 'mihomo.zip'
-
-          $tmp = 'mihomo-extract'
-          Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-          Expand-Archive -LiteralPath 'mihomo.zip' -DestinationPath $tmp -Force
-
-          # The entry inside the archive is named after the asset
-          # (`mihomo-windows-amd64-compatible.exe`), NOT plain `mihomo.exe`, and
-          # the name differs per variant. Discover it rather than assume it --
-          # hardcoding `mihomo.exe` fails on every asset in this release.
-          $inner = Get-ChildItem -Path $tmp -Filter '*.exe' | Select-Object -First 1
-          if (-not $inner) { throw "no .exe inside $asset.zip" }
-
-          # The bundler resolves `externalBin: ["binaries/mihomo"]` to the
-          # target-triple file name. Anything else is simply not found.
-          Move-Item -LiteralPath $inner.FullName -Destination $dest -Force
-
-          $size = (Get-Item -LiteralPath $dest).Length
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLower()
-          Write-Host "sidecar: $dest ($size bytes)"
-          Write-Host "sha256 : $hash"
-
-          if ($hash -ne $env:MIHOMO_SHA256) {
-            throw "mihomo digest mismatch: expected $env:MIHOMO_SHA256, got $hash"
-          }
-          Write-Host 'sidecar digest verified'
+        uses: ./.github/actions/fetch-mihomo
 
       # Drop any bundle output a restored cache may have brought back. Without
       # this, `bundle/nsis/` can hold the previous release's installer, and the

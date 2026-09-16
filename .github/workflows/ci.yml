@@ -1,0 +1,88 @@
+# ============================================================================
+# ci.yml — the pull-request gate.
+#
+# Runs on every push to `main` and every PR targeting it. This is the check that
+# has to be green *before* a release: `release.yml` only fires once a `v*` tag is
+# pushed, so by the time it runs the commit is already on `main`. Without this
+# gate, a lint or test regression is only discovered by tagging -- at which point
+# the release is already half-built.
+#
+# `-D warnings` is the whole point of the clippy step. The zero-warning baseline
+# was established in 52e5308; denying warnings is what stops it from silently
+# eroding one `#[allow]`-free PR at a time.
+# ============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to the same branch or PR makes the in-flight run obsolete;
+  # cancelling it saves a runner rather than queueing behind stale work.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, test and type-check
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # The runner's host triple already is x86_64-pc-windows-msvc, so this
+          # is a no-op today. Pinned so the requirement is stated rather than
+          # merely implied by `runs-on`.
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The crate is NOT at the repository root. Left at its default (`.`)
+          # the action finds no Cargo.toml and silently caches nothing.
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      # Must run BEFORE any cargo invocation, and not only for the release
+      # build: `bundle.externalBin` is resolved by tauri-build's build script,
+      # which fails with `ResourcePathNotFound` when the sidecar is missing --
+      # so `cargo clippy` and `cargo test` need it too. The action carries the
+      # pinned mihomo version and digest.
+      - name: Fetch the mihomo sidecar
+        uses: ./.github/actions/fetch-mihomo
+
+      # `--all-targets` lints bins, integration tests and benches in addition to
+      # the lib, so the two files under `src-tauri/tests/` that are not executed
+      # below are still type-checked and lint-gated here.
+      - name: Clippy (warnings are errors)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust unit tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Frontend type-check
+        run: npx vue-tsc --noEmit
