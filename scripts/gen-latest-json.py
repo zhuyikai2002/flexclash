@@ -35,19 +35,51 @@ REPO = "https://github.com/zhuyikai2002/flexclash"
 # Keep in sync with `tauri.conf.json > plugins.updater.endpoints`.
 DOWNLOAD_BASE = f"{REPO}/releases/download"
 
-# NOTE: this is the changelog the in-app updater dialog shows. It is NOT
-# derived from `release_notes.md` or from `version`, so it MUST be rewritten
-# by hand on every release. A stale value ships the previous version's notes
-# to every user and fails silently -- there is no check that catches it.
-# Keep it to a few short clauses; long-form notes belong in release_notes.md.
-NOTES = (
-    "Feat (TUN): 「严格路由」与「DNS 劫持」进阶开关正式可用，支持状态持久化与"
-    "Mihomo 运行时配置热重载（PUT /configs?force=true）；"
-    "Fix (DNS): 修复 DNS 劫持参数仅拦截 UDP 的漏洞，补齐 tcp://any:53，"
-    "全面防范 DNS 泄漏；"
-    "Fix (UI): 抹除前端组件中的历史硬编码，关于页面与更新模块全面接入 "
-    "Tauri 运行时版本动态校验。"
-)
+# NOTE: the changelog the in-app updater dialog shows is DERIVED, not
+# hand-copied. It used to be a constant here that had to be rewritten by
+# hand on every release -- and the script itself warned that a stale value
+# ships the previous version's notes to every user and fails silently, with
+# no check to catch it. That warning was prophetic: v0.4.0 shipped with the
+# v0.2.5 text because the constant was never touched. The summary is now
+# extracted from release_notes.md (the same file `release.yml` publishes as
+# the release body), so there is exactly ONE place to maintain. See
+# `read_updater_notes` for the contract it enforces.
+UPDATER_NOTES_MAX = 400
+
+
+def read_updater_notes() -> str:
+    """Derive the short updater summary from `release_notes.md`.
+
+    Contract: every top-level numbered section heading (`## 1. Feat (...): ...`)
+    becomes one clause, joined with `；`. Numbered headings only -- the
+    un-numbered `## 兼容性说明` / `## 基础设施` boilerplate stays out.
+
+    Fails the run instead of guessing when the file has no such headings or
+    the derived summary is too long. A missing/oddly-shaped notes file must
+    break the release, not silently publish last version's text.
+    """
+    md = (ROOT / "release_notes.md").read_text(encoding="utf-8")
+    clauses = []
+    for line in md.splitlines():
+        m = re.match(r"^##\s+\d+\s*[.、)]\s*(.+?)\s*$", line)
+        if m:
+            clause = m.group(1).strip().rstrip("。")
+            if clause:
+                clauses.append(clause)
+    if not clauses:
+        sys.exit(
+            "release_notes.md has no '## N. Title' section headings; "
+            "cannot derive the updater notes. Add numbered sections or "
+            "update the summary by hand and restore a constant."
+        )
+    notes = "；".join(clauses) + "。"
+    if len(notes) > UPDATER_NOTES_MAX:
+        sys.exit(
+            f"derived updater notes are {len(notes)} chars (max "
+            f"{UPDATER_NOTES_MAX}); shorten the section headings in "
+            "release_notes.md -- long-form belongs in the body, not the dialog"
+        )
+    return notes
 
 
 def read_version() -> str:
@@ -83,7 +115,7 @@ def main() -> None:
 
     manifest = {
         "version": version,
-        "notes": NOTES,
+        "notes": read_updater_notes(),
         "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "platforms": {
             "windows-x86_64": {
