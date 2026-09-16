@@ -3,6 +3,7 @@
 //! Wires plugins, managed state and `#[tauri::command]` handlers.
 //! Mobile entry point is delegated to `main.rs`.
 
+pub mod bindings;
 mod commands;
 pub mod config;
 pub mod core;
@@ -29,61 +30,13 @@ pub fn run() {
     let silent_flag = SilentFlag::default();
     silent_flag.set(silent);
 
-    // Phase R2: export typed IPC bindings (commands → src/bindings.ts).
-    // Debug/dev builds rewrite the file on every start so the frontend
-    // types never drift; release keeps the last generated copy.
-    //
-    // NOTE: only the Mihomo façade + updater are registered here. The
-    // speed-test commands deliberately are **not** — they follow the plain
-    // `#[tauri::command]` + `safeInvoke` convention that tun / profile / proxy
-    // / kernel already use, with their payload types declared in
-    // `src/services/speedtest.ts`.
-    //
-    // The deciding factor is that this list is what generates
-    // `src/bindings.ts`, and that file is only rewritten when the app starts —
-    // so a command added here cannot be typechecked until someone launches the
-    // GUI. Commands whose results arrive over *events* (as the speed test's do)
-    // gain little from it anyway: specta types the command signature, not the
-    // event payloads. Keep the two conventions separate.
-    {
-        use tauri_specta::{collect_commands, Builder};
-
-        let _ = std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/.specta-ran.log"),
-            "started",
-        );
-
-        let specta = Builder::<tauri::Wry>::new()
-            .disable_serde_phases()
-            .commands(collect_commands![
-                commands::mihomo::get_mihomo_version,
-                commands::mihomo::get_mihomo_configs,
-                commands::mihomo::patch_mihomo_config,
-                commands::mihomo::reload_mihomo_config,
-                commands::mihomo::get_mihomo_proxies,
-                commands::mihomo::get_mihomo_proxy,
-                commands::mihomo::select_mihomo_proxy,
-                commands::mihomo::get_mihomo_proxy_delay,
-                commands::mihomo::get_mihomo_connections,
-                commands::mihomo::close_mihomo_connection,
-                commands::mihomo::close_all_mihomo_connections,
-                commands::mihomo::get_mihomo_rules,
-                commands::updater::check_update,
-                commands::updater::install_update,
-            ])
-            .typ::<crate::core::watcher::AppStateSnapshot>()
-            .typ::<crate::commands::updater::UpdateInfo>();
-
-        // Export TypeScript bindings to the frontend source tree.
-        let out_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/bindings.ts");
-        let handle = std::thread::spawn(move || {
-            specta.export(specta_typescript::Typescript::default(), out_path)
-        });
-        let _ = std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/.specta-export-err.log"),
-            format!("{:?}", handle.join()),
-        );
-    }
+    // The renderer-facing IPC surface — every command and every type that
+    // crosses the boundary — is declared once, in `bindings`. The dispatcher
+    // below is built from that same list, so registering a command and typing
+    // it are the same act and cannot drift apart. See `bindings.rs` for why
+    // this is not done with `tauri::generate_handler!` plus a parallel
+    // `collect_commands!`.
+    let builder = crate::bindings::builder();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -268,63 +221,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::kernel::start_kernel,
-            commands::kernel::stop_kernel,
-            commands::kernel::restart_kernel,
-            commands::kernel::get_kernel_state,
-            // Phase R1: Mihomo REST façade (frontend no longer hits 9091 directly)
-            commands::mihomo::get_mihomo_version,
-            commands::mihomo::get_mihomo_configs,
-            commands::mihomo::patch_mihomo_config,
-            commands::mihomo::reload_mihomo_config,
-            commands::mihomo::get_mihomo_proxies,
-            commands::mihomo::get_mihomo_proxy,
-            commands::mihomo::select_mihomo_proxy,
-            commands::mihomo::get_mihomo_proxy_delay,
-            commands::mihomo::get_mihomo_connections,
-            commands::mihomo::close_mihomo_connection,
-            commands::mihomo::close_all_mihomo_connections,
-            commands::mihomo::get_mihomo_rules,
-            // v0.3: Rust-native concurrent speed test (results stream over
-            // `proxy://delay-batch` / `proxy://delay-done`).
-            commands::speedtest::speed_test_group,
-            commands::speedtest::cancel_speed_test,
-            commands::updater::check_update,
-            commands::updater::install_update,
-            commands::profile::list_profiles,
-            commands::profile::get_active_profile,
-            commands::profile::get_profile_content,
-            commands::profile::save_profile,
-            commands::profile::delete_profile,
-            commands::profile::import_profile_url,
-            commands::profile::import_profile_file,
-            commands::profile::update_subscription,
-            commands::profile::set_active_profile,
-            commands::profile::rename_profile,
-            commands::profile::open_profile_in_editor,
-            commands::profile::reveal_profile_file,
-            commands::proxy::enable_system_proxy,
-            commands::proxy::disable_system_proxy,
-            commands::proxy::get_system_proxy_status,
-            commands::desktop::get_autostart_status,
-            commands::desktop::set_autostart,
-            commands::desktop::get_silent_autostart_status,
-            commands::desktop::set_silent_autostart,
-            commands::desktop::get_silent_flag,
-            commands::desktop::sweep_residual_routes,
-            commands::tun::get_tun_state,
-            commands::tun::enable_tun,
-            commands::tun::apply_tun_advanced,
-            commands::tun::disable_tun,
-            commands::tun::sweep_tun_routes,
-            // M10: traffic history (SQLite-backed)
-            commands::history::get_traffic_history,
-            commands::history::get_history_db_path,
-            commands::history::get_history_sample_count,
-            // Phase 8: outbound mode switcher + application reset
-            commands::reset::reset_application,
-        ])
+        .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running FlexClash");
 }

@@ -14,7 +14,6 @@
 // ============================================================================
 
 use serde_json::Value;
-use specta::specta;
 
 
 use crate::config::profile::RESERVED_CONTROLLER;
@@ -82,8 +81,8 @@ async fn mihomo_request(
 // Version / health
 // ---------------------------------------------------------------------------
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_version(
     
 ) -> CmdResult<String> {
@@ -94,8 +93,8 @@ pub async fn get_mihomo_version(
 // Configs (GET / PATCH / PUT)
 // ---------------------------------------------------------------------------
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_configs(
     
 ) -> CmdResult<String> {
@@ -103,8 +102,8 @@ pub async fn get_mihomo_configs(
 }
 
 /// PATCH /configs — outbound mode switch (`{"mode": "rule"}`), etc.
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn patch_mihomo_config(
     
     mode: String,
@@ -116,8 +115,8 @@ pub async fn patch_mihomo_config(
 
 /// PUT /configs — hot-reload. `path: None` reloads the current config;
 /// `Some(path)` loads that yaml file. `force` mirrors `?force=true`.
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn reload_mihomo_config(
     
     path: Option<String>,
@@ -142,8 +141,8 @@ pub async fn reload_mihomo_config(
 // Proxies
 // ---------------------------------------------------------------------------
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_proxies(
     
 ) -> CmdResult<String> {
@@ -151,8 +150,8 @@ pub async fn get_mihomo_proxies(
 }
 
 /// GET /proxies/{name} — single proxy / group read.
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_proxy(
     
     name: String,
@@ -167,8 +166,8 @@ pub async fn get_mihomo_proxy(
 /// sees a bare `null` payload it would crash on. A failed re-GET is NOT
 /// fatal: the switch already happened, so we degrade to `null` and the
 /// frontend falls back to optimistic state.
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn select_mihomo_proxy(
     
     group: String,
@@ -198,8 +197,8 @@ pub async fn select_mihomo_proxy(
 }
 
 /// GET /proxies/{name}/delay?url=…&timeout=…
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_proxy_delay(
     
     name: String,
@@ -221,16 +220,16 @@ pub async fn get_mihomo_proxy_delay(
 // Connections
 // ---------------------------------------------------------------------------
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_connections(
     
 ) -> CmdResult<String> {
     mihomo_request(reqwest::Method::GET, "/connections", None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
 }
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn close_mihomo_connection(
     
     id: String,
@@ -241,8 +240,8 @@ pub async fn close_mihomo_connection(
         .map(|_| ())
 }
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn close_all_mihomo_connections(
     
 ) -> CmdResult<()> {
@@ -255,8 +254,8 @@ pub async fn close_all_mihomo_connections(
 // Rules
 // ---------------------------------------------------------------------------
 
-#[specta]
 #[tauri::command]
+#[specta::specta]
 pub async fn get_mihomo_rules(
     
 ) -> CmdResult<String> {

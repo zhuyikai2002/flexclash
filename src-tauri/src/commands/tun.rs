@@ -45,6 +45,7 @@ fn advanced_from(strict_route: Option<bool>, dns_hijack: Option<bool>) -> TunAdv
 /// `tun://state-changed` event so the toggle always reflects the
 /// authoritative backend state.
 #[tauri::command]
+#[specta::specta]
 pub fn get_tun_state<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
     let mgr = app
         .try_state::<TunManager>()
@@ -65,7 +66,8 @@ pub fn get_tun_state<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
 /// arguments to camelCase, and pinning the convention here is what keeps the
 /// Rust parameter names and the `invoke` payload in `src/services/tun.ts`
 /// from silently drifting apart.
-#[tauri::command(rename_all = "snake_case")]
+#[tauri::command]
+#[specta::specta]
 pub fn enable_tun<R: Runtime>(
     app: AppHandle<R>,
     strict_route: Option<bool>,
@@ -93,7 +95,8 @@ pub fn enable_tun<R: Runtime>(
 /// correct file behind for the next start; the failure is logged rather than
 /// surfaced, because the persisted switch is not lost. With TUN off this is
 /// a no-op: there is no kernel holding the old yaml.
-#[tauri::command(rename_all = "snake_case")]
+#[tauri::command]
+#[specta::specta]
 pub async fn apply_tun_advanced<R: Runtime>(
     app: AppHandle<R>,
     strict_route: bool,
@@ -122,6 +125,7 @@ pub async fn apply_tun_advanced<R: Runtime>(
 /// Disable TUN. Symmetric to `enable_tun`; rolls forward even on
 /// partial failure (best-effort cleanup) and returns the final state.
 #[tauri::command]
+#[specta::specta]
 pub fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
     let mgr = app
         .try_state::<TunManager>()
@@ -136,6 +140,7 @@ pub fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
 /// Returns the M9 richer shape (`SweepResultFull`) so the UI can
 /// render routes + adapters separately.
 #[tauri::command]
+#[specta::specta]
 pub fn sweep_tun_routes(app: AppHandle) -> Result<crate::core::startup::SweepResultFull> {
     let _ = app; // reserved for future "scope to current app dir" logic
     Ok(crate::core::route_guard::sweep_residual_routes())

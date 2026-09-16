@@ -22,13 +22,13 @@ type CmdResult<T> = Result<T, AppError>;
 // Wire types (extra result shapes exposed to the frontend)
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct ReloadResult {
     pub status: ReloadStatus,
     pub detail: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ReloadStatus {
     /// mihomo was running and reload succeeded.
@@ -44,12 +44,14 @@ pub enum ReloadStatus {
 // ============================================================================
 
 #[tauri::command]
+#[specta::specta]
 pub fn list_profiles<R: Runtime>(app: AppHandle<R>) -> CmdResult<Vec<profile_ops::ProfileMeta>> {
     let storage = storage_for(&app)?;
     profile_ops::list_profiles(&storage)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_active_profile<R: Runtime>(
     app: AppHandle<R>,
 ) -> CmdResult<Option<profile_ops::ProfileMeta>> {
@@ -58,6 +60,7 @@ pub fn get_active_profile<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_profile_content<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -69,6 +72,7 @@ pub fn get_profile_content<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn save_profile<R: Runtime>(
     app: AppHandle<R>,
     id: Option<String>,
@@ -85,6 +89,7 @@ pub fn save_profile<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn delete_profile<R: Runtime>(app: AppHandle<R>, id: String) -> CmdResult<()> {
     let storage = storage_for(&app)?;
     profile_ops::delete_profile(&storage, &id)?;
@@ -93,6 +98,7 @@ pub fn delete_profile<R: Runtime>(app: AppHandle<R>, id: String) -> CmdResult<()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn import_profile_url<R: Runtime>(
     app: AppHandle<R>,
     url: String,
@@ -145,6 +151,7 @@ pub async fn import_profile_url<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn import_profile_file<R: Runtime>(
     app: AppHandle<R>,
     path: String,
@@ -166,6 +173,7 @@ pub fn import_profile_file<R: Runtime>(
 /// If the updated profile is the active one we additionally hot-reload
 /// mihomo so the new node list takes effect immediately.
 #[tauri::command]
+#[specta::specta]
 pub async fn update_subscription<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -265,6 +273,7 @@ pub async fn update_subscription<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_active_profile<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -431,6 +440,7 @@ pub(crate) async fn reload_via_controller(file_path: &str) -> Result<(), String>
 /// alone (its file name remains the id-derived directory), but the
 /// `ProfileIndex` is rewritten so the list reflects the new label.
 #[tauri::command]
+#[specta::specta]
 pub fn rename_profile<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -466,6 +476,7 @@ pub fn rename_profile<R: Runtime>(
 /// `ShellExecuteW` with the `edit` verb when the association supports
 /// it, falling back to the `open` verb.  No-op stub on non-Windows.
 #[tauri::command]
+#[specta::specta]
 pub fn open_profile_in_editor<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -489,6 +500,7 @@ pub fn open_profile_in_editor<R: Runtime>(
 /// what `explorer.exe /select,"path"` does under the hood.  Stub on
 /// non-Windows: prints the parent dir to stderr.
 #[tauri::command]
+#[specta::specta]
 pub fn reveal_profile_file<R: Runtime>(
     app: AppHandle<R>,
     id: String,

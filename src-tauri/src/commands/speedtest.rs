@@ -59,6 +59,7 @@ fn registry(app: &AppHandle) -> CmdResult<Arc<SpeedTestRegistry>> {
 /// Returns the run id. Every result carries it, so a client that superseded a
 /// run can drop the stragglers — and so can we.
 #[tauri::command]
+#[specta::specta]
 pub async fn speed_test_group(
     app: AppHandle,
     group: String,
@@ -91,6 +92,7 @@ pub async fn speed_test_group(
 /// `proxy://delay-done` with `cancelled: true`, so the UI always gets to clear
 /// its spinners.
 #[tauri::command]
+#[specta::specta]
 pub fn cancel_speed_test(app: AppHandle, group: String) -> CmdResult<()> {
     registry(&app)?.cancel(&group);
     Ok(())

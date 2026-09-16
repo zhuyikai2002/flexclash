@@ -57,7 +57,7 @@ use crate::proxy;
 
 type CmdResult<T> = Result<T>;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ResetReport {
     /// Items removed (for the success modal).
     pub removed_profiles: usize,
@@ -103,6 +103,7 @@ fn dir_size(dir: &Path) -> u64 {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reset_application<R: Runtime>(
     app: AppHandle<R>,
     handle: State<'_, SidecarHandle>,

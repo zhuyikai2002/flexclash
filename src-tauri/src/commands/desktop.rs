@@ -13,14 +13,14 @@ use crate::core::startup::{self, SilentFlag};
 use crate::core::task_autostart;
 use crate::error::{AppError, Result};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct AutostartStatus {
     pub enabled: bool,
     pub silent: bool,
 }
 
 /// Status of the elevated (Task Scheduler) autostart.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct SilentAutostartStatus {
     /// The logon task is registered.
     pub enabled: bool,
@@ -36,6 +36,7 @@ pub struct SilentAutostartStatus {
 /// Read the actual `HKCU\...\Run\FlexClash` state via the autostart plugin.
 /// Plugins store this under the app identifier on Windows.
 #[tauri::command]
+#[specta::specta]
 pub fn get_autostart_status<R: Runtime>(app: AppHandle<R>) -> AutostartStatus {
     let enabled = app
         .autolaunch()
@@ -61,6 +62,7 @@ pub fn get_autostart_status<R: Runtime>(app: AppHandle<R>) -> AutostartStatus {
 // stale frontend cannot create that state.
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_silent_autostart_status<R: Runtime>(app: AppHandle<R>) -> SilentAutostartStatus {
     SilentAutostartStatus {
         enabled: task_autostart::is_enabled(),
@@ -77,6 +79,7 @@ pub fn get_silent_autostart_status<R: Runtime>(app: AppHandle<R>) -> SilentAutos
 /// whereas the reverse order could leave both mechanisms armed and produce
 /// the double-launch the exclusion exists to prevent.
 #[tauri::command]
+#[specta::specta]
 pub fn set_silent_autostart<R: Runtime>(
     app: AppHandle<R>,
     enabled: bool,
@@ -111,6 +114,7 @@ pub fn set_silent_autostart<R: Runtime>(
 /// Enabling this also removes the elevated logon task, for the reason
 /// spelled out above.
 #[tauri::command]
+#[specta::specta]
 pub fn set_autostart<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<AutostartStatus> {
     let launcher = app.autolaunch();
     if enabled {
@@ -132,6 +136,7 @@ pub fn set_autostart<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<Aut
 
 /// Read the silent-launch flag (set once at boot from `argv`).
 #[tauri::command]
+#[specta::specta]
 pub fn get_silent_flag<R: Runtime>(app: AppHandle<R>) -> bool {
     app.try_state::<SilentFlag>()
         .map(|s| s.is_silent())
@@ -142,6 +147,7 @@ pub fn get_silent_flag<R: Runtime>(app: AppHandle<R>) -> bool {
 /// frontend can show "checked for leftover routes" feedback even when the
 /// real implementation is not yet wired in.
 #[tauri::command]
+#[specta::specta]
 pub fn sweep_residual_routes() -> startup::SweepResult {
     startup::sweep_residual_routes()
 }

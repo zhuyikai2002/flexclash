@@ -13,7 +13,7 @@ use crate::tray;
 
 type CmdResult<T> = Result<T, AppError>;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct ProxyToggleResult {
     pub enabled: bool,
     pub port: Option<u16>,
@@ -23,6 +23,7 @@ pub struct ProxyToggleResult {
 /// Turn the Windows system proxy on, pointing at `127.0.0.1:<port>`.
 /// If `port` is None we use mihomo's default mixed-port (7897).
 #[tauri::command]
+#[specta::specta]
 pub fn enable_system_proxy<R: Runtime>(
     app: AppHandle<R>,
     port: Option<u16>,
@@ -47,6 +48,7 @@ pub fn enable_system_proxy<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn disable_system_proxy<R: Runtime>(app: AppHandle<R>) -> CmdResult<ProxyToggleResult> {
     proxy::disable_system_proxy().map_err(AppError::Proxy)?;
     let _ = app.emit(
@@ -66,6 +68,7 @@ pub fn disable_system_proxy<R: Runtime>(app: AppHandle<R>) -> CmdResult<ProxyTog
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn get_system_proxy_status() -> CmdResult<Option<ProxyStatus>> {
     Ok(shutdown::current_system_proxy_state())
 }

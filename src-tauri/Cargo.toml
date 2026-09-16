@@ -10,6 +10,30 @@ rust-version = "1.77"
 name = "flexclash_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Regenerates `src/bindings.ts` without launching the GUI.
+#
+# `required-features` keeps it out of ordinary `cargo build` / `tauri build`
+# runs. That matters: the binary links the whole command graph (and therefore
+# the WebView2 / windows crate stack), so building it unconditionally would
+# add a second full binary -- and under `lto = true` + `codegen-units = 1` a
+# slow one -- to every release. CI enables the feature explicitly so the file
+# is still linted.
+#
+# A `[[bin]]` target is also the only place this may live. `tauri-build` links
+# its comctl32 v6 manifest with `cargo:rustc-link-arg-bins`, which covers every
+# bin target but *not* test targets; generating from a `#[cfg(test)]` helper
+# instead produces a test executable that fails to load with
+# STATUS_ENTRYPOINT_NOT_FOUND.
+[[bin]]
+name = "export-bindings"
+path = "src/bin/export-bindings.rs"
+required-features = ["export-bindings"]
+
+[features]
+# Opt-in marker for the `export-bindings` binary above. Enables no code by
+# itself -- it exists purely to gate that one target.
+export-bindings = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -38,7 +62,10 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["javascript", "typescript"] }
-specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
+# `chrono` supplies the `specta::Type` impls for `DateTime<Utc>`, which
+# `HistoryPoint.ts` and friends carry. Without it the IPC types cannot derive
+# `Type` at all.
+specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json", "chrono"] }
 specta-typescript = "0.0.12"
 tauri-plugin-updater = "2.0.0-rc.4"
 

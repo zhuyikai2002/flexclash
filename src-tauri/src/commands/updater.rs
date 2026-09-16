@@ -9,7 +9,6 @@
 
 use serde::Serialize;
 use specta::Type;
-use specta::specta;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -31,7 +30,7 @@ pub struct UpdateInfo {
 /// current version is already the latest. Network failures are surfaced as
 /// readable errors — never panics, never crashes the renderer.
 #[tauri::command]
-#[specta]
+#[specta::specta]
 pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
     let updater = app.updater().map_err(|e| e.to_string())?;
     match updater.check().await {
@@ -49,7 +48,7 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
 /// `updater://progress` with `{ downloaded, total }`; `total` may be null
 /// until the server reports a content length.
 #[tauri::command]
-#[specta]
+#[specta::specta]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater

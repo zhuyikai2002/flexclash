@@ -14,6 +14,7 @@ use crate::store::queries::{HistoryDb, TrafficHistory};
 /// The buckets are zero-filled so the frontend can render a continuous
 /// line even when the kernel was off for part of the window.
 #[tauri::command]
+#[specta::specta]
 pub fn get_traffic_history(
     db: State<'_, HistoryDb>,
     range: String,
@@ -24,6 +25,7 @@ pub fn get_traffic_history(
 /// Diagnostic: absolute path of the SQLite file. Used by the
 /// "where is my data stored?" line in the settings card.
 #[tauri::command]
+#[specta::specta]
 pub fn get_history_db_path(db: State<'_, HistoryDb>) -> String {
     db.path().to_string_lossy().into_owned()
 }
@@ -31,6 +33,7 @@ pub fn get_history_db_path(db: State<'_, HistoryDb>) -> String {
 /// Count of stored samples. Used by the live-monitor chip on the
 /// history view to show "currently buffering N rows".
 #[tauri::command]
+#[specta::specta]
 pub fn get_history_sample_count(db: State<'_, HistoryDb>) -> Result<i64> {
     db.count()
 }
