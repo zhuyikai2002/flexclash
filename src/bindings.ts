@@ -39,6 +39,16 @@ export const commands = {
 	closeMihomoConnection: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("close_mihomo_connection", { id })),
 	closeAllMihomoConnections: () => typedError<null, AppError>(__TAURI_INVOKE("close_all_mihomo_connections")),
 	getMihomoRules: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_rules")),
+	/**  Current state of the refresh pipeline. Cheap: one small JSON read. */
+	getGeodataStatus: () => typedError<GeoDataStatus, AppError>(__TAURI_INVOKE("get_geodata_status")),
+	/**
+	 *  Run one refresh cycle now.
+	 * 
+	 *  The scheduler will call the same routine in a later step; exposing it as a
+	 *  command is what lets the user force a check without waiting for the tick,
+	 *  and lets the pipeline be exercised end to end without a timer in the way.
+	 */
+	refreshGeodata: () => typedError<GeoRefreshReport, AppError>(__TAURI_INVOKE("refresh_geodata")),
 	/**
 	 *  Probe every node in `nodes` concurrently and stream the results.
 	 * 
@@ -268,6 +278,7 @@ export const commands = {
 /** Events */
 export const events = {
 	configRefreshPayload: makeEvent<ConfigRefreshPayload>("config-refresh-payload"),
+	geoDataUpdatedPayload: makeEvent<GeoDataUpdatedPayload>("geo-data-updated-payload"),
 	logBatch: makeEvent<LogBatch>("log-batch"),
 	trafficPayload: makeEvent<TrafficPayload>("traffic-payload"),
 };
@@ -341,6 +352,84 @@ export type DelayDone = {
 	ok: number,
 	failed: number,
 	cancelled: boolean,
+};
+
+/**  Everything the UI and the next cycle need to know about the pipeline. */
+export type GeoDataStatus = {
+	/**  When we last looked upstream, successfully or not. */
+	lastCheckAt: string | null,
+	/**  When the databases were last actually replaced. */
+	lastUpdateAt: string | null,
+	/**  The `id` of the source that last served us, for display. */
+	activeSource: string | null,
+	/**  That source's index — the sticky pin the next cycle starts from. */
+	sourceIndex: number,
+	/**  Digests of the databases currently in force. */
+	appliedSha256: GeoDigests,
+	/**
+	 *  The last failure, cleared by the next success. Doubles as the
+	 *  "was the previous cycle clean?" input to [`cycle_start_source`].
+	 */
+	lastError: string | null,
+};
+
+/**
+ *  The outcome of one geo-data refresh cycle.
+ * 
+ *  Emitted once per cycle, *including* the cycles that changed nothing, so the
+ *  UI can distinguish "checked, already current" from "not checked since
+ *  launch" — the status file alone cannot express that difference at a glance.
+ * 
+ *  `updated: false` covers both a no-op check and a failure; `last_error` on
+ *  the persisted status (surfaced through `get_geodata_status`) carries the
+ *  reason, so the event stays a small, non-fallible shape.
+ */
+export type GeoDataUpdatedPayload = {
+	/**  Whether at least one database was actually replaced. */
+	updated: boolean,
+	/**  The `id` of the source that served the cycle, when one was reached. */
+	source: string | null,
+	/**  Digest now in force for `GeoIP.dat`, if known. */
+	geoipSha256: string | null,
+	/**  Digest now in force for `GeoSite.dat`, if known. */
+	geositeSha256: string | null,
+	/**
+	 *  Bytes the kernel pulled from our staging server. The positive proof
+	 *  that the kernel really fetched; `0` on a no-op cycle.
+	 */
+	bytesServed: number,
+	/**  How many file requests the staging server answered. */
+	requests: number,
+	/**  Receipt time, as Unix epoch milliseconds. */
+	atMs: number,
+};
+
+/**  The digests we have actually applied, per artefact. */
+export type GeoDigests = {
+	geoip: string | null,
+	geosite: string | null,
+};
+
+/**
+ *  What one refresh cycle did — returned to the caller of `refresh_geodata`
+ *  and rendered in the settings card.
+ */
+export type GeoRefreshReport = {
+	/**  Whether at least one database was actually replaced. */
+	updated: boolean,
+	/**  The `id` of the source that served this cycle. */
+	source: string | null,
+	geoipSha256: string | null,
+	geositeSha256: string | null,
+	/**
+	 *  Bytes the kernel pulled from the staging server (`0` when it fetched
+	 *  nothing — see the enabled-flags note on `patch_mount_config`).
+	 */
+	bytesServed: number,
+	/**  How many `GET`s the staging server answered with a file. */
+	requests: number,
+	/**  One-line summary for the UI. */
+	detail: string,
 };
 
 /**  One row of aggregated history data. `ts` is the bucket START (epoch ms). */

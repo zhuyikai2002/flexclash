@@ -141,6 +141,53 @@ pub async fn reload_mihomo_config(path: Option<String>, force: Option<bool>) -> 
 }
 
 // ---------------------------------------------------------------------------
+// Geo databases (v0.4.x refresh pipeline)
+// ---------------------------------------------------------------------------
+
+/// A full `ApplyConfig` re-parses every provider and rebuilds every listener,
+/// so it is given far more room than a plain control call.
+const CONFIG_RELOAD_TIMEOUT_MS: u64 = 30_000;
+
+/// `PUT /configs?force=…` with `{"path": <file>}`.
+///
+/// This is the route mihomo uses to re-read a config *from disk*: its handler
+/// JSON-decodes `{path, payload}`, parses the file at `path` and calls
+/// `executor.ApplyConfig`. `path` must resolve under the user's home directory
+/// (`constant.Path.IsSafePath`), which the mihomo work dir does.
+///
+/// Note there is no partial-update route for `geox-url`: `PATCH /configs`
+/// accepts a fixed schema of ports / mode / tun / log-level and nothing else.
+/// Repointing the geo sources therefore requires handing over a whole config.
+pub(crate) async fn put_config_file(file: &std::path::Path, force: bool) -> Result<(), AppError> {
+    let body = serde_json::json!({ "path": file.to_string_lossy() });
+    mihomo_request(
+        reqwest::Method::PUT,
+        &format!("/configs?force={force}"),
+        Some(body),
+        CONFIG_RELOAD_TIMEOUT_MS,
+    )
+    .await
+    .map(|_| ())
+}
+
+/// `POST /configs/geo` — make the kernel re-fetch the geo databases from
+/// whatever `geox-url` currently points at, and drop its parsed-matcher
+/// caches.
+///
+/// This is the *only* thing that clears those caches. mihomo exposes no other
+/// REST entry point for it, and its own updater registers the clear
+/// (`defer ClearGeoIPCache()` / `ClearGeoSiteCache()`) on the branch where it
+/// actually downloaded something — which is precisely why the refreshed bytes
+/// must be served from somewhere *other* than mihomo's own database path.
+///
+/// Answers `204 No Content` on success, or `500` plus a JSON error body.
+pub(crate) async fn trigger_mihomo_geo_update(timeout_ms: u64) -> Result<(), AppError> {
+    mihomo_request(reqwest::Method::POST, "/configs/geo", None, timeout_ms)
+        .await
+        .map(|_| ())
+}
+
+// ---------------------------------------------------------------------------
 // Proxies
 // ---------------------------------------------------------------------------
 

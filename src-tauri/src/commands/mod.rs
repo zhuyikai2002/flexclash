@@ -1,4 +1,5 @@
 pub mod desktop;
+pub mod geodata;
 pub mod history;
 pub mod kernel;
 pub mod mihomo;

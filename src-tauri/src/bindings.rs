@@ -89,6 +89,9 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::commands::mihomo::close_mihomo_connection,
             crate::commands::mihomo::close_all_mihomo_connections,
             crate::commands::mihomo::get_mihomo_rules,
+            // -- geo databases (v0.4.x silent hot-refresh) -----------------
+            crate::commands::geodata::get_geodata_status,
+            crate::commands::geodata::refresh_geodata,
             // -- Rust-native speed test ------------------------------------
             // Results stream over `proxy://delay-batch` / `proxy://delay-done`;
             // only the start/cancel controls are commands.
@@ -180,6 +183,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::core::kernel_events::TrafficPayload,
             crate::core::kernel_events::LogBatch,
             crate::core::sidecar::ConfigRefreshPayload,
+            crate::core::kernel_events::GeoDataUpdatedPayload,
         ])
 }
 

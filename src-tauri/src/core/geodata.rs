@@ -49,6 +49,13 @@
 // digest cannot drift that way; an ETag can.
 // ============================================================================
 
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 use crate::error::{AppError, Result};
 
 /// Number of hex digits in a SHA-256 digest.
@@ -309,6 +316,473 @@ pub fn cycle_start_source(sticky: usize, primary_ok: bool) -> usize {
     } else {
         sticky
     }
+}
+
+// ---------------------------------------------------------------------------
+// Layout
+// ---------------------------------------------------------------------------
+
+/// Where every artefact of the refresh lives.
+///
+/// `kernel_*` is the directory mihomo was started with (`-d`): it resolves
+/// `GeoIP.dat` / `GeoSite.dat` directly inside it, so those two paths are
+/// mihomo's, not ours. `staging_*` is a directory we own, and the distinction
+/// is load-bearing rather than cosmetic — see `mount_config` below.
+pub struct GeoPaths {
+    work_dir: PathBuf,
+}
+
+impl GeoPaths {
+    pub fn new(work_dir: &Path) -> Self {
+        Self {
+            work_dir: work_dir.to_path_buf(),
+        }
+    }
+
+    /// `<work_dir>/geodata.json` — the persisted status.
+    pub fn status_file(&self) -> PathBuf {
+        self.work_dir.join("geodata.json")
+    }
+
+    /// `<work_dir>/geodata-mount.yaml` — the transient config handed to
+    /// mihomo's `PUT /configs` while the staging server is up. Written only
+    /// for the duration of a refresh and deleted afterwards.
+    pub fn mount_config(&self) -> PathBuf {
+        self.work_dir.join("geodata-mount.yaml")
+    }
+
+    /// `<work_dir>/config.yaml` — the live profile mihomo is running.
+    pub fn active_config(&self) -> PathBuf {
+        self.work_dir.join("config.yaml")
+    }
+
+    /// Our own copy of a verified database.
+    ///
+    /// Deliberately **not** the file mihomo reads. `UpdateGeoIp` compares the
+    /// hash of the file already on disk with the hash of what it downloaded
+    /// and returns early — *before* registering its `defer ClearGeoIPCache()`
+    /// — when they match. Landing the new bytes at mihomo's own path first
+    /// would therefore make the cache clear never run, and the kernel would
+    /// keep matching against the stale parsed matcher while every status
+    /// indicator said "updated". Keeping the master copy elsewhere guarantees
+    /// the hash mihomo computes differs from the one on disk.
+    pub fn staging_file(&self, file: GeoFile) -> PathBuf {
+        self.work_dir
+            .join("geodata-staging")
+            .join(file.asset_name())
+    }
+
+    /// The path mihomo resolves inside its `-d` directory.
+    pub fn kernel_file(&self, file: GeoFile) -> PathBuf {
+        self.work_dir.join(file.asset_name())
+    }
+
+    pub fn ensure_dirs(&self) -> Result<()> {
+        let staging = self.work_dir.join("geodata-staging");
+        std::fs::create_dir_all(&staging)
+            .map_err(|e| AppError::Io(format!("create {}: {e}", staging.display())))
+    }
+}
+
+impl GeoFile {
+    /// Both managed artefacts, in a stable order.
+    pub fn all() -> [GeoFile; 2] {
+        [GeoFile::Geoip, GeoFile::Geosite]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hashing / atomic writes
+// ---------------------------------------------------------------------------
+
+/// Lowercase hex SHA-256 of `bytes`.
+///
+/// Lowercase because that is what every published `.sha256sum` uses and what
+/// [`decide_if_update_needed`] normalises to.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        // Two lowercase hex digits per byte; `write!` into a String cannot
+        // fail, but the `fmt::Write` result is still discarded explicitly.
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{byte:02x}"));
+    }
+    out
+}
+
+/// SHA-256 of a file, or `None` when it cannot be read.
+///
+/// Reads the whole file: the pair is ~21 MB, which is the same order as what
+/// mihomo itself holds while validating, and streaming would buy nothing.
+pub fn sha256_file(path: &Path) -> Option<String> {
+    std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes))
+}
+
+/// Write `bytes` to `path` via a sibling temp file plus a rename.
+///
+/// `fs::rename` is atomic on the same volume, so a reader either sees the
+/// whole old file or the whole new one — never a truncated database. Mihomo's
+/// own `safeWrite` is a plain `os.WriteFile`; ours is deliberately stronger.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Io(format!("create {}: {e}", parent.display())))?;
+    }
+    let tmp = path.with_extension(format!(
+        "{}.fc-tmp",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")
+    ));
+    std::fs::write(&tmp, bytes)
+        .map_err(|e| AppError::Io(format!("write {}: {e}", tmp.display())))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        // Best effort: a leftover temp file is noise, not a failure to report.
+        let _ = std::fs::remove_file(&tmp);
+        AppError::Io(format!(
+            "rename {} -> {}: {e}",
+            tmp.display(),
+            path.display()
+        ))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
+/// The digests we have actually applied, per artefact.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoDigests {
+    pub geoip: Option<String>,
+    pub geosite: Option<String>,
+}
+
+impl GeoDigests {
+    /// The digest recorded for one artefact.
+    pub fn get(&self, file: GeoFile) -> Option<&str> {
+        match file {
+            GeoFile::Geoip => self.geoip.as_deref(),
+            GeoFile::Geosite => self.geosite.as_deref(),
+        }
+    }
+
+    /// Record the digest now in force for one artefact.
+    pub fn set(&mut self, file: GeoFile, digest: String) {
+        match file {
+            GeoFile::Geoip => self.geoip = Some(digest),
+            GeoFile::Geosite => self.geosite = Some(digest),
+        }
+    }
+}
+
+/// Everything the UI and the next cycle need to know about the pipeline.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoDataStatus {
+    /// When we last looked upstream, successfully or not.
+    pub last_check_at: Option<DateTime<Utc>>,
+    /// When the databases were last actually replaced.
+    pub last_update_at: Option<DateTime<Utc>>,
+    /// The `id` of the source that last served us, for display.
+    pub active_source: Option<String>,
+    /// That source's index — the sticky pin the next cycle starts from.
+    pub source_index: u32,
+    /// Digests of the databases currently in force.
+    pub applied_sha256: GeoDigests,
+    /// The last failure, cleared by the next success. Doubles as the
+    /// "was the previous cycle clean?" input to [`cycle_start_source`].
+    pub last_error: Option<String>,
+}
+
+pub fn read_status(path: &Path) -> GeoDataStatus {
+    // A missing or unreadable status file is not an error: it is exactly the
+    // first run. `Default` is the honest answer.
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub fn write_status(path: &Path, status: &GeoDataStatus) -> Result<()> {
+    let body = serde_json::to_string_pretty(status)
+        .map_err(|e| AppError::Geo(format!("serialise geodata status: {e}")))?;
+    atomic_write(path, body.as_bytes())
+}
+
+/// What one refresh cycle did — returned to the caller of `refresh_geodata`
+/// and rendered in the settings card.
+#[derive(Clone, Debug, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoRefreshReport {
+    /// Whether at least one database was actually replaced.
+    pub updated: bool,
+    /// The `id` of the source that served this cycle.
+    pub source: Option<String>,
+    pub geoip_sha256: Option<String>,
+    pub geosite_sha256: Option<String>,
+    /// Bytes the kernel pulled from the staging server (`0` when it fetched
+    /// nothing — see the enabled-flags note on `patch_mount_config`).
+    pub bytes_served: u64,
+    /// How many `GET`s the staging server answered with a file.
+    pub requests: u64,
+    /// One-line summary for the UI.
+    pub detail: String,
+}
+
+// ---------------------------------------------------------------------------
+// Mount config
+// ---------------------------------------------------------------------------
+
+/// The two rules that keep our own loopback fetch off the proxy.
+///
+/// Load-bearing, not defensive noise. mihomo fetches geo data through
+/// `component/http`, whose dialer hands the destination to `inner.HandleTcp`
+/// — i.e. through the **tunnel's rule matcher** — before falling back to a
+/// direct dial. A profile whose rules have no loopback entry lets
+/// `127.0.0.1:<port>` fall through to its catch-all `MATCH,PROXY`, and the
+/// fetch is then sent to a proxy node instead of to us. Remote nodes fail on
+/// their own loopback; a node that happens to run on this very machine would
+/// silently relay the request. Prepending a DIRECT rule removes the ambiguity.
+///
+/// Identical to what the bundled default already ships, and applied only to
+/// the transient mount config — the profile on disk is never rewritten.
+const LOOPBACK_BYPASS_RULES: [&str; 2] = [
+    "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+    "IP-CIDR6,::1/128,DIRECT,no-resolve",
+];
+
+/// Produce the config mihomo should run *while the staging server is up*:
+/// the active profile with `geox-url` repointed at loopback.
+///
+/// A `None` URL leaves that entry exactly as the profile had it. That matters
+/// because the kernel fetches **every** enabled geo artefact on one trigger:
+/// pointing `geoip` at a server that does not serve `/GeoIP.dat` would turn a
+/// geosite-only refresh into a `500`. Only entries we can actually serve —
+/// plus `mmdb` / `asn`, which we deliberately never repoint: in `geodata-mode`
+/// the MMDB path is unused, ASN only runs when the profile carries an ASN
+/// rule, and neither is something we have verified or staged.
+pub fn patch_mount_config(
+    active_yaml: &str,
+    geoip_url: Option<&str>,
+    geosite_url: Option<&str>,
+) -> Result<String> {
+    let mut root: serde_yaml::Value = serde_yaml::from_str(active_yaml)
+        .map_err(|e| AppError::Config(format!("active config is not valid YAML: {e}")))?;
+    let mapping = root
+        .as_mapping_mut()
+        .ok_or_else(|| AppError::Config("active config root is not a YAML mapping".into()))?;
+
+    let mut geox = mapping
+        .get("geox-url")
+        .and_then(|v| v.as_mapping())
+        .cloned()
+        .unwrap_or_default();
+    for (key, url) in [("geoip", geoip_url), ("geosite", geosite_url)] {
+        if let Some(url) = url {
+            geox.insert(
+                serde_yaml::Value::String(key.into()),
+                serde_yaml::Value::String(url.into()),
+            );
+        }
+    }
+    mapping.insert(
+        serde_yaml::Value::String("geox-url".into()),
+        serde_yaml::Value::Mapping(geox),
+    );
+
+    ensure_loopback_bypass(mapping);
+
+    serde_yaml::to_string(&root)
+        .map_err(|e| AppError::Config(format!("serialise mount config: {e}")))
+}
+
+fn ensure_loopback_bypass(mapping: &mut serde_yaml::Mapping) {
+    let Some(serde_yaml::Value::Sequence(rules)) = mapping.get_mut("rules") else {
+        // No `rules:` sequence to prepend to. Nothing sensible to do — mihomo
+        // will reject the config anyway if it has no rules at all.
+        return;
+    };
+    let already_covered = rules.iter().any(|rule| {
+        rule.as_str()
+            .is_some_and(|line| line.contains("127.0.0.0/8") && line.contains("DIRECT"))
+    });
+    if already_covered {
+        return;
+    }
+    let mut prefixed: Vec<serde_yaml::Value> = LOOPBACK_BYPASS_RULES
+        .iter()
+        .map(|line| serde_yaml::Value::String((*line).into()))
+        .collect();
+    prefixed.append(rules);
+    *rules = prefixed;
+}
+
+// ---------------------------------------------------------------------------
+// Transfer
+// ---------------------------------------------------------------------------
+
+/// One artefact that needs downloading, with the digest it must hash to.
+#[derive(Clone, Debug)]
+pub struct PlannedFile {
+    pub sha256: String,
+    pub url: String,
+}
+
+/// What a cycle intends to do.
+#[derive(Clone, Debug)]
+pub struct UpdatePlan {
+    pub source_index: usize,
+    pub geoip: Option<PlannedFile>,
+    pub geosite: Option<PlannedFile>,
+}
+
+impl UpdatePlan {
+    pub fn file(&self, file: GeoFile) -> Option<&PlannedFile> {
+        match file {
+            GeoFile::Geoip => self.geoip.as_ref(),
+            GeoFile::Geosite => self.geosite.as_ref(),
+        }
+    }
+
+    /// True when both databases already match upstream.
+    pub fn is_noop(&self) -> bool {
+        self.geoip.is_none() && self.geosite.is_none()
+    }
+}
+
+/// A client with sane bounds for a 21 MB pair.
+///
+/// The timeout is per request rather than per transfer: the sidecars are
+/// bytes and the databases are megabytes, and both must finish inside it.
+pub fn geo_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| AppError::Geo(format!("build geo http client: {e}")))
+}
+
+const HTTP_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// A cap on what we will accept from a source. The real files are ~21 MB
+/// combined; anything past this is a misbehaving endpoint, not a database.
+const MAX_DOWNLOAD_BYTES: usize = 256 * 1024 * 1024;
+
+async fn http_get_text(client: &reqwest::Client, url: &str) -> Result<String> {
+    let bytes = http_get_bytes(client, url).await?;
+    String::from_utf8(bytes).map_err(|e| AppError::Geo(format!("{url} is not UTF-8: {e}")))
+}
+
+async fn http_get_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| AppError::Geo(format!("GET {url}: {e}")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(AppError::Geo(format!("GET {url}: HTTP {status}")));
+    }
+    let mut resp = resp;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let chunk = resp
+            .chunk()
+            .await
+            .map_err(|e| AppError::Geo(format!("read {url}: {e}")))?;
+        let Some(chunk) = chunk else { break };
+        if buf.len() + chunk.len() > MAX_DOWNLOAD_BYTES {
+            return Err(AppError::Geo(format!(
+                "{url} exceeded {MAX_DOWNLOAD_BYTES} bytes"
+            )));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    if buf.is_empty() {
+        return Err(AppError::Geo(format!("{url} returned an empty body")));
+    }
+    Ok(buf)
+}
+
+/// Ask one source what needs doing, without downloading any database.
+///
+/// Two cheap sidecar reads decide everything. Any failure — transport, HTTP
+/// status, an unparseable checksum — fails the *source*, which is what makes
+/// the caller's failover meaningful: we only move on when this upstream
+/// cannot answer, never when it simply has nothing new.
+pub async fn plan_update(
+    client: &reqwest::Client,
+    index: usize,
+    status: &GeoDataStatus,
+    paths: &GeoPaths,
+) -> Result<UpdatePlan> {
+    let src =
+        source(index).ok_or_else(|| AppError::Geo(format!("source index {index} out of range")))?;
+    let mut plan = UpdatePlan {
+        source_index: index,
+        geoip: None,
+        geosite: None,
+    };
+
+    for file in GeoFile::all() {
+        let Some((_, db_url, sum_url)) = src.files().into_iter().find(|(k, _, _)| *k == file)
+        else {
+            return Err(AppError::Geo(format!(
+                "source {} has no entry for {file:?}",
+                src.id
+            )));
+        };
+        let raw = http_get_text(client, sum_url).await?;
+        let published = parse_sha256sum(&raw)?;
+        let applied = status.applied_sha256.get(file);
+
+        match decide_if_update_needed(&published.sha256, applied) {
+            UpdateDecision::UpToDate => continue,
+            UpdateDecision::Unknown => {
+                // No applied digest on record — almost always a first run on a
+                // machine whose database mihomo already downloaded. Resolve it
+                // against the file itself rather than pulling 21 MB to learn
+                // that nothing changed.
+                if sha256_file(&paths.kernel_file(file))
+                    .is_some_and(|disk| disk.eq_ignore_ascii_case(&published.sha256))
+                {
+                    continue;
+                }
+            }
+            UpdateDecision::NeedsUpdate => {}
+        }
+
+        let planned = PlannedFile {
+            sha256: published.sha256,
+            url: db_url.to_string(),
+        };
+        match file {
+            GeoFile::Geoip => plan.geoip = Some(planned),
+            GeoFile::Geosite => plan.geosite = Some(planned),
+        }
+    }
+
+    Ok(plan)
+}
+
+/// Download a database and refuse it unless it hashes to `expected`.
+///
+/// Verification happens before anything is written anywhere, so a truncated
+/// or substituted response cannot reach the staging directory at all.
+pub async fn download_verified(
+    client: &reqwest::Client,
+    url: &str,
+    expected_sha256: &str,
+) -> Result<Vec<u8>> {
+    let bytes = http_get_bytes(client, url).await?;
+    let got = sha256_hex(&bytes);
+    if !got.eq_ignore_ascii_case(expected_sha256) {
+        return Err(AppError::Geo(format!(
+            "{url} failed verification: expected {expected_sha256}, got {got}"
+        )));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -619,5 +1093,318 @@ mod tests {
         assert!(source(0).is_some());
         assert!(source(SOURCES.len() - 1).is_some());
         assert!(source(SOURCES.len()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    /// Same fixture digest the policy tests use.
+    const DIGEST_A: &str = "e8fba6c888d7bf13b4cfcab2b4d3cf7c355a9a2f4d94ee34c9ccfc00730bb389";
+
+    const ACTIVE: &str = "mixed-port: 7897\n\
+                          mode: rule\n\
+                          proxies:\n  - name: a\n    type: ss\n\
+                          rules:\n  - MATCH,PROXY\n";
+
+    fn mount(yaml: &str) -> serde_yaml::Value {
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
+    // -- sha256 ------------------------------------------------------------
+
+    #[test]
+    fn sha256_matches_the_published_test_vector() {
+        // FIPS 180-2 / the canonical "abc" vector.
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        // Lowercase, always — the digest is compared against `.sha256sum`
+        // files and against `applied_sha256` from our own JSON.
+        assert!(sha256_hex(b"abc").chars().all(|c| !c.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn sha256_file_is_none_for_a_missing_path() {
+        let missing = std::env::temp_dir().join("flexclash-no-such-geo-file.dat");
+        assert_eq!(sha256_file(&missing), None);
+    }
+
+    // -- atomic_write ------------------------------------------------------
+
+    #[test]
+    fn atomic_write_replaces_content_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("fc-geo-at-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("GeoIP.dat");
+
+        atomic_write(&target, b"first").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"first");
+
+        // A second write must replace, not append.
+        atomic_write(&target, b"second").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"second");
+
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "GeoIP.dat")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {leftovers:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- status ------------------------------------------------------------
+
+    #[test]
+    fn status_defaults_when_the_file_is_absent_or_corrupt() {
+        let missing = std::env::temp_dir().join("flexclash-no-such-geodata.json");
+        let status = read_status(&missing);
+        assert!(status.last_check_at.is_none());
+        assert_eq!(status.source_index, 0);
+        assert_eq!(status.applied_sha256, GeoDigests::default());
+
+        let dir = std::env::temp_dir().join(format!("fc-geo-st-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let corrupt = dir.join("geodata.json");
+        std::fs::write(&corrupt, b"not json at all").unwrap();
+        // A corrupt status file degrades to a first run rather than failing
+        // the refresh outright.
+        assert_eq!(read_status(&corrupt).source_index, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn status_round_trips_through_disk() {
+        let dir = std::env::temp_dir().join(format!("fc-geo-rt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("geodata.json");
+
+        let mut status = GeoDataStatus {
+            last_check_at: Some(Utc::now()),
+            active_source: Some("jsdelivr-cdn".into()),
+            source_index: 1,
+            ..Default::default()
+        };
+        status
+            .applied_sha256
+            .set(GeoFile::Geosite, DIGEST_A.to_string());
+        write_status(&path, &status).unwrap();
+
+        let back = read_status(&path);
+        assert_eq!(back.active_source.as_deref(), Some("jsdelivr-cdn"));
+        assert_eq!(back.source_index, 1);
+        assert_eq!(back.applied_sha256.geosite.as_deref(), Some(DIGEST_A));
+        assert!(back.applied_sha256.geoip.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn digests_are_keyed_by_file() {
+        let mut d = GeoDigests::default();
+        d.set(GeoFile::Geoip, "aa".into());
+        assert_eq!(d.get(GeoFile::Geoip), Some("aa"));
+        assert_eq!(d.get(GeoFile::Geosite), None);
+        d.set(GeoFile::Geosite, "bb".into());
+        assert_eq!(d.geoip.as_deref(), Some("aa"));
+        assert_eq!(d.geosite.as_deref(), Some("bb"));
+    }
+
+    // -- patch_mount_config ------------------------------------------------
+
+    #[test]
+    fn mount_config_points_geox_url_at_the_staging_server() {
+        let out = patch_mount_config(
+            ACTIVE,
+            Some("http://127.0.0.1:5001/GeoIP.dat"),
+            Some("http://127.0.0.1:5001/GeoSite.dat"),
+        )
+        .unwrap();
+        let doc = mount(&out);
+        let geox = doc
+            .as_mapping()
+            .unwrap()
+            .get("geox-url")
+            .and_then(|v| v.as_mapping())
+            .expect("geox-url must be written");
+        let get = |k: &str| {
+            geox.get(serde_yaml::Value::String(k.into()))
+                .and_then(|v| v.as_str())
+        };
+        assert_eq!(get("geoip"), Some("http://127.0.0.1:5001/GeoIP.dat"));
+        assert_eq!(get("geosite"), Some("http://127.0.0.1:5001/GeoSite.dat"));
+        // `mmdb` / `asn` are deliberately left alone — we have neither
+        // verified nor staged them.
+        assert_eq!(get("mmdb"), None);
+        assert_eq!(get("asn"), None);
+    }
+
+    #[test]
+    fn mount_config_preserves_the_rest_of_the_profile() {
+        let out = patch_mount_config(
+            ACTIVE,
+            Some("http://127.0.0.1:1/a"),
+            Some("http://127.0.0.1:1/b"),
+        )
+        .unwrap();
+        assert!(out.contains("mixed-port: 7897"), "{out}");
+        assert!(out.contains("name: a"), "proxies lost:\n{out}");
+        assert!(out.contains("MATCH,PROXY"), "rules lost:\n{out}");
+    }
+
+    #[test]
+    fn mount_config_prepends_the_loopback_bypass_when_absent() {
+        let out = patch_mount_config(
+            ACTIVE,
+            Some("http://127.0.0.1:1/a"),
+            Some("http://127.0.0.1:1/b"),
+        )
+        .unwrap();
+        let doc = mount(&out);
+        let rules = doc
+            .as_mapping()
+            .unwrap()
+            .get("rules")
+            .and_then(|v| v.as_sequence())
+            .expect("rules preserved");
+        // Our two bypass rules come first so they win over any catch-all.
+        assert_eq!(
+            rules[0].as_str(),
+            Some("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve")
+        );
+        assert_eq!(
+            rules[1].as_str(),
+            Some("IP-CIDR6,::1/128,DIRECT,no-resolve")
+        );
+        assert_eq!(rules[2].as_str(), Some("MATCH,PROXY"));
+        assert_eq!(rules.len(), 3);
+    }
+
+    #[test]
+    fn mount_config_does_not_duplicate_an_existing_loopback_rule() {
+        let yaml = "mixed-port: 7897\n\
+                    rules:\n  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve\n  - MATCH,PROXY\n";
+        let out = patch_mount_config(
+            yaml,
+            Some("http://127.0.0.1:1/a"),
+            Some("http://127.0.0.1:1/b"),
+        )
+        .unwrap();
+        let doc = mount(&out);
+        let rules = doc
+            .as_mapping()
+            .unwrap()
+            .get("rules")
+            .and_then(|v| v.as_sequence())
+            .unwrap();
+        // Unchanged: the profile already routes loopback direct.
+        assert_eq!(rules.len(), 2);
+        assert_eq!(
+            rules[0].as_str(),
+            Some("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve")
+        );
+    }
+
+    #[test]
+    fn mount_config_without_a_rules_block_is_left_alone() {
+        // No `rules:` sequence to prepend to — must not invent one, and must
+        // not panic.
+        let out = patch_mount_config(
+            "mixed-port: 7897\n",
+            Some("http://127.0.0.1:1/a"),
+            Some("http://127.0.0.1:1/b"),
+        )
+        .unwrap();
+        let doc = mount(&out);
+        assert!(doc.as_mapping().unwrap().get("geox-url").is_some());
+        assert!(doc.as_mapping().unwrap().get("rules").is_none());
+    }
+
+    #[test]
+    fn mount_config_rejects_a_non_mapping_profile() {
+        assert!(patch_mount_config("- just\n- a\n- list\n", Some("a"), Some("b")).is_err());
+        assert!(patch_mount_config("", Some("a"), Some("b")).is_err());
+    }
+
+    #[test]
+    fn mount_config_leaves_unserved_entries_alone() {
+        // A geosite-only refresh must not repoint `geoip` at a server that
+        // cannot serve it: the kernel fetches every enabled artefact on one
+        // trigger, so a 404 there fails the whole cycle.
+        let out = patch_mount_config(ACTIVE, None, Some("http://127.0.0.1:7/b")).unwrap();
+        let doc = mount(&out);
+        let geox = doc
+            .as_mapping()
+            .unwrap()
+            .get("geox-url")
+            .and_then(|v| v.as_mapping())
+            .unwrap();
+        let get = |k: &str| {
+            geox.get(serde_yaml::Value::String(k.into()))
+                .and_then(|v| v.as_str())
+        };
+        assert_eq!(get("geoip"), None, "geoip must be left as-is:\n{out}");
+        assert_eq!(get("geosite"), Some("http://127.0.0.1:7/b"));
+    }
+
+    #[test]
+    fn mount_config_replaces_preexisting_geox_url_values() {
+        let yaml = "mixed-port: 7897\n\
+                    geox-url:\n  geoip: https://example.invalid/geoip.dat\n  geosite: https://example.invalid/geosite.dat\n\
+                    rules:\n  - MATCH,PROXY\n";
+        let out = patch_mount_config(
+            yaml,
+            Some("http://127.0.0.1:9/a"),
+            Some("http://127.0.0.1:9/b"),
+        )
+        .unwrap();
+        let doc = mount(&out);
+        let geox = doc
+            .as_mapping()
+            .unwrap()
+            .get("geox-url")
+            .and_then(|v| v.as_mapping())
+            .unwrap();
+        let get = |k: &str| {
+            geox.get(serde_yaml::Value::String(k.into()))
+                .and_then(|v| v.as_str())
+        };
+        assert_eq!(get("geoip"), Some("http://127.0.0.1:9/a"));
+        assert_eq!(get("geosite"), Some("http://127.0.0.1:9/b"));
+        assert!(
+            !out.contains("example.invalid"),
+            "stale url survived:\n{out}"
+        );
+    }
+
+    // -- paths -------------------------------------------------------------
+
+    #[test]
+    fn staging_and_kernel_paths_never_collide() {
+        let work = std::path::Path::new("C:/tmp/whatever");
+        let paths = GeoPaths::new(work);
+        for file in GeoFile::all() {
+            let staging = paths.staging_file(file);
+            let kernel = paths.kernel_file(file);
+            assert_ne!(staging, kernel, "staging must not shadow mihomo's own path");
+            assert!(staging.ends_with(file.asset_name()));
+            assert!(kernel.ends_with(file.asset_name()));
+            // The kernel path is a direct child of the work dir, which is
+            // where mihomo resolves its databases.
+            assert_eq!(kernel.parent(), Some(work));
+            assert_ne!(staging.parent(), Some(work));
+        }
     }
 }

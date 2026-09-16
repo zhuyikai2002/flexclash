@@ -68,6 +68,13 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 # would be pure dead weight.
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "handshake"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# SHA-256 for the geo-data transfer half (`core/geodata`). The change detector
+# is a content digest, not an HTTP validator: the primary source is a GitHub
+# release asset whose 302 carries no ETag at all, and jsDelivr's ETag is issued
+# per edge node rather than derived from the bytes (measured -- see the module
+# docs). A content digest cannot drift that way. `sha2` is pure Rust with no
+# build script, so it costs nothing at link time beyond itself.
+sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }

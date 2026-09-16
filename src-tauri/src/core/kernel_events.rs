@@ -113,3 +113,32 @@ pub struct LogPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
 #[serde(transparent)]
 pub struct LogBatch(pub Vec<LogPayload>);
+
+/// The outcome of one geo-data refresh cycle.
+///
+/// Emitted once per cycle, *including* the cycles that changed nothing, so the
+/// UI can distinguish "checked, already current" from "not checked since
+/// launch" — the status file alone cannot express that difference at a glance.
+///
+/// `updated: false` covers both a no-op check and a failure; `last_error` on
+/// the persisted status (surfaced through `get_geodata_status`) carries the
+/// reason, so the event stays a small, non-fallible shape.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoDataUpdatedPayload {
+    /// Whether at least one database was actually replaced.
+    pub updated: bool,
+    /// The `id` of the source that served the cycle, when one was reached.
+    pub source: Option<String>,
+    /// Digest now in force for `GeoIP.dat`, if known.
+    pub geoip_sha256: Option<String>,
+    /// Digest now in force for `GeoSite.dat`, if known.
+    pub geosite_sha256: Option<String>,
+    /// Bytes the kernel pulled from our staging server. The positive proof
+    /// that the kernel really fetched; `0` on a no-op cycle.
+    pub bytes_served: u64,
+    /// How many file requests the staging server answered.
+    pub requests: u64,
+    /// Receipt time, as Unix epoch milliseconds.
+    pub at_ms: i64,
+}
