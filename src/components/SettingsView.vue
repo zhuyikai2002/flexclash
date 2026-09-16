@@ -26,11 +26,12 @@ import { useProxyStore } from '@/stores/proxy'
 import { useDesktopStore } from '@/stores/desktop'
 import { useTunStore } from '@/stores/tun'
 import { useSettingsStore } from '@/stores/settings'
+import { useUpdaterStore } from '@/stores/updater'
 import {
   applyTunAdvanced,
   type TunAdvancedOptions,
 } from '@/services/tun'
-import { getAppVersion, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { getAppVersion, type UnlistenFn } from '@/utils/tauri-bridge'
 import { resetApplication, onResetCompleted, clearClientState } from '@/services/reset'
 import type { ResetReport } from '@/bindings'
 import ConfirmModal from '@/components/ConfirmModal.vue'
@@ -41,6 +42,7 @@ const sysproxy = useProxyStore()
 const desktop = useDesktopStore()
 const tun = useTunStore()
 const settings = useSettingsStore()
+const updater = useUpdaterStore()
 
 // ---------------------------------------------------------------------------
 // Local UI state
@@ -113,23 +115,14 @@ async function onAdvancedToggle(which: keyof TunAdvancedOptions) {
 }
 
 // ---------------------------------------------------------------------------
-// Updater (Phase updater): real tauri-plugin-updater via typed bindings.
+// About card: installed client version + the in-app updater.
+//
+// The updater logic itself lives in `stores/updater.ts` (phase machine +
+// single progress listener); this component only projects that store into
+// the card. A manual check here reuses the same store as the cold-start
+// dialog, so it never attaches a competing listener or races the prompt.
 // ---------------------------------------------------------------------------
-import { commands, type UpdateInfo } from '@/bindings'
 
-type UpdatePhase =
-  | 'idle'
-  | 'checking'
-  | 'uptodate'
-  | 'available'
-  | 'downloading'
-  | 'installing'
-  | 'error'
-
-const updateState = ref<UpdatePhase>('idle')
-const updateMessage = ref<string | null>(null)
-const updateInfo = ref<UpdateInfo | null>(null)
-const dlPercent = ref(0)
 /** Installed app version, read from the Tauri bundle at mount time
  *  (`tauri.conf.json > version`). Null until the IPC call resolves, and
  *  in plain browser preview where there is no bundle to ask. Never
@@ -139,63 +132,31 @@ const appVersion = ref<string | null>(null)
 /** Display form of {@link appVersion}. Falls back to an em dash rather
  *  than a stale/guessed number when the version is not (yet) known. */
 const versionLabel = computed(() => (appVersion.value ? `v${appVersion.value}` : '—'))
-let updateUnlisten: UnlistenFn | null = null
 
-/** Attach a live progress listener for `updater://progress`. */
-function attachProgress(): Promise<void> {
-  return safeListen<{ downloaded?: number; total?: number | null }>(
-    'updater://progress',
-    (e) => {
-      const { downloaded = 0, total } = e.payload
-      dlPercent.value =
-        total && total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
-    },
-  ).then((u) => { updateUnlisten = u })
-}
-
-async function checkForUpdate() {
-  updateState.value = 'checking'
-  updateMessage.value = null
-  updateInfo.value = null
-  try {
-    const found = await commands.checkUpdate()
-    if (found.status === 'error') {
-      throw new Error(typeof found.error === 'string' ? found.error : JSON.stringify(found.error))
-    }
-    const info = found.data
-    if (info) {
-      updateInfo.value = info
-      updateState.value = 'available'
-    } else {
-      updateState.value = 'uptodate'
-      updateMessage.value = `${versionLabel.value} (latest)`
-    }
-  } catch (e) {
-    updateState.value = 'error'
-    updateMessage.value = e instanceof Error ? e.message : String(e)
+/** Primary button label, derived from the updater store's phase machine:
+ *  check → checking → download → downloading → restart → installing. */
+const updateActionLabel = computed(() => {
+  switch (updater.phase) {
+    case 'checking': return t('updater.checking')
+    case 'downloading': return t('updater.downloading')
+    case 'available': return t('updater.download')
+    case 'ready': return t('updater.restart')
+    case 'installing': return t('updater.installing')
+    default: return t('updater.check')
   }
-}
+})
 
-async function doUpdate() {
-  if (!updateInfo.value) return
-  updateState.value = 'downloading'
-  dlPercent.value = 0
-  updateMessage.value = null
-  await attachProgress()
-  try {
-    const r = await commands.installUpdate()
-    if (r.status === 'error') {
-      throw new Error(typeof r.error === 'string' ? r.error : JSON.stringify(r.error))
-    }
-    // Installer has run; the app relaunches itself. If it returns here,
-    // the platform deferred the swap — surface as ready.
-    updateState.value = 'installing'
-    updateMessage.value = `v${updateInfo.value.version} installed — restarting…`
-  } catch (e) {
-    updateState.value = 'error'
-    updateMessage.value = e instanceof Error ? e.message : String(e)
+/** Advance the flow exactly one step. `download()` and `install()` reject on
+ *  failure (the store already recorded `error`), so each is wrapped rather
+ *  than letting an unhandled rejection escape the click handler. */
+async function onUpdateAction() {
+  if (updater.phase === 'available') {
+    try { await updater.download() } catch { /* surfaced via updater.error */ }
+  } else if (updater.phase === 'ready') {
+    try { await updater.install() } catch { /* surfaced via updater.error */ }
+  } else {
+    await updater.check()
   }
-  if (updateUnlisten) { updateUnlisten(); updateUnlisten = null }
 }
 
 const GITHUB_URL = 'https://github.com/zhuyikai2002/flexclash'
@@ -751,74 +712,68 @@ onUnmounted(() => {
           <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
             {{ t('settings.about.update_check') }}
           </div>
-          <div class="mt-2 flex items-center gap-2">
+
+          <!-- Primary action + optional "view details" (the changelog now lives
+               in UpdateDialog, not inline, so the card stays compact). -->
+          <div class="mt-2 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              :disabled="updateState === 'checking'"
-              @click="checkForUpdate"
-              class="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-60 text-zinc-100 px-3 py-1.5 text-xs font-medium transition-colors"
+              :disabled="updater.isBusy"
+              @click="onUpdateAction"
+              :class="[
+                'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                updater.phase === 'ready'
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-sm shadow-emerald-500/30'
+                  : 'border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-zinc-100 disabled:opacity-60',
+              ]"
             >
-              <Loader2 v-if="updateState === 'checking'" class="w-3.5 h-3.5 animate-spin" />
-              <CheckCircle2 v-else-if="updateState === 'uptodate'" class="w-3.5 h-3.5 text-emerald-400" />
-              <AlertCircle v-else-if="updateState === 'available'" class="w-3.5 h-3.5 text-amber-400" />
+              <Loader2
+                v-if="updater.phase === 'checking' || updater.phase === 'downloading'"
+                class="w-3.5 h-3.5 animate-spin"
+              />
+              <DownloadCloud v-else-if="updater.phase === 'available'" class="w-3.5 h-3.5" />
+              <ArrowUpCircle v-else-if="updater.phase === 'ready'" class="w-3.5 h-3.5" />
               <RefreshCw v-else class="w-3.5 h-3.5" />
-              {{ t('settings.about.update_action') }}
+              {{ updateActionLabel }}
             </button>
-            <span v-if="updateMessage" class="text-[11px] text-zinc-400 font-mono">
-              {{ updateMessage }}
-            </span>
+
+            <button
+              v-if="updater.phase === 'available'"
+              type="button"
+              @click="updater.promptOpen = true"
+              class="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-zinc-100 px-3 py-1.5 text-xs font-medium transition-colors"
+            >
+              {{ t('updater.view_details') }}
+            </button>
           </div>
 
-          <!-- Available release card: version + body + update button -->
-          <div
-            v-if="updateInfo"
-            class="mt-3 rounded-xl border border-white/5 bg-zinc-950/30 p-3 space-y-2"
-          >
-            <div class="flex items-center gap-2">
-              <ArrowUpCircle class="w-4 h-4 text-sky-400 shrink-0" />
-              <span class="text-xs font-semibold text-zinc-100">
-                {{ t('settings.about.new_version', { v: updateInfo.version }) }}
+          <!-- Status line: up-to-date / new version / error -->
+          <div class="mt-2 flex items-center gap-1.5 text-[11px]">
+            <template v-if="updater.phase === 'uptodate'">
+              <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span class="text-zinc-400">{{ t('updater.uptodate') }}</span>
+            </template>
+            <template v-else-if="updater.phase === 'available' || updater.phase === 'ready'">
+              <ArrowUpCircle class="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span class="text-zinc-100 font-medium">
+                {{ t('updater.new_version', { version: updater.versionLabel }) }}
               </span>
-              <button
-                type="button"
-                :disabled="updateState === 'downloading' || updateState === 'installing'"
-                class="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-400 disabled:opacity-50 transition-colors"
-                @click="doUpdate"
-              >
-                <Loader2
-                  v-if="updateState === 'downloading' || updateState === 'installing'"
-                  class="w-3 h-3 animate-spin"
-                />
-                <DownloadCloud v-else class="w-3 h-3" />
-                {{ t('settings.about.update_now') }}
-              </button>
+            </template>
+            <template v-else-if="updater.phase === 'error'">
+              <AlertCircle class="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span class="text-rose-300 font-mono break-all">{{ updater.error }}</span>
+            </template>
+          </div>
+
+          <!-- Progress bar while downloading -->
+          <div v-if="updater.phase === 'downloading'" class="mt-3 flex items-center gap-2">
+            <div class="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
+              <div
+                class="absolute inset-y-0 left-0 bg-sky-400 transition-all"
+                :style="{ width: `${updater.progress}%` }"
+              ></div>
             </div>
-            <!-- Progress bar while downloading -->
-            <div
-              v-if="updateState === 'downloading'"
-              class="flex items-center gap-2"
-            >
-              <div class="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
-                <div
-                  class="absolute inset-y-0 left-0 bg-sky-400 transition-all"
-                  :style="{ width: `${dlPercent}%` }"
-                ></div>
-              </div>
-              <span class="font-mono text-[10px] text-zinc-400">{{ dlPercent }}%</span>
-            </div>
-            <p
-              v-if="updateInfo.body"
-              class="max-h-24 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-zinc-400 font-mono"
-            >
-              {{ updateInfo.body }}
-            </p>
-            <!-- Error detail (check/install failures, incl. network) -->
-            <p
-              v-if="updateState === 'error'"
-              class="text-[11px] leading-relaxed text-rose-300 font-mono"
-            >
-              {{ updateMessage }}
-            </p>
+            <span class="font-mono text-[10px] text-zinc-400">{{ updater.progress }}%</span>
           </div>
         </div>
       </div>

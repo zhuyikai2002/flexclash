@@ -349,5 +349,21 @@
     "label": "Interface language",
     "zh-CN": "简体中文",
     "en-US": "English"
+  },
+  "updater": {
+    "check": "Check for Updates",
+    "checking": "Checking…",
+    "uptodate": "Up to date",
+    "download": "Download Update",
+    "downloading": "Downloading update…",
+    "restart": "Restart & Update",
+    "installing": "Installing and restarting…",
+    "new_version": "Version {version} available",
+    "current_version": "Current version {version}",
+    "update_now": "Update Now",
+    "later": "Remind Me Later",
+    "close": "Close",
+    "error": "Update failed",
+    "view_details": "View details"
   }
 }

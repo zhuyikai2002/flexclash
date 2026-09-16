@@ -30,7 +30,9 @@
     "@tauri-apps/plugin-process": "^2.0.1",
     "@tauri-apps/plugin-shell": "^2.0.1",
     "axios": "^1.7.9",
+    "dompurify": "^3.4.15",
     "lucide-vue-next": "^0.469.0",
+    "marked": "^18.0.13",
     "pinia": "^2.3.0",
     "vue": "^3.5.13"
   },

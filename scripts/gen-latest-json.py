@@ -35,51 +35,31 @@ REPO = "https://github.com/zhuyikai2002/flexclash"
 # Keep in sync with `tauri.conf.json > plugins.updater.endpoints`.
 DOWNLOAD_BASE = f"{REPO}/releases/download"
 
-# NOTE: the changelog the in-app updater dialog shows is DERIVED, not
-# hand-copied. It used to be a constant here that had to be rewritten by
-# hand on every release -- and the script itself warned that a stale value
-# ships the previous version's notes to every user and fails silently, with
-# no check to catch it. That warning was prophetic: v0.4.0 shipped with the
-# v0.2.5 text because the constant was never touched. The summary is now
-# extracted from release_notes.md (the same file `release.yml` publishes as
-# the release body), so there is exactly ONE place to maintain. See
+# NOTE: the changelog the in-app updater dialog shows is the FULL Markdown
+# body of release_notes.md -- not a hand-copied constant. That used to be a
+# short, hand-maintained summary (v0.4.0 shipped v0.2.5's text because the
+# constant was never touched). As of v0.5.x the dialog renders the entire
+# changelog (marked + DOMPurify in UpdateDialog.vue), and `release.yml`
+# publishes the same file as the GitHub release body via `body_path`, so
+# there is exactly ONE place to maintain and no second copy to drift. See
 # `read_updater_notes` for the contract it enforces.
-UPDATER_NOTES_MAX = 400
 
 
 def read_updater_notes() -> str:
-    """Derive the short updater summary from `release_notes.md`.
+    """Return the full `release_notes.md` body as the updater `notes`.
 
-    Contract: every top-level numbered section heading (`## 1. Feat (...): ...`)
-    becomes one clause, joined with `；`. Numbered headings only -- the
-    un-numbered `## 兼容性说明` / `## 基础设施` boilerplate stays out.
-
-    Fails the run instead of guessing when the file has no such headings or
-    the derived summary is too long. A missing/oddly-shaped notes file must
-    break the release, not silently publish last version's text.
+    The in-app dialog shows the whole changelog, so there is no truncation
+    and no separate "summary" to keep in sync. The only contract left is
+    presence: a missing or blank notes file must break the release rather
+    than silently publish an empty dialog (or, worse, a stale one).
     """
-    md = (ROOT / "release_notes.md").read_text(encoding="utf-8")
-    clauses = []
-    for line in md.splitlines():
-        m = re.match(r"^##\s+\d+\s*[.、)]\s*(.+?)\s*$", line)
-        if m:
-            clause = m.group(1).strip().rstrip("。")
-            if clause:
-                clauses.append(clause)
-    if not clauses:
-        sys.exit(
-            "release_notes.md has no '## N. Title' section headings; "
-            "cannot derive the updater notes. Add numbered sections or "
-            "update the summary by hand and restore a constant."
-        )
-    notes = "；".join(clauses) + "。"
-    if len(notes) > UPDATER_NOTES_MAX:
-        sys.exit(
-            f"derived updater notes are {len(notes)} chars (max "
-            f"{UPDATER_NOTES_MAX}); shorten the section headings in "
-            "release_notes.md -- long-form belongs in the body, not the dialog"
-        )
-    return notes
+    path = ROOT / "release_notes.md"
+    if not path.is_file():
+        sys.exit("release_notes.md not found; cannot build the updater notes")
+    md = path.read_text(encoding="utf-8").strip()
+    if not md:
+        sys.exit("release_notes.md is empty; cannot build the updater notes")
+    return md
 
 
 def read_version() -> str:

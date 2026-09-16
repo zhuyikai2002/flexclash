@@ -50,6 +50,11 @@
     ],
     "externalBin": [
       "binaries/mihomo"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer.nsh"
+      }
+    }
   }
 }

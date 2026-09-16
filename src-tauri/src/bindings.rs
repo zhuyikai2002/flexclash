@@ -99,6 +99,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::commands::speedtest::cancel_speed_test,
             // -- updater ---------------------------------------------------
             crate::commands::updater::check_update,
+            crate::commands::updater::download_update,
             crate::commands::updater::install_update,
             // -- profiles --------------------------------------------------
             crate::commands::profile::list_profiles::<tauri::Wry>,

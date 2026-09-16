@@ -20,6 +20,7 @@ pub mod tray;
 #[cfg(feature = "geodata-smoke")]
 pub use commands::geodata::run_refresh;
 
+use crate::commands::updater::PendingUpdate;
 use crate::core::shutdown::ExitFlag;
 use crate::core::sidecar::SidecarHandle;
 use crate::core::speedtest::SpeedTestRegistry;
@@ -73,6 +74,8 @@ pub fn run() {
         // handle to the run registry instead of borrowing `State<'_, _>`
         // across a `'static` future.
         .manage(Arc::new(SpeedTestRegistry::new()))
+        // Verified update bytes parked between download and install.
+        .manage(PendingUpdate::default())
         .setup(move |app| {
             // Install the event registry first. Every typed `emit`/`listen`
             // resolves its wire name through it, and both the kernel ingest

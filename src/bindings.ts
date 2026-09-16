@@ -80,7 +80,7 @@ export const commands = {
 	 *  readable errors — never panics, never crashes the renderer.
 	 */
 	checkUpdate: () => typedError<{
-	/**  Version announced by the remote feed (e.g. "0.2.1"). */
+	/**  Version announced by the remote feed (e.g. "0.5.0"). */
 	version: string,
 	/**  Version currently installed in this build. */
 	currentVersion: string,
@@ -88,9 +88,20 @@ export const commands = {
 	body: string | null,
 } | null, string>(__TAURI_INVOKE("check_update")),
 	/**
-	 *  Download the latest update and trigger install. Progress is emitted as
-	 *  `updater://progress` with `{ downloaded, total }`; `total` may be null
-	 *  until the server reports a content length.
+	 *  Download (and signature-verify) the latest update, but do NOT install it.
+	 *  The verified bytes are parked in `PendingUpdate` for a later
+	 *  `install_update` call. Progress is emitted as `updater://progress` with a
+	 *  cumulative `{ downloaded, total }`; `total` may be null until the server
+	 *  reports a content length.
+	 */
+	downloadUpdate: () => typedError<UpdateInfo, string>(__TAURI_INVOKE("download_update")),
+	/**
+	 *  Install the update downloaded by `download_update`, then let the updater
+	 *  relaunch the app. On Windows `Update::install` runs `ShellExecuteW` and
+	 *  then `std::process::exit(0)`, which *skips* the window-close hook in
+	 *  `core::shutdown` — so we perform the sidecar teardown ourselves, right
+	 *  here, before the installer launches. The NSIS `NSIS_HOOK_PREINSTALL`
+	 *  taskkill is the belt-and-suspenders net on top of this clean shutdown.
 	 */
 	installUpdate: () => typedError<null, string>(__TAURI_INVOKE("install_update")),
 	listProfiles: () => typedError<ProfileMeta[], AppError>(__TAURI_INVOKE("list_profiles")),
@@ -697,7 +708,7 @@ export type TunStatus = {
 
 /**  Lightweight update descriptor pushed to the UI. */
 export type UpdateInfo = {
-	/**  Version announced by the remote feed (e.g. "0.2.1"). */
+	/**  Version announced by the remote feed (e.g. "0.5.0"). */
 	version: string,
 	/**  Version currently installed in this build. */
 	currentVersion: string,
