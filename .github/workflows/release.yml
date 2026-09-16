@@ -1,0 +1,203 @@
+# ============================================================================
+# release.yml — tag-driven Windows build + GitHub Release.
+#
+# Trigger: pushing a tag matching `v*` (e.g. `v0.3.0`). Nothing else starts
+# this workflow -- no branch pushes, no pull requests, no manual dispatch.
+#
+# What it produces, in one release attached to the pushed tag:
+#
+#   FlexClash_<version>_x64-setup.exe      the NSIS installer
+#   FlexClash_<version>_x64-setup.exe.sig  its minisign signature (audit copy)
+#   latest.json                            the manifest the in-app updater polls
+#
+# IMPORTANT: the tag and `tauri.conf.json > version` must agree. The updater
+# endpoint is `releases/latest/download/latest.json`, and `latest.json` points
+# at `releases/download/v<version>/...`, where `<version>` is read from
+# tauri.conf.json -- not from the tag. Tag `v0.3.0` while the config still says
+# `0.2.5` and the manifest publishes a URL that 404s. Bump the version (both
+# `tauri.conf.json` and `package.json`) before tagging.
+#
+# The release is gated on `scripts/verify-updater-sig.py` before anything is
+# published: that script replays what the Tauri updater does at runtime, so a
+# signing key that does not match `plugins.updater.pubkey` fails the run instead
+# of shipping an update every existing install rejects.
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# The release step creates a Release and uploads assets with the automatic
+# token. Everything else here only reads, so this is the whole permission set.
+permissions:
+  contents: write
+
+env:
+  # Kept in one place. Update together with the digest below.
+  # See CONTRIBUTING.md > Development Setup: FlexClash does not redistribute
+  # mihomo, the sidecar is fetched at build time.
+  MIHOMO_VERSION: v1.19.30
+  # sha256 of the exe inside mihomo-windows-amd64-compatible-<version>.zip.
+  # The sidecar is a ~50MB third-party binary that ends up *inside* the
+  # installer, so a re-uploaded or substituted release asset must fail the
+  # build here instead of shipping to users.
+  MIHOMO_SHA256: 6ac25fcb26afe8e1bea24b6e6e80805bf884a33232d12e2d78dfa0b6c529ac14
+
+jobs:
+  release:
+    name: Build and publish Windows installer
+    runs-on: windows-latest
+    # `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is set to an empty string below
+    # precisely so tauri never falls back to an interactive prompt. Should that
+    # ever regress, the run hangs *forever* rather than failing -- this cap is
+    # the backstop (a previous 300-minute zombie build caused by exactly that).
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          # package-lock.json is committed, so the npm download cache is keyed
+          # on it and survives between releases.
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # `gen-latest-json.py` is stdlib-only, but `verify-updater-sig.py`
+          # needs `cryptography` for Ed25519. Pinned so the manifest and
+          # verification steps do not depend on whatever interpreter the runner
+          # image happens to ship.
+          python-version: '3.12'
+
+      - name: Install release-script dependencies
+        run: python -m pip install --disable-pip-version-check --quiet cryptography
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # The runner's host triple already *is* x86_64-pc-windows-msvc, so
+          # this changes nothing today. It is pinned so the requirement is
+          # stated rather than merely implied by `runs-on`.
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The crate is NOT at the repository root. Left at its default (`.`)
+          # the action finds no Cargo.toml and silently caches nothing, which
+          # is the difference between a ~4 min and a ~20 min release build.
+          workspaces: src-tauri
+          # Keep the cache even when the build fails, so a fixed re-run is fast.
+          cache-on-failure: true
+
+      - name: Fetch the mihomo sidecar
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $asset = "mihomo-windows-amd64-compatible-$env:MIHOMO_VERSION"
+          $url    = "https://github.com/MetaCubeX/mihomo/releases/download/$env:MIHOMO_VERSION/$asset.zip"
+          $dest   = 'src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe'
+
+          New-Item -ItemType Directory -Force -Path 'src-tauri/binaries' | Out-Null
+
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile 'mihomo.zip'
+
+          $tmp = 'mihomo-extract'
+          Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath 'mihomo.zip' -DestinationPath $tmp -Force
+
+          # The entry inside the archive is named after the asset
+          # (`mihomo-windows-amd64-compatible.exe`), NOT plain `mihomo.exe`, and
+          # the name differs per variant. Discover it rather than assume it --
+          # hardcoding `mihomo.exe` fails on every asset in this release.
+          $inner = Get-ChildItem -Path $tmp -Filter '*.exe' | Select-Object -First 1
+          if (-not $inner) { throw "no .exe inside $asset.zip" }
+
+          # The bundler resolves `externalBin: ["binaries/mihomo"]` to the
+          # target-triple file name. Anything else is simply not found.
+          Move-Item -LiteralPath $inner.FullName -Destination $dest -Force
+
+          $size = (Get-Item -LiteralPath $dest).Length
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLower()
+          Write-Host "sidecar: $dest ($size bytes)"
+          Write-Host "sha256 : $hash"
+
+          if ($hash -ne $env:MIHOMO_SHA256) {
+            throw "mihomo digest mismatch: expected $env:MIHOMO_SHA256, got $hash"
+          }
+          Write-Host 'sidecar digest verified'
+
+      # Drop any bundle output a restored cache may have brought back. Without
+      # this, `bundle/nsis/` can hold the previous release's installer, and the
+      # upload glob below would publish BOTH that and this run's build into the
+      # new release. Cheap (the directory is a post-build output, not an input
+      # to compilation) and it also forces latest.json to be regenerated.
+      - name: Clean stale bundle output
+        shell: pwsh
+        run: Remove-Item -Recurse -Force 'src-tauri/target/release/bundle' -ErrorAction SilentlyContinue
+
+      - name: Build the installer (signed)
+        env:
+          # Tauri accepts either a path or the key *contents*; on CI it must be
+          # the contents, which is what the secret holds. It must be the private
+          # half of the keypair whose public half is `plugins.updater.pubkey`
+          # in tauri.conf.json -- a mismatch builds fine and fails only at
+          # update time, in users' installs.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          # MUST be present and empty. The key is scrypt-encrypted with an empty
+          # password; if this variable is unset, tauri prompts on the terminal
+          # and the job hangs until it is killed.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        # `--bundles nsis` because NSIS is the only target this workflow
+        # publishes: the updater downloads `*_x64-setup.exe`, and
+        # gen-latest-json.py reads that installer's .sig. Building the MSI too
+        # (`targets: "all"` in tauri.conf.json) would only add a WiX download
+        # that can fail the release and roughly double bundling time. Add
+        # `--bundles nsis,msi` here if an MSI should be published as well.
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Generate the updater manifest
+        run: python scripts/gen-latest-json.py
+
+      # The gate. `tauri build` does NOT fail when the signing key and
+      # `plugins.updater.pubkey` disagree -- it emits a single warning deep in a
+      # very long log, and the release then looks fine while every existing
+      # install rejects the update it downloads. This script replays the real
+      # runtime check (minisign "ED" = BLAKE2b-512 prehash, then Ed25519 over the
+      # actual installer bytes) and exits non-zero with "BROKEN - do not
+      # publish", which stops the run before the publish step.
+      - name: Verify the updater signature chain
+        run: python scripts/verify-updater-sig.py
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The tag that triggered this run, so the release is attached to it.
+          tag_name: ${{ github.ref_name }}
+          name: FlexClash ${{ github.ref_name }}
+          # NOT a draft and NOT a prerelease, deliberately: the updater polls
+          # `releases/latest/download/latest.json`, and GitHub's `/latest/`
+          # excludes both drafts and prereleases. A draft release is invisible
+          # to every existing install.
+          draft: false
+          prerelease: false
+          # Auto-generated from commits and merged PRs, so it can never ship a
+          # previous version's changelog. To publish the hand-written
+          # release_notes.md instead, drop this line and add
+          # `body_path: release_notes.md` -- but then it must be updated before
+          # every tag, since a stale file fails silently.
+          generate_release_notes: true
+          files: |
+            src-tauri/target/release/bundle/nsis/FlexClash_*_x64-setup.exe
+            src-tauri/target/release/bundle/nsis/FlexClash_*_x64-setup.exe.sig
+            src-tauri/target/release/bundle/latest.json
