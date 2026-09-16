@@ -99,6 +99,11 @@ pub fn run() {
             // above, which installs the registry those emits resolve through.
             crate::core::ingest::spawn(&handle, app.state::<SidecarHandle>().inner().clone());
 
+            // Step 4: the geo-data refresher. Silent, self-healing, and it
+            // waits out startup before its first check. Also after
+            // `mount_events`, since it publishes a typed event.
+            crate::commands::geodata::spawn_scheduler(&handle);
+
             // M10: open the history DB at
             //   %LOCALAPPDATA%\com.flexclash.app\history.db
             // and register it as managed state so the Tauri commands

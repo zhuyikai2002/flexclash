@@ -199,6 +199,20 @@ pub(crate) async fn trigger_mihomo_geo_update(timeout_ms: u64) -> Result<(), App
         .map(|_| ())
 }
 
+/// Is a kernel actually listening?
+///
+/// Consulted before committing to a geo-database transfer. There is no point
+/// downloading ~21 MB when there is no kernel to apply it to, and a scheduled
+/// check that hit a stopped kernel would otherwise repeat the transfer on every
+/// retry. Kept short so a missing kernel costs a moment, not a timeout.
+const PROBE_TIMEOUT_MS: u64 = 2_000;
+
+pub(crate) async fn probe_controller() -> Result<(), AppError> {
+    mihomo_request(reqwest::Method::GET, "/version", None, PROBE_TIMEOUT_MS)
+        .await
+        .map(|_| ())
+}
+
 // ---------------------------------------------------------------------------
 // Proxies
 // ---------------------------------------------------------------------------

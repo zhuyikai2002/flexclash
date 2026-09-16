@@ -46,6 +46,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use tauri_specta::Event;
@@ -106,10 +107,21 @@ pub type EventSink<'a> = &'a (dyn Fn(&GeoDataStatus, u64, u64, bool) + Send + Sy
 
 async fn refresh(app: &tauri::AppHandle) -> CmdResult<GeoRefreshReport> {
     let work_dir = sidecar::work_dir_for(app)?;
-    run_refresh(&work_dir, &|status, bytes_served, requests, updated| {
+    let sink = event_sink(app);
+    run_refresh(&work_dir, &sink).await
+}
+
+/// The sink every in-app caller of [`run_refresh`] wants: publish the typed
+/// event to the renderer and swallow the result.
+///
+/// A failed emit is not a refresh failure — a head-less or pre-window run may
+/// legitimately have no listener.
+fn event_sink(
+    app: &tauri::AppHandle,
+) -> impl Fn(&GeoDataStatus, u64, u64, bool) + Send + Sync + '_ {
+    move |status, bytes_served, requests, updated| {
         emit(app, status, bytes_served, requests, updated);
-    })
-    .await
+    }
 }
 
 /// One cycle against an explicit work dir.
@@ -182,6 +194,14 @@ pub async fn run_refresh(work_dir: &Path, on_event: EventSink<'_>) -> CmdResult<
             detail: "geo databases are already current".into(),
         });
     }
+
+    // ---- 2b. is there a kernel to apply this to? ------------------------
+    // Deliberately after the no-op check, so a check that finds nothing still
+    // succeeds with no kernel running. From here on the cycle is committed to
+    // moving ~21 MB, and there is no point doing that for a kernel that is not
+    // there to adopt it — the scheduled caller would just repeat the transfer
+    // on its next probe.
+    mihomo::probe_controller().await?;
 
     // ---- 3. download, verify, stage -------------------------------------
     let mut staged: Vec<StagedFile> = Vec::new();
@@ -387,4 +407,89 @@ fn emit(
     // The renderer may legitimately have no listener (headless runs); a
     // failed emit is not worth failing the refresh over.
     let _ = payload.emit(app);
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler (Step 4)
+// ---------------------------------------------------------------------------
+
+/// Grace period before the first check. Startup is the busiest moment in the
+/// process — window, sidecar, first config load — and a geo refresh is never
+/// urgent enough to compete with it, so it waits its turn.
+const FIRST_RUN_DELAY: Duration = Duration::from_secs(30);
+
+/// Cadence once the first check has run.
+const RUN_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Bounded catch-up. A check that failed for a transient reason — the kernel
+/// was not up yet, one source blipped — should not cost a whole day, so it is
+/// retried a few times before the daily cadence takes over. Bounded on purpose:
+/// an unbounded retry against a genuinely dead upstream is a hot loop.
+const RETRY_DELAY: Duration = Duration::from_secs(5 * 60);
+const MAX_RETRIES: u32 = 3;
+
+/// Start the silent refresher. Runs for the life of the process.
+///
+/// Every failure is consumed inside: reported on stderr, persisted into the
+/// status file and published as the `GeoDataUpdatedPayload` event, both of
+/// which the UI already reads. Nothing here may panic — a background task that
+/// dies takes the feature with it and nobody notices.
+pub fn spawn_scheduler(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(FIRST_RUN_DELAY).await;
+
+        // `interval`'s first tick completes immediately; burn it so the ticks
+        // acted on are a full period apart.
+        let mut ticker = tokio::time::interval(RUN_INTERVAL);
+        ticker.tick().await;
+
+        loop {
+            if let Err(e) = check_with_catch_up(&app).await {
+                eprintln!("[geodata] giving up until the next daily check: {e}");
+            }
+            ticker.tick().await;
+        }
+    });
+}
+
+/// One check plus its bounded retries.
+///
+/// `Ok` means a cycle ran, including one that found nothing to do. `Err` is
+/// returned only after every retry is spent.
+async fn check_with_catch_up(app: &tauri::AppHandle) -> Result<(), AppError> {
+    let mut last: Option<AppError> = None;
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            eprintln!(
+                "[geodata] retry {attempt}/{MAX_RETRIES} in {}s",
+                RETRY_DELAY.as_secs()
+            );
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
+        match check_once(app).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("[geodata] check failed: {e}");
+                last = Some(e);
+            }
+        }
+    }
+    last.ok_or_else(|| AppError::Geo("scheduler retries exhausted".into()))
+        .map(|_| ())
+}
+
+/// One cycle, with the outcome reduced to `Ok`/`Err` and all reporting done.
+async fn check_once(app: &tauri::AppHandle) -> Result<(), AppError> {
+    let work_dir = sidecar::work_dir_for(app)?;
+    let sink = event_sink(app);
+    let report = run_refresh(&work_dir, &sink).await?;
+    if report.updated {
+        let source = report.source.as_deref().map_or("an unknown source", |s| s);
+        eprintln!(
+            "[geodata] updated from {source} — {} request(s), {} bytes",
+            report.requests, report.bytes_served
+        );
+    }
+    Ok(())
 }
