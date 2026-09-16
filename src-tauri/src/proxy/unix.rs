@@ -39,8 +39,14 @@ fn set_family(family: &str, port: u16) -> Result<(), String> {
     // stripped GNOME builds omit ftp). Missing schemas would fail loudly,
     // so we only touch the families that are universally present.
     if matches!(family, "http" | "https" | "ftp") {
-        gset(&format!("org.gnome.system.proxy.{family}.host"), &format!("'{HOST}'"))?;
-        gset(&format!("org.gnome.system.proxy.{family}.port"), &port.to_string())?;
+        gset(
+            &format!("org.gnome.system.proxy.{family}.host"),
+            &format!("'{HOST}'"),
+        )?;
+        gset(
+            &format!("org.gnome.system.proxy.{family}.port"),
+            &port.to_string(),
+        )?;
     }
     Ok(())
 }
@@ -101,7 +107,10 @@ pub fn query_system_proxy_status() -> Option<ProxyStatus> {
             .output()
             .ok()
             .and_then(|o| {
-                String::from_utf8_lossy(&o.stdout).trim().parse::<u16>().ok()
+                String::from_utf8_lossy(&o.stdout)
+                    .trim()
+                    .parse::<u16>()
+                    .ok()
             })
             .unwrap_or(0);
         Some(ProxyStatus {

@@ -38,10 +38,7 @@ pub struct SilentAutostartStatus {
 #[tauri::command]
 #[specta::specta]
 pub fn get_autostart_status<R: Runtime>(app: AppHandle<R>) -> AutostartStatus {
-    let enabled = app
-        .autolaunch()
-        .is_enabled()
-        .unwrap_or(false);
+    let enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let silent = app
         .try_state::<SilentFlag>()
         .map(|s| s.is_silent())
@@ -85,9 +82,7 @@ pub fn set_silent_autostart<R: Runtime>(
     enabled: bool,
 ) -> Result<SilentAutostartStatus> {
     if !task_autostart::is_available() {
-        return Err(AppError::Desktop(
-            "silent autostart is Windows-only".into(),
-        ));
+        return Err(AppError::Desktop("silent autostart is Windows-only".into()));
     }
 
     if enabled {
@@ -96,8 +91,8 @@ pub fn set_silent_autostart<R: Runtime>(
                 AppError::Desktop(format!("could not clear the registry autostart entry: {e}"))
             })?;
         }
-        let exe = std::env::current_exe()
-            .map_err(|e| AppError::Path(format!("current_exe: {e}")))?;
+        let exe =
+            std::env::current_exe().map_err(|e| AppError::Path(format!("current_exe: {e}")))?;
         task_autostart::enable(&exe)?;
     } else {
         task_autostart::disable()?;

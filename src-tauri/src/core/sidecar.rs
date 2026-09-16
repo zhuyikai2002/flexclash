@@ -55,7 +55,10 @@ pub enum ConfigRefresh {
     Created,
     /// File existed but `external-controller` port didn't match.
     /// Overwritten; old port reported as `from_port` (None if unparseable).
-    PortChanged { from_port: Option<u16>, to_port: u16 },
+    PortChanged {
+        from_port: Option<u16>,
+        to_port: u16,
+    },
     /// File existed but the `flexclash-config-version` comment was
     /// older (or missing).  Overwritten; bumped to `to_version`.
     /// The UI should prompt the user to restart the kernel so the
@@ -86,13 +89,17 @@ pub struct SidecarInner {
 pub struct SidecarHandle(pub Arc<Mutex<SidecarInner>>);
 
 impl SidecarHandle {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, SidecarInner> {
         self.0.lock().expect("sidecar mutex poisoned")
     }
 
-    pub fn state(&self) -> KernelState { self.lock().state }
+    pub fn state(&self) -> KernelState {
+        self.lock().state
+    }
 
     pub fn set_state(&self, new_state: KernelState) {
         self.lock().state = new_state;
@@ -197,14 +204,19 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
     // Announce config outcome via logs + event.
     match refresh {
         ConfigRefresh::Created => {
-            let msg = format!("[config] created default config at {}", config_path.display());
+            let msg = format!(
+                "[config] created default config at {}",
+                config_path.display()
+            );
             handle.push_log(msg.clone());
             let _ = app.emit(crate::events::KERNEL_LOG, msg);
         }
         ConfigRefresh::PortChanged { from_port, to_port } => {
             let msg = format!(
                 "[config] external-controller port auto-refreshed: {} -> {}",
-                from_port.map(|p| p.to_string()).unwrap_or_else(|| "?".into()),
+                from_port
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "?".into()),
                 to_port
             );
             handle.push_log(msg.clone());
@@ -214,7 +226,12 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
                 ConfigRefresh::PortChanged { from_port, to_port },
             );
         }
-        ConfigRefresh::SchemaBumped { from_version, to_version, from_port, to_port } => {
+        ConfigRefresh::SchemaBumped {
+            from_version,
+            to_version,
+            from_port,
+            to_port,
+        } => {
             let msg = format!(
                 "[config] schema bumped v{} -> v{} (added TUN loopback bypass rules, etc.) — please restart the kernel",
                 from_version, to_version
@@ -223,7 +240,12 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
             let _ = app.emit(crate::events::KERNEL_LOG, msg);
             let _ = app.emit(
                 crate::events::KERNEL_CONFIG_REFRESHED,
-                ConfigRefresh::SchemaBumped { from_version, to_version, from_port, to_port },
+                ConfigRefresh::SchemaBumped {
+                    from_version,
+                    to_version,
+                    from_port,
+                    to_port,
+                },
             );
         }
         ConfigRefresh::Unchanged => {}
@@ -294,9 +316,7 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
                     handle_for_task.set_child(None);
                     // Visible in dev-terminal + kernel log so a crash's real
                     // exit code / signal is never hidden by the watcher.
-                    eprintln!(
-                        "[sidecar] mihomo exited code={code:?} signal={signal:?}"
-                    );
+                    eprintln!("[sidecar] mihomo exited code={code:?} signal={signal:?}");
                     handle_for_task.push_log(format!(
                         "[sidecar] mihomo exited (code={code:?}, signal={signal:?})"
                     ));
@@ -468,7 +488,13 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
 
     let from_port = extract_controller_port(&existing);
     std::fs::write(&path, bundled)?;
-    Ok((path, ConfigRefresh::PortChanged { from_port, to_port: EXPECTED_CONTROLLER_PORT }))
+    Ok((
+        path,
+        ConfigRefresh::PortChanged {
+            from_port,
+            to_port: EXPECTED_CONTROLLER_PORT,
+        },
+    ))
 }
 
 /// True when `yaml` declares an inbound port that FlexClash does not own:

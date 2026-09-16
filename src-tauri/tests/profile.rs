@@ -47,8 +47,7 @@ proxies:
 
 #[test]
 fn sanitize_overwrites_reserved_fields() {
-    let out = profile_ops::patch_and_sanitize_yaml(HOSTILE_YAML)
-        .expect("sanitize ok");
+    let out = profile_ops::patch_and_sanitize_yaml(HOSTILE_YAML).expect("sanitize ok");
     let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
     let m = v.as_mapping().unwrap();
 
@@ -82,11 +81,7 @@ fn sanitize_injects_cors() {
         .expect("cors injected")
         .as_mapping()
         .unwrap();
-    let origins = cors
-        .get("allow-origins")
-        .unwrap()
-        .as_sequence()
-        .unwrap();
+    let origins = cors.get("allow-origins").unwrap().as_sequence().unwrap();
     let has_tauri = origins
         .iter()
         .any(|o| o.as_str() == Some("tauri://localhost"));
@@ -170,20 +165,13 @@ fn profile_storage_activate_copies_yaml_to_active_path() {
     let storage = profile_ops::ProfileStorage::new(&dir);
 
     let body = "mixed-port: 7897\nmode: rule\n";
-    let meta = profile_ops::save_profile(
-        &storage,
-        None,
-        "P1".into(),
-        body.into(),
-        String::new(),
-    )
-    .unwrap();
+    let meta =
+        profile_ops::save_profile(&storage, None, "P1".into(), body.into(), String::new()).unwrap();
 
     // The active config path should not exist yet.
     assert!(!storage.active_config().exists());
 
-    let activated =
-        profile_ops::activate_profile(&storage, &meta.id).unwrap();
+    let activated = profile_ops::activate_profile(&storage, &meta.id).unwrap();
     assert_eq!(activated.id, meta.id);
     assert!(storage.active_config().exists());
 

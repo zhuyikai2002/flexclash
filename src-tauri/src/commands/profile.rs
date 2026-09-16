@@ -61,10 +61,7 @@ pub fn get_active_profile<R: Runtime>(
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_profile_content<R: Runtime>(
-    app: AppHandle<R>,
-    id: String,
-) -> CmdResult<String> {
+pub fn get_profile_content<R: Runtime>(app: AppHandle<R>, id: String) -> CmdResult<String> {
     let storage = storage_for(&app)?;
     let path = storage.profile_yaml(&id);
     std::fs::read_to_string(&path)
@@ -81,10 +78,7 @@ pub fn save_profile<R: Runtime>(
 ) -> CmdResult<profile_ops::ProfileMeta> {
     let storage = storage_for(&app)?;
     let meta = profile_ops::save_profile(&storage, id, name, content, String::new())?;
-    let _ = app.emit(
-        crate::events::PROFILE_LIST_CHANGED,
-        &meta,
-    );
+    let _ = app.emit(crate::events::PROFILE_LIST_CHANGED, &meta);
     Ok(meta)
 }
 
@@ -130,8 +124,7 @@ pub async fn import_profile_url<R: Runtime>(
     // User overrides are merged in *before* the profile is written, so an
     // import and a later refresh both produce the same document.
     let body = apply_overrides(&app, &name, body);
-    let mut meta =
-        profile_ops::save_profile(&storage, None, name.clone(), body, url.clone())?;
+    let mut meta = profile_ops::save_profile(&storage, None, name.clone(), body, url.clone())?;
 
     // Attach subscription usage info, if reported.
     if user_info.total.is_some() || user_info.download.is_some() {
@@ -157,8 +150,8 @@ pub fn import_profile_file<R: Runtime>(
     path: String,
     name: String,
 ) -> CmdResult<profile_ops::ProfileMeta> {
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| AppError::Io(format!("read {}: {e}", path)))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| AppError::Io(format!("read {}: {e}", path)))?;
     let storage = storage_for(&app)?;
     let meta = profile_ops::save_profile(&storage, None, name, content, String::new())?;
     let _ = app.emit(crate::events::PROFILE_LIST_CHANGED, &meta);
@@ -192,7 +185,10 @@ pub async fn update_subscription<R: Runtime>(
 
     let _ = app.emit(
         crate::events::KERNEL_LOG,
-        format!("[subscription] updating '{name}' from {url}", name = meta.name),
+        format!(
+            "[subscription] updating '{name}' from {url}",
+            name = meta.name
+        ),
     );
 
     // 1) Fetch.
@@ -206,8 +202,13 @@ pub async fn update_subscription<R: Runtime>(
     //    `proxy-groups` / `rules` / `dns` edits are re-stitched on top rather
     //    than being thrown away with the previous fetch.
     let body = apply_overrides(&app, &meta.name, body);
-    let mut updated =
-        profile_ops::save_profile(&storage, Some(id.clone()), meta.name.clone(), body, url.clone())?;
+    let mut updated = profile_ops::save_profile(
+        &storage,
+        Some(id.clone()),
+        meta.name.clone(),
+        body,
+        url.clone(),
+    )?;
 
     // 3) Update quota fields from the new header.
     if user_info.total.is_some() || user_info.download.is_some() {
@@ -245,7 +246,8 @@ pub async fn update_subscription<R: Runtime>(
                     });
                 }
                 Err(e) => {
-                    let msg = format!("[subscription] reload after update failed ({e}); restarting");
+                    let msg =
+                        format!("[subscription] reload after update failed ({e}); restarting");
                     let _ = app.emit(crate::events::KERNEL_LOG, &msg);
                     let handle = (*sidecar).clone();
                     if sidecar::restart(&app, handle).await.is_ok() {
@@ -263,7 +265,11 @@ pub async fn update_subscription<R: Runtime>(
 
     let _ = app.emit(crate::events::PROFILE_LIST_CHANGED, &updated);
     Ok(ReloadResult {
-        status: if is_active { ReloadStatus::Staged } else { ReloadStatus::Reloaded },
+        status: if is_active {
+            ReloadStatus::Staged
+        } else {
+            ReloadStatus::Reloaded
+        },
         detail: if is_active {
             "subscription updated (kernel not running)".into()
         } else {
@@ -364,11 +370,7 @@ fn storage_for<R: Runtime>(app: &AppHandle<R>) -> CmdResult<ProfileStorage> {
 /// `profile_name` is the fetched profile's display name, passed through
 /// [`crate::config::profile::normalize_profile_name`] so it matches the name
 /// `save_profile` will store — the per-profile layer is keyed on that name.
-fn apply_overrides<R: Runtime>(
-    app: &AppHandle<R>,
-    profile_name: &str,
-    raw_yaml: String,
-) -> String {
+fn apply_overrides<R: Runtime>(app: &AppHandle<R>, profile_name: &str, raw_yaml: String) -> String {
     let dir = match override_ops::dir_for(app) {
         Ok(dir) => dir,
         Err(e) => {
@@ -384,10 +386,7 @@ fn apply_overrides<R: Runtime>(
     let outcome = override_ops::apply(&dir, &name, &raw_yaml);
 
     for warning in &outcome.warnings {
-        let _ = app.emit(
-            crate::events::KERNEL_LOG,
-            format!("[override] {warning}"),
-        );
+        let _ = app.emit(crate::events::KERNEL_LOG, format!("[override] {warning}"));
     }
     if !outcome.applied.is_empty() {
         let _ = app.emit(
@@ -411,7 +410,10 @@ fn apply_overrides<R: Runtime>(
 /// call. The elevated mihomo TUN spawns listens on the same reserved
 /// controller, so one helper covers both.
 pub(crate) async fn reload_via_controller(file_path: &str) -> Result<(), String> {
-    let url = format!("http://{}/configs?force=true", profile_ops::RESERVED_CONTROLLER);
+    let url = format!(
+        "http://{}/configs?force=true",
+        profile_ops::RESERVED_CONTROLLER
+    );
     let body = serde_json::json!({ "path": file_path }).to_string();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
@@ -477,10 +479,7 @@ pub fn rename_profile<R: Runtime>(
 /// it, falling back to the `open` verb.  No-op stub on non-Windows.
 #[tauri::command]
 #[specta::specta]
-pub fn open_profile_in_editor<R: Runtime>(
-    app: AppHandle<R>,
-    id: String,
-) -> CmdResult<()> {
+pub fn open_profile_in_editor<R: Runtime>(app: AppHandle<R>, id: String) -> CmdResult<()> {
     let storage = storage_for(&app)?;
     let path = storage.profile_yaml(&id);
     if !path.exists() {
@@ -501,10 +500,7 @@ pub fn open_profile_in_editor<R: Runtime>(
 /// non-Windows: prints the parent dir to stderr.
 #[tauri::command]
 #[specta::specta]
-pub fn reveal_profile_file<R: Runtime>(
-    app: AppHandle<R>,
-    id: String,
-) -> CmdResult<()> {
+pub fn reveal_profile_file<R: Runtime>(app: AppHandle<R>, id: String) -> CmdResult<()> {
     let storage = storage_for(&app)?;
     let path = storage.profile_yaml(&id);
     if !path.exists() {
@@ -543,7 +539,8 @@ fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResu
     let verb = if prefer_edit_verb { "edit" } else { "open" };
     if verb == "open" {
         let path_arg = path.as_os_str().to_string_lossy().into_owned();
-        let status = Command::new("cmd").creation_flags(create_no_window)
+        let status = Command::new("cmd")
+            .creation_flags(create_no_window)
             .args(["/C", "start", "", &path_arg])
             .status()
             .map_err(|e| AppError::Shell(format!("cmd /C start {}: {e}", path.display())))?;
@@ -557,7 +554,8 @@ fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResu
     } else {
         // Fallback: run the same `open` path.
         let path_arg = path.as_os_str().to_string_lossy().into_owned();
-        let status = Command::new("cmd").creation_flags(create_no_window)
+        let status = Command::new("cmd")
+            .creation_flags(create_no_window)
             .args(["/C", "start", "", &path_arg])
             .status()
             .map_err(|e| AppError::Shell(format!("cmd /C start {}: {e}", path.display())))?;
@@ -574,7 +572,10 @@ fn open_path_external(path: &std::path::Path, prefer_edit_verb: bool) -> CmdResu
 
 #[cfg(not(target_os = "windows"))]
 fn open_path_external(path: &std::path::Path, _prefer_edit_verb: bool) -> CmdResult<()> {
-    eprintln!("[profile] open_path_external stub on non-Windows: {}", path.display());
+    eprintln!(
+        "[profile] open_path_external stub on non-Windows: {}",
+        path.display()
+    );
     Ok(())
 }
 
@@ -612,6 +613,9 @@ fn reveal_in_explorer(path: &std::path::Path) -> CmdResult<()> {
 
 #[cfg(not(target_os = "windows"))]
 fn reveal_in_explorer(path: &std::path::Path) -> CmdResult<()> {
-    eprintln!("[profile] reveal_in_explorer stub on non-Windows: {}", path.display());
+    eprintln!(
+        "[profile] reveal_in_explorer stub on non-Windows: {}",
+        path.display()
+    );
     Ok(())
 }

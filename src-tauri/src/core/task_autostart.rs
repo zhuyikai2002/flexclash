@@ -74,9 +74,7 @@ pub fn enable(exe: &Path) -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn enable(_exe: &Path) -> Result<()> {
-    Err(AppError::Desktop(
-        "silent autostart is Windows-only".into(),
-    ))
+    Err(AppError::Desktop("silent autostart is Windows-only".into()))
 }
 
 /// Remove the logon task. Best-effort when the task is already absent.
@@ -87,9 +85,7 @@ pub fn disable() -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn disable() -> Result<()> {
-    Err(AppError::Desktop(
-        "silent autostart is Windows-only".into(),
-    ))
+    Err(AppError::Desktop("silent autostart is Windows-only".into()))
 }
 
 pub fn is_available() -> bool {
@@ -243,8 +239,7 @@ mod imp {
         // path with an explicit unique name rather than reusing a fixed one
         // that a stale leftover could shadow.
         let dir = std::env::temp_dir().join("flexclash");
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| AppError::Desktop(format!("temp dir: {e}")))?;
+        std::fs::create_dir_all(&dir).map_err(|e| AppError::Desktop(format!("temp dir: {e}")))?;
         let xml_path = dir.join(format!("{name}-autostart.xml"));
 
         let xml = task_xml(exe);
@@ -358,7 +353,10 @@ mod tests {
     fn xml_escapes_hostile_paths() {
         let xml = imp::task_xml(Path::new(r"C:\Tom & Jerry\flexclash.exe"));
         assert!(xml.contains("Tom &amp; Jerry"));
-        assert!(!xml.contains("Tom & Jerry"), "raw ampersand must not survive");
+        assert!(
+            !xml.contains("Tom & Jerry"),
+            "raw ampersand must not survive"
+        );
     }
 
     /// Requires a runnable `schtasks.exe`. Ignored by default because
@@ -377,6 +375,9 @@ mod tests {
     fn schtasks_reports_unknown_tasks_as_absent() {
         let found = imp::query("FlexClash-NoSuchTask-2f8a1c")
             .expect("schtasks.exe must be runnable for this test");
-        assert!(!found, "a task that was never created must not be reported as present");
+        assert!(
+            !found,
+            "a task that was never created must not be reported as present"
+        );
     }
 }

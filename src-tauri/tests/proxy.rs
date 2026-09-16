@@ -47,16 +47,28 @@ fn restore_snapshot() {
         .expect("open HKCU\\Internet Settings for restore");
 
     match &snap.proxy_enable {
-        Some(v) => { let _ = key.set_value("ProxyEnable", v); }
-        None    => { let _ = key.delete_value("ProxyEnable"); }
+        Some(v) => {
+            let _ = key.set_value("ProxyEnable", v);
+        }
+        None => {
+            let _ = key.delete_value("ProxyEnable");
+        }
     }
     match &snap.proxy_server {
-        Some(v) => { let _ = key.set_value("ProxyServer", v); }
-        None    => { let _ = key.delete_value("ProxyServer"); }
+        Some(v) => {
+            let _ = key.set_value("ProxyServer", v);
+        }
+        None => {
+            let _ = key.delete_value("ProxyServer");
+        }
     }
     match &snap.proxy_override {
-        Some(v) => { let _ = key.set_value("ProxyOverride", v); }
-        None    => { let _ = key.delete_value("ProxyOverride"); }
+        Some(v) => {
+            let _ = key.set_value("ProxyOverride", v);
+        }
+        None => {
+            let _ = key.delete_value("ProxyOverride");
+        }
     }
 }
 
@@ -87,7 +99,10 @@ fn enable_writes_expected_values() {
     assert_eq!(en, Some(1), "ProxyEnable should be 1");
     assert_eq!(srv.as_deref(), Some("127.0.0.1:17890"));
     let ov = ov.expect("ProxyOverride must be set");
-    assert!(ov.contains("localhost"), "override must include 'localhost'");
+    assert!(
+        ov.contains("localhost"),
+        "override must include 'localhost'"
+    );
     assert_eq!(ov, DEFAULT_PROXY_OVERRIDE);
 
     // Cleanup.

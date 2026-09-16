@@ -42,9 +42,9 @@ use crate::error::AppError;
 use crate::events::{KERNEL_LOG, SYSTEM_PROXY_CHANGED, TUN_STATE_CHANGED};
 use crate::proxy;
 
-const ID_SHOW:    &str = "tray_show";
-const ID_TOGGLE:  &str = "tray_toggle_proxy";
-const ID_QUIT:    &str = "tray_quit";
+const ID_SHOW: &str = "tray_show";
+const ID_TOGGLE: &str = "tray_toggle_proxy";
+const ID_QUIT: &str = "tray_quit";
 
 // --- Icons (embedded at compile time so the bundle doesn't depend on
 //     the working directory of the launcher).  tray-active.png 888 B,
@@ -52,10 +52,10 @@ const ID_QUIT:    &str = "tray_quit";
 //     src-tauri/icons/tray-{active,idle}.svg via
 //     `node tools/svg-to-png.cjs` (uses @resvg/resvg-js). -----------------
 const ICON_ACTIVE_PNG: &[u8] = include_bytes!("../icons/tray-active.png");
-const ICON_IDLE_PNG:   &[u8] = include_bytes!("../icons/tray-idle.png");
+const ICON_IDLE_PNG: &[u8] = include_bytes!("../icons/tray-idle.png");
 
 const TOOLTIP_ACTIVE: &str = "FlexClash - 代理已连接";
-const TOOLTIP_IDLE:   &str = "FlexClash - 直连模式";
+const TOOLTIP_IDLE: &str = "FlexClash - 直连模式";
 
 /// Container for handles the tray code needs to access from event
 /// callbacks. Tray APIs only exist on the desktop Wry runtime, so the
@@ -63,16 +63,18 @@ const TOOLTIP_IDLE:   &str = "FlexClash - 直连模式";
 #[derive(Default)]
 pub struct TrayHandles {
     pub toggle_item: Arc<Mutex<Option<CheckMenuItem<Wry>>>>,
-    pub show_item:   Arc<Mutex<Option<MenuItem<Wry>>>>,
+    pub show_item: Arc<Mutex<Option<MenuItem<Wry>>>>,
     /// The TrayIcon itself, so we can call `set_icon` / `set_tooltip`
     /// at runtime. Built once in `install()` and stashed here.
-    pub tray_icon:   Arc<Mutex<Option<TrayIcon<Wry>>>>,
+    pub tray_icon: Arc<Mutex<Option<TrayIcon<Wry>>>>,
 }
 
 impl TrayHandles {
     /// Kept for API consistency with the rest of the codebase
     /// (`TunManager::new()`, `SidecarHandle::new()`, ...).
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 // ============================================================================
@@ -125,8 +127,8 @@ fn update_tray_icon_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError>
     let handles = app
         .try_state::<TrayHandles>()
         .ok_or_else(|| AppError::Tray("TrayHandles not managed".into()))?;
-    let icon: Image<'_> = Image::from_bytes(png)
-        .map_err(|e| AppError::Tray(format!("decode tray png: {e}")))?;
+    let icon: Image<'_> =
+        Image::from_bytes(png).map_err(|e| AppError::Tray(format!("decode tray png: {e}")))?;
 
     let g = handles.tray_icon.lock().expect("tray handles poisoned");
     if let Some(tray) = g.as_ref() {
@@ -180,14 +182,8 @@ fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
     let sep = PredefinedMenuItem::separator(app)
         .map_err(|e| AppError::Tray(format!("build separator: {e}")))?;
 
-    let menu = Menu::with_items(app, &[
-        &show_item,
-        &sep,
-        &toggle_item,
-        &sep,
-        &quit_item,
-    ])
-    .map_err(|e| AppError::Tray(format!("build menu: {e}")))?;
+    let menu = Menu::with_items(app, &[&show_item, &sep, &toggle_item, &sep, &quit_item])
+        .map_err(|e| AppError::Tray(format!("build menu: {e}")))?;
 
     // Stash handles so we can update the check state later.
     let handles = TrayHandles::new();
@@ -207,9 +203,11 @@ fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
     // of the wrong icon on first boot.
     let tray = TrayIconBuilder::with_id("main")
         .tooltip("FlexClash")
-        .icon(app.default_window_icon().cloned().ok_or_else(|| {
-            AppError::Tray("no default window icon configured".into())
-        })?)
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .ok_or_else(|| AppError::Tray("no default window icon configured".into()))?,
+        )
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event: MenuEvent| {
@@ -235,7 +233,10 @@ fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
 
     // First paint: read current state and pick the right icon now.
     if let Err(e) = update_tray_icon(app) {
-        let _ = app.emit(KERNEL_LOG, format!("[tray] initial icon update failed: {e}"));
+        let _ = app.emit(
+            KERNEL_LOG,
+            format!("[tray] initial icon update failed: {e}"),
+        );
     }
 
     let _ = app.emit(KERNEL_LOG, "[tray] installed");
@@ -289,7 +290,12 @@ fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
 }
 
 fn handle_tray_event(app: AppHandle<Wry>, event: TrayIconEvent) {
-    if let TrayIconEvent::Click { button, button_state, .. } = event {
+    if let TrayIconEvent::Click {
+        button,
+        button_state,
+        ..
+    } = event
+    {
         if button == MouseButton::Left && button_state == MouseButtonState::Up {
             toggle_window_visibility(&app);
         }
@@ -314,7 +320,9 @@ fn subscribe_proxy_state(app: &AppHandle<Wry>) {
         let app_for_cb = app_for_task.clone();
         let _ = app_for_task.listen_any(SYSTEM_PROXY_CHANGED, move |event| {
             #[derive(serde::Deserialize)]
-            struct P { enabled: bool }
+            struct P {
+                enabled: bool,
+            }
             if let Ok(p) = serde_json::from_str::<P>(event.payload()) {
                 if let Some(state) = app_for_cb.try_state::<TrayHandles>() {
                     if let Some(item) = state.toggle_item.lock().expect("poisoned").as_ref() {

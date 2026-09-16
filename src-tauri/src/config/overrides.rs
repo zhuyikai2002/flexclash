@@ -154,13 +154,10 @@ fn sanitize_profile_name(name: &str) -> String {
     // extension, so `CON.yaml` cannot be created. Prefix rather than mangle the
     // name beyond recognition.
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
-    if RESERVED
-        .iter()
-        .any(|r| r.eq_ignore_ascii_case(&cut))
-    {
+    if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(&cut)) {
         return format!("_{cut}");
     }
     cut
@@ -306,7 +303,9 @@ fn merge_values(
             } else {
                 seq_policy_for(key_path)
             };
-            Ok(Value::Sequence(merge_sequences(b, o, policy, key_path, warnings)?))
+            Ok(Value::Sequence(merge_sequences(
+                b, o, policy, key_path, warnings,
+            )?))
         }
         // Everything else: same kind, overlay wins.
         _ => Ok(overlay.clone()),
@@ -348,8 +347,7 @@ fn merge_sequences(
                 };
                 match positions.get(id).copied() {
                     Some(i) => {
-                        out[i] =
-                            merge_values(&out[i], ov, &format!("{key_path}[{id}]"), warnings)?;
+                        out[i] = merge_values(&out[i], ov, &format!("{key_path}[{id}]"), warnings)?;
                     }
                     None => {
                         positions.insert(id.to_string(), out.len());
@@ -364,8 +362,8 @@ fn merge_sequences(
 
 /// Parse one override file into a root mapping.
 fn load_layer(path: &Path) -> Result<Mapping, String> {
-    let raw = fs::read_to_string(path)
-        .map_err(|e| format!("{}: cannot read ({e})", path.display()))?;
+    let raw =
+        fs::read_to_string(path).map_err(|e| format!("{}: cannot read ({e})", path.display()))?;
     if raw.trim().is_empty() {
         // An empty file is almost certainly an unfinished edit, not an
         // instruction to wipe the config.
@@ -398,12 +396,7 @@ fn merge_chain(
     let mut applied = Vec::new();
     for path in layers {
         let overlay = load_layer(path)?;
-        merged = merge_values(
-            &merged,
-            &Value::Mapping(overlay),
-            "",
-            warnings,
-        )?;
+        merged = merge_values(&merged, &Value::Mapping(overlay), "", warnings)?;
         applied.push(path.display().to_string());
     }
 
@@ -505,11 +498,7 @@ rules:
 
     #[test]
     fn rules_are_appended_not_replaced() {
-        let out = merge(
-            AIRPORT,
-            "rules:\n  - DOMAIN-SUFFIX,example.com,PROXY\n",
-        )
-        .unwrap();
+        let out = merge(AIRPORT, "rules:\n  - DOMAIN-SUFFIX,example.com,PROXY\n").unwrap();
         assert!(out.contains("MATCH,DIRECT"), "airport rule kept: {out}");
         assert!(out.contains("DOMAIN-SUFFIX,example.com,PROXY"), "{out}");
         // Airport rule must come first: mihomo is first-match-wins, so an
@@ -630,10 +619,8 @@ rules:
 
     impl Scratch {
         fn new() -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "flexclash-override-test-{}",
-                uuid::Uuid::new_v4()
-            ));
+            let dir = std::env::temp_dir()
+                .join(format!("flexclash-override-test-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&dir).unwrap();
             Self(dir)
         }
@@ -666,7 +653,10 @@ rules:
     #[test]
     fn global_and_per_profile_layers_both_apply_per_profile_wins() {
         let s = Scratch::new();
-        s.write(GLOBAL_OVERRIDE_FILENAME, "dns:\n  enable: true\n  nameserver: [1.1.1.1]\n");
+        s.write(
+            GLOBAL_OVERRIDE_FILENAME,
+            "dns:\n  enable: true\n  nameserver: [1.1.1.1]\n",
+        );
         s.write("profiles/Airport.yaml", "dns:\n  nameserver: [9.9.9.9]\n");
 
         let out = apply(&s.0, "Airport", AIRPORT);
@@ -734,7 +724,11 @@ rules:
         let out = apply(&s.0, "Airport", AIRPORT);
         assert_eq!(out.yaml, AIRPORT);
         assert!(out.degraded());
-        assert!(out.warnings.iter().any(|w| w.contains("empty")), "{:?}", out.warnings);
+        assert!(
+            out.warnings.iter().any(|w| w.contains("empty")),
+            "{:?}",
+            out.warnings
+        );
     }
 
     #[test]
@@ -745,7 +739,9 @@ rules:
         assert_eq!(out.yaml, AIRPORT);
         assert!(out.degraded());
         assert!(
-            out.warnings.iter().any(|w| w.contains("root must be a mapping")),
+            out.warnings
+                .iter()
+                .any(|w| w.contains("root must be a mapping")),
             "{:?}",
             out.warnings
         );
@@ -759,7 +755,9 @@ rules:
         s.write(GLOBAL_OVERRIDE_FILENAME, "dns: [unclosed\n");
         let out = apply(&s.0, "Airport", AIRPORT);
         assert!(
-            out.warnings.iter().any(|w| w.contains(GLOBAL_OVERRIDE_FILENAME)),
+            out.warnings
+                .iter()
+                .any(|w| w.contains(GLOBAL_OVERRIDE_FILENAME)),
             "{:?}",
             out.warnings
         );
@@ -781,7 +779,11 @@ rules:
         let root: Value = serde_yaml::from_str(&out.yaml).expect("output must parse");
         assert_eq!(root.get("proxies").unwrap().as_sequence().unwrap().len(), 2);
         assert_eq!(
-            root.get("dns").unwrap().get("enhanced-mode").unwrap().as_str(),
+            root.get("dns")
+                .unwrap()
+                .get("enhanced-mode")
+                .unwrap()
+                .as_str(),
             Some("fake-ip")
         );
         assert_eq!(

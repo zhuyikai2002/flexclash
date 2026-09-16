@@ -90,8 +90,8 @@ mod imp {
 
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows::Win32::System::Threading::{
@@ -160,7 +160,9 @@ mod imp {
         };
         if let Err(e) = res {
             // Do not leak the handle if we are about to bail.
-            unsafe { let _ = CloseHandle(job); }
+            unsafe {
+                let _ = CloseHandle(job);
+            }
             return Err(io::Error::other(format!("SetInformationJobObject: {e}")));
         }
         Ok(job)
@@ -208,7 +210,9 @@ mod imp {
         let res = unsafe { AssignProcessToJobObject(job, process) };
         // SAFETY: we opened `process` ourselves and never hand ownership
         // anywhere else, so closing it here is required to avoid a leak.
-        unsafe { let _ = CloseHandle(process); }
+        unsafe {
+            let _ = CloseHandle(process);
+        }
 
         match res {
             Ok(()) => Ok(true),
@@ -217,9 +221,7 @@ mod imp {
                 // case. Anything else is worth surfacing.
                 let code = e.code().0 as u32;
                 if code != 5 {
-                    eprintln!(
-                        "[job] WARNING: AssignProcessToJobObject(pid={pid}) failed: {e}"
-                    );
+                    eprintln!("[job] WARNING: AssignProcessToJobObject(pid={pid}) failed: {e}");
                 }
                 Ok(false)
             }
@@ -246,15 +248,24 @@ mod tests {
     /// silently logging.
     #[test]
     fn job_arms_on_windows() {
-        assert!(assign_child(0).is_ok(), "assign_child must not error for pid 0");
+        assert!(
+            assign_child(0).is_ok(),
+            "assign_child must not error for pid 0"
+        );
         // pid 0 is the "nothing to adopt" case; it must not arm anything by
         // itself, but calling with a real (self) pid below does.
         let me = std::process::id();
         let adopted = assign_child(me).expect("assign_child(self) must not error");
         // Assigning our own process to the job is allowed and is the
         // cheapest end-to-end proof that the job exists and is usable.
-        assert!(adopted, "should be able to adopt our own (non-elevated) process");
-        assert!(is_armed(), "job must report armed after a successful assign");
+        assert!(
+            adopted,
+            "should be able to adopt our own (non-elevated) process"
+        );
+        assert!(
+            is_armed(),
+            "job must report armed after a successful assign"
+        );
     }
 
     /// A PID that cannot exist must be reported as "not adopted" rather

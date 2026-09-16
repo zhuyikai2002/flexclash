@@ -81,7 +81,13 @@ pub async fn speed_test_group(
     }
 
     Ok(crate::core::speedtest::spawn_run(
-        app, registry, group, nodes, url, timeout_ms, concurrency,
+        app,
+        registry,
+        group,
+        nodes,
+        url,
+        timeout_ms,
+        concurrency,
     ))
 }
 

@@ -80,10 +80,7 @@ pub fn write_autostart_registry_entry_for_test(present: bool) {
         use winreg::RegKey;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let run = hkcu
-            .open_subkey_with_flags(
-                autostart_registry_path(),
-                winreg::enums::KEY_ALL_ACCESS,
-            )
+            .open_subkey_with_flags(autostart_registry_path(), winreg::enums::KEY_ALL_ACCESS)
             .expect("open Run key for test");
         if present {
             run.set_value(

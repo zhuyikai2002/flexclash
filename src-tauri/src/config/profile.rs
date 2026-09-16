@@ -112,10 +112,18 @@ impl ProfileStorage {
         }
     }
 
-    pub fn profiles_dir(&self) -> &Path { &self.profiles_dir }
-    pub fn active_config(&self) -> &Path { &self.active_config }
-    pub fn index_file(&self) -> &Path { &self.index_file }
-    pub fn root(&self) -> &Path { &self.root }
+    pub fn profiles_dir(&self) -> &Path {
+        &self.profiles_dir
+    }
+    pub fn active_config(&self) -> &Path {
+        &self.active_config
+    }
+    pub fn index_file(&self) -> &Path {
+        &self.index_file
+    }
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
 
     /// `<profiles_dir>/<id>/config.yaml`
     pub fn profile_yaml(&self, id: &str) -> PathBuf {
@@ -125,7 +133,10 @@ impl ProfileStorage {
     /// Create `profiles/` if missing. Idempotent.
     pub fn ensure_dirs(&self) -> Result<(), AppError> {
         fs::create_dir_all(&self.profiles_dir).map_err(|e| {
-            AppError::Io(format!("create profiles dir {}: {e}", self.profiles_dir.display()))
+            AppError::Io(format!(
+                "create profiles dir {}: {e}",
+                self.profiles_dir.display()
+            ))
         })?;
         Ok(())
     }
@@ -134,15 +145,13 @@ impl ProfileStorage {
         if !self.index_file.exists() {
             return Ok(ProfileIndex::default());
         }
-        let raw = fs::read_to_string(&self.index_file).map_err(|e| {
-            AppError::Io(format!("read index.json: {e}"))
-        })?;
+        let raw = fs::read_to_string(&self.index_file)
+            .map_err(|e| AppError::Io(format!("read index.json: {e}")))?;
         if raw.trim().is_empty() {
             return Ok(ProfileIndex::default());
         }
-        let idx: ProfileIndex = serde_json::from_str(&raw).map_err(|e| {
-            AppError::Config(format!("index.json not valid JSON: {e}"))
-        })?;
+        let idx: ProfileIndex = serde_json::from_str(&raw)
+            .map_err(|e| AppError::Config(format!("index.json not valid JSON: {e}")))?;
         Ok(idx)
     }
 
@@ -219,9 +228,8 @@ pub fn save_profile(
 
     let yaml_path = storage.profile_yaml(&id);
     if let Some(parent) = yaml_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            AppError::Io(format!("create profile dir {}: {e}", parent.display()))
-        })?;
+        fs::create_dir_all(parent)
+            .map_err(|e| AppError::Io(format!("create profile dir {}: {e}", parent.display())))?;
     }
     fs::write(&yaml_path, sanitized.as_bytes())
         .map_err(|e| AppError::Io(format!("write profile yaml: {e}")))?;
@@ -246,8 +254,7 @@ pub fn save_profile(
 pub fn delete_profile(storage: &ProfileStorage, id: &str) -> Result<(), AppError> {
     let dir = storage.profiles_dir().join(id);
     if dir.exists() {
-        fs::remove_dir_all(&dir)
-            .map_err(|e| AppError::Io(format!("remove profile dir: {e}")))?;
+        fs::remove_dir_all(&dir).map_err(|e| AppError::Io(format!("remove profile dir: {e}")))?;
     }
     let _ = storage.remove_meta(id);
     Ok(())
@@ -259,17 +266,16 @@ pub fn list_profiles(storage: &ProfileStorage) -> Result<Vec<ProfileMeta>, AppEr
 
 pub fn get_active_profile(storage: &ProfileStorage) -> Result<Option<ProfileMeta>, AppError> {
     let idx = storage.read_index()?;
-    let Some(active_id) = idx.active_id else { return Ok(None) };
+    let Some(active_id) = idx.active_id else {
+        return Ok(None);
+    };
     Ok(idx.profiles.into_iter().find(|p| p.id == active_id))
 }
 
 /// Mark a profile active in the index AND copy its yaml to the active path
 /// (the file mihomo is started with). The Tauri command is responsible for
 /// then calling `reloadConfig` on the running mihomo.
-pub fn activate_profile(
-    storage: &ProfileStorage,
-    id: &str,
-) -> Result<ProfileMeta, AppError> {
+pub fn activate_profile(storage: &ProfileStorage, id: &str) -> Result<ProfileMeta, AppError> {
     let mut idx = storage.read_index()?;
     let Some(meta) = idx.profiles.iter().find(|p| p.id == id).cloned() else {
         return Err(AppError::Config(format!("profile id not found: {id}")));
@@ -296,9 +302,8 @@ pub fn activate_profile(
         }
     }
 
-    fs::copy(&src, storage.active_config()).map_err(|e| {
-        AppError::Io(format!("copy profile -> active config: {e}"))
-    })?;
+    fs::copy(&src, storage.active_config())
+        .map_err(|e| AppError::Io(format!("copy profile -> active config: {e}")))?;
     idx.active_id = Some(id.to_string());
     storage.write_index(&idx)?;
     Ok(meta)
@@ -367,13 +372,22 @@ pub fn patch_and_sanitize_yaml(raw_yaml: &str) -> Result<String, AppError> {
 }
 
 fn insert_str(m: &mut serde_yaml::Mapping, k: &str, v: &str) {
-    m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::String(v.into()));
+    m.insert(
+        serde_yaml::Value::String(k.into()),
+        serde_yaml::Value::String(v.into()),
+    );
 }
 fn insert_bool(m: &mut serde_yaml::Mapping, k: &str, v: bool) {
-    m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::Bool(v));
+    m.insert(
+        serde_yaml::Value::String(k.into()),
+        serde_yaml::Value::Bool(v),
+    );
 }
 fn insert_u64(m: &mut serde_yaml::Mapping, k: &str, v: u64) {
-    m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::Number(v.into()));
+    m.insert(
+        serde_yaml::Value::String(k.into()),
+        serde_yaml::Value::Number(v.into()),
+    );
 }
 
 /// Remove the legacy `port:` / `socks-port:` inbound ports.
@@ -428,7 +442,9 @@ fn inject_cors(m: &mut serde_yaml::Mapping) {
 /// Best-effort node count from a sanitised yaml. Counts entries in
 /// `proxies:` and flattens `proxy-groups:` children.
 fn count_nodes(yaml: &str) -> u32 {
-    let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else { return 0 };
+    let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else {
+        return 0;
+    };
     let Some(map) = v.as_mapping() else { return 0 };
     let mut count = 0u32;
     if let Some(serde_yaml::Value::Sequence(seq)) = map.get("proxies") {
@@ -655,10 +671,16 @@ pub fn toggle_tun_block(
 }
 
 fn insert_str_map(m: &mut serde_yaml::Mapping, k: &str, v: &str) {
-    m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::String(v.into()));
+    m.insert(
+        serde_yaml::Value::String(k.into()),
+        serde_yaml::Value::String(v.into()),
+    );
 }
 fn insert_bool_map(m: &mut serde_yaml::Mapping, k: &str, v: bool) {
-    m.insert(serde_yaml::Value::String(k.into()), serde_yaml::Value::Bool(v));
+    m.insert(
+        serde_yaml::Value::String(k.into()),
+        serde_yaml::Value::Bool(v),
+    );
 }
 
 /// The exact `dns:` mapping we stamp when the active config has none.
@@ -739,7 +761,10 @@ mod tun_yaml_tests {
         let on = toggle_tun_block(
             yaml,
             true,
-            TunAdvanced { strict_route: true, dns_hijack: true },
+            TunAdvanced {
+                strict_route: true,
+                dns_hijack: true,
+            },
         )
         .unwrap();
         assert!(on.contains("strict-route: true"), "{on}");
@@ -749,7 +774,10 @@ mod tun_yaml_tests {
         let off = toggle_tun_block(
             yaml,
             true,
-            TunAdvanced { strict_route: false, dns_hijack: false },
+            TunAdvanced {
+                strict_route: false,
+                dns_hijack: false,
+            },
         )
         .unwrap();
         assert!(off.contains("strict-route: false"), "{off}");
@@ -762,7 +790,10 @@ mod tun_yaml_tests {
             .and_then(|t| t.get("dns-hijack"))
             .and_then(|v| v.as_sequence())
             .expect("dns-hijack must still be present while the switch is off");
-        assert!(hijack.is_empty(), "dns-hijack must be empty when off: {hijack:?}");
+        assert!(
+            hijack.is_empty(),
+            "dns-hijack must be empty when off: {hijack:?}"
+        );
     }
 
     /// Turning strict-route off has to *override* a profile that turned it
@@ -787,7 +818,10 @@ mod tun_yaml_tests {
         let yaml = "mixed-port: 7897\nexternal-controller: 127.0.0.1:9091\n";
         let once = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
         let twice = toggle_tun_block(&once, true, TunAdvanced::default()).unwrap();
-        assert_eq!(once, twice, "toggling enable twice must not mutate the yaml");
+        assert_eq!(
+            once, twice,
+            "toggling enable twice must not mutate the yaml"
+        );
     }
 
     #[test]
@@ -818,8 +852,14 @@ mod tun_yaml_tests {
             .clone();
         let get = |k: &str| dns.get(serde_yaml::Value::String(k.into())).cloned();
         assert_eq!(get("enable").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(get("enhanced-mode").and_then(|v| v.as_str().map(String::from)), Some("fake-ip".into()));
-        assert_eq!(get("fake-ip-range").and_then(|v| v.as_str().map(String::from)), Some("198.18.0.1/16".into()));
+        assert_eq!(
+            get("enhanced-mode").and_then(|v| v.as_str().map(String::from)),
+            Some("fake-ip".into())
+        );
+        assert_eq!(
+            get("fake-ip-range").and_then(|v| v.as_str().map(String::from)),
+            Some("198.18.0.1/16".into())
+        );
         let ns = get("nameserver").unwrap();
         let ns = ns.as_sequence().unwrap();
         assert_eq!(ns.len(), 2);
@@ -834,9 +874,18 @@ mod tun_yaml_tests {
                     dns:\n  enable: true\n  enhanced-mode: fake-ip\n  respect-rules: true\n\
                     \x20 nameserver:\n    - https://1.1.1.1/dns-query\n";
         let out = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
-        assert!(out.contains("respect-rules: true"), "profile dns block was rewritten:\n{out}");
-        assert!(out.contains("https://1.1.1.1/dns-query"), "profile nameserver lost:\n{out}");
-        assert!(!out.contains("119.29.29.29"), "our nameserver leaked into a profile-owned dns block:\n{out}");
+        assert!(
+            out.contains("respect-rules: true"),
+            "profile dns block was rewritten:\n{out}"
+        );
+        assert!(
+            out.contains("https://1.1.1.1/dns-query"),
+            "profile nameserver lost:\n{out}"
+        );
+        assert!(
+            !out.contains("119.29.29.29"),
+            "our nameserver leaked into a profile-owned dns block:\n{out}"
+        );
     }
 
     #[test]
@@ -845,13 +894,19 @@ mod tun_yaml_tests {
         let on = toggle_tun_block("mixed-port: 7897\n", true, TunAdvanced::default()).unwrap();
         let off = toggle_tun_block(&on, false, TunAdvanced::default()).unwrap();
         let doc: serde_yaml::Value = serde_yaml::from_str(&off).unwrap();
-        assert!(doc.as_mapping().unwrap().get("dns").is_none(), "our dns block survived disable:\n{off}");
+        assert!(
+            doc.as_mapping().unwrap().get("dns").is_none(),
+            "our dns block survived disable:\n{off}"
+        );
 
         // ...but a profile-owned one must survive the round trip.
         let with_own = "mixed-port: 7897\ndns:\n  enable: true\n  nameserver:\n    - 223.5.5.5\n";
         let on2 = toggle_tun_block(with_own, true, TunAdvanced::default()).unwrap();
         let off2 = toggle_tun_block(&on2, false, TunAdvanced::default()).unwrap();
-        assert!(off2.contains("nameserver:"), "profile-owned dns removed by disable:\n{off2}");
+        assert!(
+            off2.contains("nameserver:"),
+            "profile-owned dns removed by disable:\n{off2}"
+        );
     }
 
     /// Regression guard for the actual defect: the bundled default is what a
@@ -875,7 +930,10 @@ mod tun_yaml_tests {
             get("enhanced-mode").and_then(|v| v.as_str().map(String::from)),
             Some("fake-ip".into())
         );
-        assert!(get("nameserver").is_some(), "default dns block has no nameserver");
+        assert!(
+            get("nameserver").is_some(),
+            "default dns block has no nameserver"
+        );
         // And it must not be pointing at a fake-ip range that bypasses the
         // documented 198.18.0.0/15 test expectation.
         assert_eq!(

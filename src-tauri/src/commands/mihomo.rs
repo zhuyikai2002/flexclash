@@ -15,7 +15,6 @@
 
 use serde_json::Value;
 
-
 use crate::config::profile::RESERVED_CONTROLLER;
 use crate::core::urlenc::percent_encode;
 use crate::error::AppError;
@@ -67,14 +66,17 @@ async fn mihomo_request(
         let text = String::from_utf8_lossy(&bytes).into_owned();
         return Err(AppError::Mihomo(format!(
             "mihomo HTTP {status} on {path}: {}",
-            if text.trim().is_empty() { "(empty body)" } else { text.trim() }
+            if text.trim().is_empty() {
+                "(empty body)"
+            } else {
+                text.trim()
+            }
         )));
     }
     if bytes.is_empty() {
         return Ok(Value::Null);
     }
-    serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::Mihomo(format!("parse {url}: {e}")))
+    serde_json::from_slice(&bytes).map_err(|e| AppError::Mihomo(format!("parse {url}: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +85,10 @@ async fn mihomo_request(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mihomo_version(
-    
-) -> CmdResult<String> {
-    mihomo_request(reqwest::Method::GET, "/version", None, 2_000).await.map(|v| v.to_string())
+pub async fn get_mihomo_version() -> CmdResult<String> {
+    mihomo_request(reqwest::Method::GET, "/version", None, 2_000)
+        .await
+        .map(|v| v.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -95,36 +97,37 @@ pub async fn get_mihomo_version(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mihomo_configs(
-    
-) -> CmdResult<String> {
-    mihomo_request(reqwest::Method::GET, "/configs", None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
+pub async fn get_mihomo_configs() -> CmdResult<String> {
+    mihomo_request(reqwest::Method::GET, "/configs", None, DEFAULT_TIMEOUT_MS)
+        .await
+        .map(|v| v.to_string())
 }
 
 /// PATCH /configs — outbound mode switch (`{"mode": "rule"}`), etc.
 #[tauri::command]
 #[specta::specta]
-pub async fn patch_mihomo_config(
-    
-    mode: String,
-) -> CmdResult<()> {
-    mihomo_request(reqwest::Method::PATCH, "/configs", Some(serde_json::json!({ "mode": mode })), DEFAULT_TIMEOUT_MS)
-        .await
-        .map(|_| ())
+pub async fn patch_mihomo_config(mode: String) -> CmdResult<()> {
+    mihomo_request(
+        reqwest::Method::PATCH,
+        "/configs",
+        Some(serde_json::json!({ "mode": mode })),
+        DEFAULT_TIMEOUT_MS,
+    )
+    .await
+    .map(|_| ())
 }
 
 /// PUT /configs — hot-reload. `path: None` reloads the current config;
 /// `Some(path)` loads that yaml file. `force` mirrors `?force=true`.
 #[tauri::command]
 #[specta::specta]
-pub async fn reload_mihomo_config(
-    
-    path: Option<String>,
-    force: Option<bool>,
-) -> CmdResult<()> {
+pub async fn reload_mihomo_config(path: Option<String>, force: Option<bool>) -> CmdResult<()> {
     let force = force.unwrap_or(true);
     let (query, body) = match &path {
-        Some(p) => (format!("?force={force}"), Some(serde_json::json!({ "path": p }))),
+        Some(p) => (
+            format!("?force={force}"),
+            Some(serde_json::json!({ "path": p })),
+        ),
         None => (format!("?force={force}"), None),
     };
     mihomo_request(
@@ -143,21 +146,20 @@ pub async fn reload_mihomo_config(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mihomo_proxies(
-    
-) -> CmdResult<String> {
-    mihomo_request(reqwest::Method::GET, "/proxies", None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
+pub async fn get_mihomo_proxies() -> CmdResult<String> {
+    mihomo_request(reqwest::Method::GET, "/proxies", None, DEFAULT_TIMEOUT_MS)
+        .await
+        .map(|v| v.to_string())
 }
 
 /// GET /proxies/{name} — single proxy / group read.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mihomo_proxy(
-    
-    name: String,
-) -> CmdResult<String> {
+pub async fn get_mihomo_proxy(name: String) -> CmdResult<String> {
     let path = format!("/proxies/{}", percent_encode(&name));
-    mihomo_request(reqwest::Method::GET, &path, None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
+    mihomo_request(reqwest::Method::GET, &path, None, DEFAULT_TIMEOUT_MS)
+        .await
+        .map(|v| v.to_string())
 }
 
 /// PUT /proxies/{group} — switch the active child of a Selector group.
@@ -168,17 +170,10 @@ pub async fn get_mihomo_proxy(
 /// frontend falls back to optimistic state.
 #[tauri::command]
 #[specta::specta]
-pub async fn select_mihomo_proxy(
-    
-    group: String,
-    proxy: String,
-) -> CmdResult<String> {
+pub async fn select_mihomo_proxy(group: String, proxy: String) -> CmdResult<String> {
     // Tight 1.5 s budget: a hung controller must not wedge the UI.
     const SELECT_TIMEOUT_MS: u64 = 1_500;
-    let path = format!(
-        "/proxies/{}",
-        percent_encode(&group)
-    );
+    let path = format!("/proxies/{}", percent_encode(&group));
     // 1) Issue the switch; propagate transport/HTTP errors, ignore body.
     mihomo_request(
         reqwest::Method::PUT,
@@ -200,7 +195,6 @@ pub async fn select_mihomo_proxy(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_mihomo_proxy_delay(
-    
     name: String,
     url: Option<String>,
     timeout_ms: Option<u32>,
@@ -213,7 +207,9 @@ pub async fn get_mihomo_proxy_delay(
         percent_encode(&u),
         t
     );
-    mihomo_request(reqwest::Method::GET, &path, None, t).await.map(|v| v.to_string())
+    mihomo_request(reqwest::Method::GET, &path, None, t)
+        .await
+        .map(|v| v.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -222,18 +218,20 @@ pub async fn get_mihomo_proxy_delay(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mihomo_connections(
-    
-) -> CmdResult<String> {
-    mihomo_request(reqwest::Method::GET, "/connections", None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
+pub async fn get_mihomo_connections() -> CmdResult<String> {
+    mihomo_request(
+        reqwest::Method::GET,
+        "/connections",
+        None,
+        DEFAULT_TIMEOUT_MS,
+    )
+    .await
+    .map(|v| v.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn close_mihomo_connection(
-    
-    id: String,
-) -> CmdResult<()> {
+pub async fn close_mihomo_connection(id: String) -> CmdResult<()> {
     let path = format!("/connections/{}", percent_encode(&id));
     mihomo_request(reqwest::Method::DELETE, &path, None, DEFAULT_TIMEOUT_MS)
         .await
@@ -242,12 +240,15 @@ pub async fn close_mihomo_connection(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn close_all_mihomo_connections(
-    
-) -> CmdResult<()> {
-    mihomo_request(reqwest::Method::DELETE, "/connections", None, DEFAULT_TIMEOUT_MS)
-        .await
-        .map(|_| ())
+pub async fn close_all_mihomo_connections() -> CmdResult<()> {
+    mihomo_request(
+        reqwest::Method::DELETE,
+        "/connections",
+        None,
+        DEFAULT_TIMEOUT_MS,
+    )
+    .await
+    .map(|_| ())
 }
 
 // ---------------------------------------------------------------------------
@@ -256,8 +257,8 @@ pub async fn close_all_mihomo_connections(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mihomo_rules(
-    
-) -> CmdResult<String> {
-    mihomo_request(reqwest::Method::GET, "/rules", None, DEFAULT_TIMEOUT_MS).await.map(|v| v.to_string())
+pub async fn get_mihomo_rules() -> CmdResult<String> {
+    mihomo_request(reqwest::Method::GET, "/rules", None, DEFAULT_TIMEOUT_MS)
+        .await
+        .map(|v| v.to_string())
 }

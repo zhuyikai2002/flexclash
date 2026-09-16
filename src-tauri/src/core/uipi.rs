@@ -34,9 +34,7 @@
 #[cfg(target_os = "windows")]
 pub fn relax_drag_drop_for_window(hwnd: isize) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        ChangeWindowMessageFilterEx, MSGFLT_ALLOW,
-    };
+    use windows::Win32::UI::WindowsAndMessaging::{ChangeWindowMessageFilterEx, MSGFLT_ALLOW};
 
     // Canonical Win32 message IDs.
     const WM_DROPFILES: u32 = 0x0233;

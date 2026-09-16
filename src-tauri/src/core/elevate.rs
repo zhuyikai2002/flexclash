@@ -189,7 +189,10 @@ mod platform {
         Err(AppError::Tun(format!(
             "mihomo binary not found in any of the {} search paths; first candidate was {}",
             candidates.len(),
-            candidates.first().map(|p| p.display().to_string()).unwrap_or_default(),
+            candidates
+                .first()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
         )))
     }
 
@@ -240,9 +243,7 @@ mod platform {
             // The most common failure here is ERROR_CANCELLED (1223) —
             // the user dismissed the UAC dialog. We map that to a
             // dedicated variant for the UI to render a friendly toast.
-            return Err(AppError::Tun(format!(
-                "ShellExecuteExW(runas) failed: {e}"
-            )));
+            return Err(AppError::Tun(format!("ShellExecuteExW(runas) failed: {e}")));
         }
         // `hInstApp` > 32 indicates success per ShellExecute docs.
         // HINSTANCE is a pointer; cast to isize to compare against
@@ -323,7 +324,9 @@ mod platform {
         let waited = unsafe { WaitForSingleObject(process, TIMEOUT_MS) };
         if waited != WAIT_OBJECT_0 {
             // SAFETY: releasing the handle we asked for above.
-            unsafe { let _ = CloseHandle(process); }
+            unsafe {
+                let _ = CloseHandle(process);
+            }
             return Err(AppError::Elevation(format!(
                 "elevated helper did not exit within {TIMEOUT_MS} ms"
             )));
@@ -333,7 +336,9 @@ mod platform {
         // SAFETY: valid handle, valid out-pointer.
         let status = unsafe { GetExitCodeProcess(process, &mut code) };
         // SAFETY: same handle; must be closed because we created it.
-        unsafe { let _ = CloseHandle(process); }
+        unsafe {
+            let _ = CloseHandle(process);
+        }
 
         status.map_err(|e| AppError::Elevation(format!("GetExitCodeProcess: {e}")))?;
         Ok(code as i32)
@@ -452,9 +457,7 @@ pub fn spawn_elevated_mihomo<R: Runtime>(app: &AppHandle<R>) -> Result<u32> {
     let binary = platform::resolve_mihomo_binary(app, &work_dir)?;
 
     let pid = platform::runas_spawn(&binary, &work_dir, &config_path)?;
-    *registry()
-        .lock()
-        .expect("elevated registry poisoned") = Some(ElevatedChild { pid });
+    *registry().lock().expect("elevated registry poisoned") = Some(ElevatedChild { pid });
     Ok(pid)
 }
 

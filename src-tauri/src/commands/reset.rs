@@ -232,9 +232,12 @@ pub async fn reset_application<R: Runtime>(
         Ok(db) => {
             let stem = db.to_string_lossy().into_owned();
             for suffix in ["", "-wal", "-shm", "-journal"] {
-                report.removed_history_bytes = report
-                    .removed_history_bytes
-                    .saturating_add(remove_file_if_present(Path::new(&format!("{stem}{suffix}"))));
+                report.removed_history_bytes =
+                    report
+                        .removed_history_bytes
+                        .saturating_add(remove_file_if_present(Path::new(&format!(
+                            "{stem}{suffix}"
+                        ))));
             }
         }
         Err(e) => eprintln!("[reset] history db path: {e}"),

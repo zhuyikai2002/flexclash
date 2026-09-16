@@ -137,11 +137,13 @@ pub fn run() {
                     }
 
                     // 2. 最终防线：AcceleratorKeyPressed 精确拦截。
-                    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(
-                        move |_, args| {
+                    let handler =
+                        AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
                             let Some(args) = args else { return Ok(()) };
                             let mut kind = COREWEBVIEW2_KEY_EVENT_KIND(0);
-                            unsafe { args.KeyEventKind(&mut kind)?; }
+                            unsafe {
+                                args.KeyEventKind(&mut kind)?;
+                            }
                             // 只处理按下事件，忽略抬起/重复。
                             if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
                                 && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
@@ -149,7 +151,9 @@ pub fn run() {
                                 return Ok(());
                             }
                             let mut vk: u32 = 0;
-                            unsafe { args.VirtualKey(&mut vk)?; }
+                            unsafe {
+                                args.VirtualKey(&mut vk)?;
+                            }
 
                             // 修饰键状态（Ctrl = 0x11, Shift = 0x10）。
                             use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
@@ -171,20 +175,16 @@ pub fn run() {
                                 _ => false,
                             };
                             if block {
-                                unsafe { args.SetHandled(true)?; }
+                                unsafe {
+                                    args.SetHandled(true)?;
+                                }
                             }
                             Ok(())
-                        },
-                    ));
+                        }));
                     let mut token: i64 = 0;
-                    if unsafe {
-                        controller.add_AcceleratorKeyPressed(&handler, &mut token)
-                    }
-                    .is_ok()
+                    if unsafe { controller.add_AcceleratorKeyPressed(&handler, &mut token) }.is_ok()
                     {
-                        eprintln!(
-                            "[startup] WebView2 DevTools + accelerator keys hard-blocked"
-                        );
+                        eprintln!("[startup] WebView2 DevTools + accelerator keys hard-blocked");
                     }
                 });
 

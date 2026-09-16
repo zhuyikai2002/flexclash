@@ -67,23 +67,33 @@ pub enum AppError {
 }
 
 impl From<std::io::Error> for AppError {
-    fn from(e: std::io::Error) -> Self { AppError::Io(e.to_string()) }
+    fn from(e: std::io::Error) -> Self {
+        AppError::Io(e.to_string())
+    }
 }
 
 impl From<tauri::Error> for AppError {
-    fn from(e: tauri::Error) -> Self { AppError::Other(e.to_string()) }
+    fn from(e: tauri::Error) -> Self {
+        AppError::Other(e.to_string())
+    }
 }
 
 impl From<tauri_plugin_shell::Error> for AppError {
-    fn from(e: tauri_plugin_shell::Error) -> Self { AppError::Shell(e.to_string()) }
+    fn from(e: tauri_plugin_shell::Error) -> Self {
+        AppError::Shell(e.to_string())
+    }
 }
 
 impl From<serde_json::Error> for AppError {
-    fn from(e: serde_json::Error) -> Self { AppError::Config(e.to_string()) }
+    fn from(e: serde_json::Error) -> Self {
+        AppError::Config(e.to_string())
+    }
 }
 
 impl From<rusqlite::Error> for AppError {
-    fn from(e: rusqlite::Error) -> Self { AppError::Storage(e.to_string()) }
+    fn from(e: rusqlite::Error) -> Self {
+        AppError::Storage(e.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

@@ -45,7 +45,10 @@ pub async fn fetch_subscription(
 
     let resp = client
         .get(url)
-        .header("Accept", "application/yaml, text/yaml, text/plain;q=0.9, */*;q=0.5")
+        .header(
+            "Accept",
+            "application/yaml, text/yaml, text/plain;q=0.9, */*;q=0.5",
+        )
         .send()
         .await
         .map_err(|e| AppError::Subscription(format!("GET {url}: {e}")))?;
@@ -95,21 +98,21 @@ fn sniff_subscription(body: &str) -> Result<(), AppError> {
 
     // HTML (e.g. a login wall or provider error page).
     let trimmed = body.trim_start();
-    if trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with("<html") || trimmed.starts_with("<head") {
+    if trimmed.starts_with("<!DOCTYPE")
+        || trimmed.starts_with("<html")
+        || trimmed.starts_with("<head")
+    {
         return Err(AppError::Subscription(
             "subscription returned an HTML page instead of YAML — the link may be expired or require login".into(),
         ));
     }
 
     // Base64 node dump: mostly [A-Za-z0-9+/=], whitespace, length >= 48.
-    let compact: String = body
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+    let compact: String = body.chars().filter(|c| !c.is_whitespace()).collect();
     let looks_base64 = compact.len() >= 48
-        && compact.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=')
-        });
+        && compact
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='));
     if looks_base64 {
         return Err(AppError::Subscription(
             "subscription returned a Base64 node list instead of YAML — enable the provider's Clash/meta subscription, or run it through a subscription-converter".into(),
@@ -122,12 +125,18 @@ fn sniff_subscription(body: &str) -> Result<(), AppError> {
 /// Parse a `subscription-userinfo` header value into structured fields.
 /// Returns `SubscriptionUserInfo::default()` for any malformed/missing input.
 pub fn parse_user_info_header(raw: Option<&str>) -> SubscriptionUserInfo {
-    let Some(raw) = raw else { return SubscriptionUserInfo::default() };
+    let Some(raw) = raw else {
+        return SubscriptionUserInfo::default();
+    };
     let mut out = SubscriptionUserInfo::default();
     for part in raw.split(';') {
         let part = part.trim();
-        if part.is_empty() { continue; }
-        let Some((k, v)) = part.split_once('=') else { continue; };
+        if part.is_empty() {
+            continue;
+        }
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
         let k = k.trim();
         let v = v.trim();
         match k {
@@ -136,7 +145,8 @@ pub fn parse_user_info_header(raw: Option<&str>) -> SubscriptionUserInfo {
             "total" => out.total = v.parse().ok(),
             "expire" => {
                 if let Ok(ts) = v.parse::<i64>() {
-                    out.expire_at = Some(Utc.timestamp_opt(ts, 0).single().unwrap_or_else(Utc::now));
+                    out.expire_at =
+                        Some(Utc.timestamp_opt(ts, 0).single().unwrap_or_else(Utc::now));
                 }
             }
             _ => { /* ignore unknown keys */ }

@@ -23,8 +23,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{AppHandle, Runtime};
 use tauri::Emitter;
+use tauri::{AppHandle, Runtime};
 
 use crate::error::Result;
 use crate::store::migrations;
@@ -63,10 +63,16 @@ pub struct SamplerHandle {
 }
 
 impl SamplerHandle {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    pub fn cancel(&self) { self.cancel.store(true, Ordering::SeqCst); }
-    pub fn is_running(&self) -> bool { self.running.load(Ordering::SeqCst) }
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
 }
 
 /// Spawn the sampler + pruner background tasks. Returns a handle for
@@ -118,17 +124,29 @@ async fn sample_loop<R: Runtime>(handle: SamplerHandle, db: HistoryDb, app: AppH
     eprintln!("[sampler] cancelled, exiting loop");
 }
 
-async fn fetch_and_record(client: &reqwest::Client, db: &HistoryDb) -> std::result::Result<(), SampleError> {
-    let resp = client.get(MIHOMO_TRAFFIC_URL).send().await
+async fn fetch_and_record(
+    client: &reqwest::Client,
+    db: &HistoryDb,
+) -> std::result::Result<(), SampleError> {
+    let resp = client
+        .get(MIHOMO_TRAFFIC_URL)
+        .send()
+        .await
         .map_err(|e| SampleError::Unreachable(e.to_string()))?;
     if !resp.status().is_success() {
         return Err(SampleError::Http(resp.status().as_u16()));
     }
-    let body: serde_json::Value = resp.json().await
+    let body: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| SampleError::BadShape(e.to_string()))?;
-    let up = body.get("up").and_then(|v| v.as_i64())
+    let up = body
+        .get("up")
+        .and_then(|v| v.as_i64())
         .ok_or_else(|| SampleError::BadShape("missing up".into()))?;
-    let down = body.get("down").and_then(|v| v.as_i64())
+    let down = body
+        .get("down")
+        .and_then(|v| v.as_i64())
         .ok_or_else(|| SampleError::BadShape("missing down".into()))?;
     // 5-second sample window: rate * 5. Saturate at i64 max.
     let bytes_up = up.saturating_mul(SAMPLE_INTERVAL.as_secs() as i64);

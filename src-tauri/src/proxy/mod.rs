@@ -17,16 +17,24 @@ pub mod unix;
 /// surface a clear "not implemented" toast.
 pub fn set_system_proxy(port: u16) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    { windows::set_system_proxy(port) }
+    {
+        windows::set_system_proxy(port)
+    }
     #[cfg(not(target_os = "windows"))]
-    { unix::set_system_proxy(port) }
+    {
+        unix::set_system_proxy(port)
+    }
 }
 
 pub fn disable_system_proxy() -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    { windows::disable_system_proxy() }
+    {
+        windows::disable_system_proxy()
+    }
     #[cfg(not(target_os = "windows"))]
-    { unix::disable_system_proxy() }
+    {
+        unix::disable_system_proxy()
+    }
 }
 
 /// Read the current effective system-proxy state from the registry.
@@ -36,9 +44,13 @@ pub fn disable_system_proxy() -> Result<(), String> {
 ///   * `None` if the keys are missing entirely
 pub fn query_system_proxy_status() -> Option<ProxyStatus> {
     #[cfg(target_os = "windows")]
-    { windows::query_system_proxy_status() }
+    {
+        windows::query_system_proxy_status()
+    }
     #[cfg(not(target_os = "windows"))]
-    { unix::query_system_proxy_status() }
+    {
+        unix::query_system_proxy_status()
+    }
 }
 
 /// Convenience: parse "host:port" into `(host, port)`.
@@ -61,8 +73,7 @@ pub struct ProxyStatus {
 
 /// Default bypass list we apply when we *enable* the proxy. Keeps LAN
 /// resources reachable and avoids routing the loopback to mihomo.
-pub const DEFAULT_PROXY_OVERRIDE: &str =
-    "localhost;127.*;10.*;172.16.*;192.168.*;<local>";
+pub const DEFAULT_PROXY_OVERRIDE: &str = "localhost;127.*;10.*;172.16.*;192.168.*;<local>";
 
 /// Extra time we wait between writing the registry and refreshing WinINET.
 /// 200ms is enough for HKCU writes to settle on Windows 10/11.

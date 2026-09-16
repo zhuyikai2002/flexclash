@@ -15,10 +15,7 @@ use crate::store::queries::{HistoryDb, TrafficHistory};
 /// line even when the kernel was off for part of the window.
 #[tauri::command]
 #[specta::specta]
-pub fn get_traffic_history(
-    db: State<'_, HistoryDb>,
-    range: String,
-) -> Result<TrafficHistory> {
+pub fn get_traffic_history(db: State<'_, HistoryDb>, range: String) -> Result<TrafficHistory> {
     db.query_history(&range)
 }
 

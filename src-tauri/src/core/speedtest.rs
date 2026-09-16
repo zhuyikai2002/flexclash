@@ -378,7 +378,8 @@ pub fn spawn_run(
         // `.max(1)` so a stray 0 can never produce a zero-length deadline that
         // fails every probe instantly.
         timeout_ms: timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).max(1),
-        concurrency: (concurrency.unwrap_or(DEFAULT_CONCURRENCY) as usize).clamp(1, MAX_CONCURRENCY),
+        concurrency: (concurrency.unwrap_or(DEFAULT_CONCURRENCY) as usize)
+            .clamp(1, MAX_CONCURRENCY),
     };
 
     let run_id = registry.begin(&spec.group);
@@ -416,8 +417,10 @@ async fn run_pool(app: AppHandle, registry: std::sync::Arc<SpeedTestRegistry>, s
             // Cannot probe anything. Still emit a definite status per node and
             // a terminal event, so no card is left spinning.
             let reason = format!("could not build http client: {e}");
-            let results: Vec<NodeProbe> =
-                nodes.iter().map(|n| NodeProbe::error(n, reason.clone())).collect();
+            let results: Vec<NodeProbe> = nodes
+                .iter()
+                .map(|n| NodeProbe::error(n, reason.clone()))
+                .collect();
             emit_batch(&app, run_id, &group, results, total, total);
             emit_done(
                 &app,
@@ -468,7 +471,14 @@ async fn run_pool(app: AppHandle, registry: std::sync::Arc<SpeedTestRegistry>, s
         batch.push(probe);
 
         if batch.len() >= BATCH_SIZE {
-            emit_batch(&app, run_id, &group, std::mem::take(&mut batch), done, total);
+            emit_batch(
+                &app,
+                run_id,
+                &group,
+                std::mem::take(&mut batch),
+                done,
+                total,
+            );
             batch = Vec::with_capacity(BATCH_SIZE);
         }
     }
@@ -497,7 +507,14 @@ async fn run_pool(app: AppHandle, registry: std::sync::Arc<SpeedTestRegistry>, s
 
 /// Emit one progress batch. Emission failures are swallowed: a webview that
 /// went away must not abort a run, and there is nothing useful to do about it.
-fn emit_batch(app: &AppHandle, run_id: u32, group: &str, results: Vec<NodeProbe>, done: u32, total: u32) {
+fn emit_batch(
+    app: &AppHandle,
+    run_id: u32,
+    group: &str,
+    results: Vec<NodeProbe>,
+    done: u32,
+    total: u32,
+) {
     if results.is_empty() {
         return;
     }
@@ -555,7 +572,11 @@ mod tests {
 
     #[test]
     fn classify_504_is_timeout() {
-        let p = classify("n1", 504, r#"{"message":"An error occurred in the delay test"}"#);
+        let p = classify(
+            "n1",
+            504,
+            r#"{"message":"An error occurred in the delay test"}"#,
+        );
         assert_eq!(p.status, ProbeStatus::Timeout);
     }
 

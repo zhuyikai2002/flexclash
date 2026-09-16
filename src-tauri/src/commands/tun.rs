@@ -23,9 +23,7 @@ use crate::tray;
 /// comes up with no profiles, no rules and no DNS: "TUN is on but nothing is
 /// proxied". `work_dir_for` derives the path from `app.path()` instead, so
 /// it is correct from the very first call.
-fn storage_for<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<crate::config::profile::ProfileStorage> {
+fn storage_for<R: Runtime>(app: &AppHandle<R>) -> Result<crate::config::profile::ProfileStorage> {
     let work = sidecar::work_dir_for(app)?;
     Ok(crate::config::profile::ProfileStorage::new(&work))
 }
@@ -106,7 +104,10 @@ pub async fn apply_tun_advanced<R: Runtime>(
         .try_state::<TunManager>()
         .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
     let storage = storage_for(&app)?;
-    let advanced = TunAdvanced { strict_route, dns_hijack };
+    let advanced = TunAdvanced {
+        strict_route,
+        dns_hijack,
+    };
 
     match mgr.repatch_for_advanced(&storage, advanced)? {
         // TUN is off (or mid-transition): nothing running to reload.

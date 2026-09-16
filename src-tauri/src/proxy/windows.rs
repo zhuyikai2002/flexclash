@@ -24,8 +24,7 @@ use winreg::RegKey;
 
 use super::{parse_proxy_server, ProxyStatus, DEFAULT_PROXY_OVERRIDE, POST_WRITE_SETTLE};
 
-const INTERNET_SETTINGS_PATH: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+const INTERNET_SETTINGS_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
 // ---------------------------------------------------------------------------
 // Public surface

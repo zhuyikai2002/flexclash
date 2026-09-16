@@ -32,8 +32,12 @@ use crate::tray;
 pub struct ExitFlag(pub Arc<AtomicBool>);
 
 impl ExitFlag {
-    pub fn request(&self) { self.0.store(true, Ordering::SeqCst); }
-    pub fn should_exit(&self) -> bool { self.0.load(Ordering::SeqCst) }
+    pub fn request(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+    pub fn should_exit(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 /// Install window-close hook. Call once from `setup`.
@@ -42,7 +46,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn install_window_close_hook<R: Runtime>(app: &AppHandle<R>) {
-    let Some(win) = app.get_webview_window("main") else { return; };
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
     let app_handle = app.clone();
     win.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {

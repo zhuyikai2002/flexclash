@@ -27,8 +27,7 @@ CREATE TABLE IF NOT EXISTS traffic_samples (
     download INTEGER NOT NULL
 )"#;
 
-const CREATE_IDX: &str =
-    "CREATE INDEX IF NOT EXISTS idx_traffic_ts ON traffic_samples(ts)";
+const CREATE_IDX: &str = "CREATE INDEX IF NOT EXISTS idx_traffic_ts ON traffic_samples(ts)";
 
 /// Run the migration on a fresh or already-initialised connection.
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -52,10 +51,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 /// deleted so callers can surface it in logs / a future admin command.
 pub fn prune(conn: &Connection) -> Result<usize> {
     let cutoff_ms: i64 = now_ms() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    let n = conn.execute(
-        "DELETE FROM traffic_samples WHERE ts < ?1",
-        [cutoff_ms],
-    )?;
+    let n = conn.execute("DELETE FROM traffic_samples WHERE ts < ?1", [cutoff_ms])?;
     Ok(n)
 }
 

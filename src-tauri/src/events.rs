@@ -48,4 +48,3 @@ pub const PROXY_DELAY_BATCH: &str = "proxy://delay-batch";
 /// guaranteed terminal event a cancelled run would leave every node spinner
 /// stuck forever.
 pub const PROXY_DELAY_DONE: &str = "proxy://delay-done";
-

@@ -23,9 +23,9 @@
 // ============================================================================
 
 #[cfg(target_os = "windows")]
-use std::process::Command;
-#[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+use std::process::Command;
 /// Hide child consoles when invoking netsh / route (no cmd flash on TUN ops).
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -78,7 +78,9 @@ pub fn sweep_residual_routes() -> SweepResultFull {
 
     #[cfg(not(target_os = "windows"))]
     {
-        result.message.push_str("sweep is a no-op on non-Windows (Phase 1 Windows-only)");
+        result
+            .message
+            .push_str("sweep is a no-op on non-Windows (Phase 1 Windows-only)");
     }
 
     if result.message.is_empty() {
@@ -138,8 +140,8 @@ pub fn parse_auto_route_rows(text: &str) -> Vec<AutoRoute> {
             continue;
         }
         let (destination, netmask, gateway) = (cols[0], cols[1], cols[2]);
-        let is_split_default = (destination == "0.0.0.0" || destination == "128.0.0.0")
-            && netmask == "128.0.0.0";
+        let is_split_default =
+            (destination == "0.0.0.0" || destination == "128.0.0.0") && netmask == "128.0.0.0";
         if !is_split_default {
             continue;
         }
@@ -166,7 +168,8 @@ pub fn parse_auto_route_rows(text: &str) -> Vec<AutoRoute> {
 fn sweep_routes_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     // Look for the two split-default routes mihomo adds when auto-route is
     // on, then issue one `route delete` per matching row.
-    let out = Command::new("route").creation_flags(CREATE_NO_WINDOW)
+    let out = Command::new("route")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["print", "-4"])
         .output()?;
     if !out.status.success() {
@@ -175,7 +178,8 @@ fn sweep_routes_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     for row in parse_auto_route_rows(&text) {
-        let del = Command::new("route").creation_flags(CREATE_NO_WINDOW)
+        let del = Command::new("route")
+            .creation_flags(CREATE_NO_WINDOW)
             .args(["delete", &row.destination, "mask", &row.netmask])
             .output();
         if let Ok(d) = del {
@@ -197,7 +201,8 @@ fn sweep_adapter_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     // exactly "flexclash-tun". If found and the device is administratively
     // down, we delete it via `netsh interface set interface ... disabled`
     // followed by `netsh interface delete interface ...`.
-    let out = Command::new("netsh").creation_flags(CREATE_NO_WINDOW)
+    let out = Command::new("netsh")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["interface", "show", "interface"])
         .output()?;
     if !out.status.success() {
@@ -220,15 +225,19 @@ fn sweep_adapter_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     }
     // Best-effort: disable first, then delete. Both are silent if the
     // device is already gone.
-    let _ = Command::new("netsh").creation_flags(CREATE_NO_WINDOW)
+    let _ = Command::new("netsh")
+        .creation_flags(CREATE_NO_WINDOW)
         .args([
-            "interface", "set", "interface", TUN_DEVICE_NAME, "admin=disable",
+            "interface",
+            "set",
+            "interface",
+            TUN_DEVICE_NAME,
+            "admin=disable",
         ])
         .output();
-    let del = Command::new("netsh").creation_flags(CREATE_NO_WINDOW)
-        .args([
-            "interface", "delete", "interface", TUN_DEVICE_NAME,
-        ])
+    let del = Command::new("netsh")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["interface", "delete", "interface", TUN_DEVICE_NAME])
         .output();
     if let Ok(d) = del {
         if d.status.success() {
@@ -303,7 +312,11 @@ Persistent Routes:
     #[test]
     fn parses_the_two_split_default_routes() {
         let rows = parse_auto_route_rows(SAMPLE_ROUTE_PRINT);
-        assert_eq!(rows.len(), 2, "expected exactly the 0.0.0.0/1 + 128.0.0.0/1 pair, got {rows:?}");
+        assert_eq!(
+            rows.len(),
+            2,
+            "expected exactly the 0.0.0.0/1 + 128.0.0.0/1 pair, got {rows:?}"
+        );
         assert_eq!(rows[0].destination, "0.0.0.0");
         assert_eq!(rows[0].netmask, "128.0.0.0");
         assert_eq!(rows[0].gateway, "198.18.0.1");
@@ -344,7 +357,10 @@ Persistent Routes:
     fn leaves_split_defaults_on_a_foreign_gateway_alone() {
         let foreign = "          0.0.0.0        128.0.0.0          8.8.8.8      10.0.0.9      1\n\
                                 128.0.0.0        128.0.0.0          8.8.8.8      10.0.0.9      1\n";
-        assert!(parse_auto_route_rows(foreign).is_empty(), "deleted a non-TUN split default");
+        assert!(
+            parse_auto_route_rows(foreign).is_empty(),
+            "deleted a non-TUN split default"
+        );
     }
 
     #[test]

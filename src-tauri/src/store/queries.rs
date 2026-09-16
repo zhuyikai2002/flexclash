@@ -72,7 +72,9 @@ impl HistoryDb {
         })
     }
 
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 
     /// Append a single sample. Called by the sampler task every 5s.
     pub fn insert_sample(&self, ts_ms: i64, upload: i64, download: i64) -> Result<()> {
@@ -105,10 +107,14 @@ impl HistoryDb {
     /// (28 × 6h). Returns an error for unknown values.
     pub fn query_history(&self, range: &str) -> Result<TrafficHistory> {
         let (window_ms, bucket_ms, max_buckets) = match range {
-            "1h"  => (60 * 60 * 1000i64,                60 * 1000i64,            60),
-            "24h" => (24 * 60 * 60 * 1000i64,           60 * 60 * 1000i64,       24),
-            "7d"  => (7 * 24 * 60 * 60 * 1000i64,       6 * 60 * 60 * 1000i64,   28),
-            other => return Err(AppError::Other(format!("history range '{other}' is not supported"))),
+            "1h" => (60 * 60 * 1000i64, 60 * 1000i64, 60),
+            "24h" => (24 * 60 * 60 * 1000i64, 60 * 60 * 1000i64, 24),
+            "7d" => (7 * 24 * 60 * 60 * 1000i64, 6 * 60 * 60 * 1000i64, 28),
+            other => {
+                return Err(AppError::Other(format!(
+                    "history range '{other}' is not supported"
+                )))
+            }
         };
         let now = migrations::now_ms();
         // `start` is the conceptual lower bound; the actual SQL filter
@@ -127,7 +133,8 @@ impl HistoryDb {
              GROUP BY bucket
              ORDER BY bucket ASC",
         )?;
-        let mut map: std::collections::BTreeMap<i64, (i64, i64)> = std::collections::BTreeMap::new();
+        let mut map: std::collections::BTreeMap<i64, (i64, i64)> =
+            std::collections::BTreeMap::new();
         // Anchor the array on the END of the window (the bucket
         // containing `now`) so the most-recent bucket is always at the
         // last index. The SQL `WHERE ts >= ?2` filter uses one bucket
@@ -156,7 +163,11 @@ impl HistoryDb {
             let (u, d) = map.get(&ts).copied().unwrap_or((0, 0));
             total_upload += u;
             total_download += d;
-            buckets.push(HistoryPoint { ts, upload: u, download: d });
+            buckets.push(HistoryPoint {
+                ts,
+                upload: u,
+                download: d,
+            });
         }
         Ok(TrafficHistory {
             range: range.to_string(),

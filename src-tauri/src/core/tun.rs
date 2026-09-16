@@ -221,9 +221,8 @@ impl TunManager {
                 //    is healthy. Health = /version returns 200 on the
                 //    controller port. We do NOT poll /traffic here —
                 //    the existing kernel manager owns that lifecycle.
-                let wait = crate::core::elevate::wait_until_healthy(
-                    std::time::Duration::from_secs(8),
-                );
+                let wait =
+                    crate::core::elevate::wait_until_healthy(std::time::Duration::from_secs(8));
                 match wait {
                     Ok(()) => {
                         self.set_state(TunState::On, None);
@@ -258,7 +257,11 @@ impl TunManager {
     }
 
     /// Drive a full disable transition.
-    pub fn disable<R: Runtime>(&self, app: &AppHandle<R>, storage: &ProfileStorage) -> Result<TunStatus> {
+    pub fn disable<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        storage: &ProfileStorage,
+    ) -> Result<TunStatus> {
         let _gate = self.gate.lock().expect("tun gate poisoned");
         if matches!(self.snapshot().state, TunState::Off | TunState::Disabling) {
             return Ok(self.snapshot());
