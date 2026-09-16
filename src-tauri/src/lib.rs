@@ -13,6 +13,13 @@ pub mod proxy;
 pub mod store;
 pub mod tray;
 
+// `commands` is private (the IPC surface is exposed through the specta
+// registry, not through the module tree), but the head-less geo-data smoke
+// harness needs exactly one function from it. Re-exported only when that
+// harness is being built, so ordinary builds see no extra public surface.
+#[cfg(feature = "geodata-smoke")]
+pub use commands::geodata::run_refresh;
+
 use crate::core::shutdown::ExitFlag;
 use crate::core::sidecar::SidecarHandle;
 use crate::core::speedtest::SpeedTestRegistry;

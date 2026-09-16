@@ -23,8 +23,20 @@ type CmdResult<T> = Result<T, AppError>;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
+/// Address of the kernel's REST controller.
+///
+/// The app forces `RESERVED_CONTROLLER` into every profile it writes, so in the
+/// running application this is simply that constant. It is read from the
+/// environment first so the head-less geo-data smoke harness
+/// (`src/bin/geodata-smoke.rs`) can drive a kernel it started on a scratch port;
+/// a release build never sets `FLEXCLASH_CONTROLLER`, so nothing changes there.
 fn base_url() -> String {
-    format!("http://{RESERVED_CONTROLLER}")
+    let addr = std::env::var("FLEXCLASH_CONTROLLER")
+        .ok()
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+        .unwrap_or_else(|| RESERVED_CONTROLLER.to_string());
+    format!("http://{addr}")
 }
 
 /// Fire one request against the Mihomo controller and return the JSON body.

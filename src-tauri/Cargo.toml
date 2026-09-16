@@ -29,10 +29,22 @@ name = "export-bindings"
 path = "src/bin/export-bindings.rs"
 required-features = ["export-bindings"]
 
+# Head-less harness that drives one real geo-data refresh cycle against a live
+# kernel (`src/bin/geodata-smoke.rs`). It has to be a `[[bin]]` for the same
+# reason `export-bindings` does, and it is feature-gated for the same reason:
+# a release build must not carry a second binary through `lto`.
+[[bin]]
+name = "geodata-smoke"
+path = "src/bin/geodata-smoke.rs"
+required-features = ["geodata-smoke"]
+
 [features]
 # Opt-in marker for the `export-bindings` binary above. Enables no code by
 # itself -- it exists purely to gate that one target.
 export-bindings = []
+# Opt-in marker for the `geodata-smoke` harness. Also enables the one
+# `run_refresh` re-export in `lib.rs` that the harness calls.
+geodata-smoke = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

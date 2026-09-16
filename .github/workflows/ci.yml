@@ -90,6 +90,13 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
+      # The geo-data smoke harness is feature-gated, so the `--all-targets`
+      # above skips it -- without this it would rot unnoticed. It is only built,
+      # never run: it needs a live kernel and outbound network.
+      - name: Build the geo-data smoke harness
+        working-directory: src-tauri
+        run: cargo build --bin geodata-smoke --features geodata-smoke
+
       - name: Rust unit tests
         working-directory: src-tauri
         run: cargo test --lib
