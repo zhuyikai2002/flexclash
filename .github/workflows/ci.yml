@@ -10,6 +10,9 @@
 # `-D warnings` is the whole point of the clippy step. The zero-warning baseline
 # was established in 52e5308; denying warnings is what stops it from silently
 # eroding one `#[allow]`-free PR at a time.
+#
+# Two further gates cover drift a reviewer cannot see once it has accumulated:
+# `cargo fmt --check`, and a regenerate-then-diff of `src/bindings.ts`.
 # ============================================================================
 
 name: CI
@@ -73,6 +76,13 @@ jobs:
       - name: Fetch the mihomo sidecar
         uses: ./.github/actions/fetch-mihomo
 
+      # Kept after the sidecar fetch so the invariant above stays literal: it
+      # is placed here rather than first purely because everything below is a
+      # cargo invocation that builds.
+      - name: Rustfmt
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
       # `--all-targets` lints bins, integration tests and benches in addition to
       # the lib, so the two files under `src-tauri/tests/` that are not executed
       # below are still type-checked and lint-gated here.
@@ -83,6 +93,22 @@ jobs:
       - name: Rust unit tests
         working-directory: src-tauri
         run: cargo test --lib
+
+      # The committed bindings are an artifact: `bindings.rs` is the single
+      # source of truth for the IPC surface and `src/bindings.ts` is generated
+      # from it. Regenerating here and diffing is what stops the two drifting
+      # apart -- without it a command can be added to the registry while the
+      # renderer keeps compiling against a stale type surface, which is the
+      # failure the single-registry refactor exists to prevent.
+      #
+      # Deliberately placed before the type-check: a stale artifact should be
+      # reported as drift, not as a confusing error in whatever consumes it.
+      - name: Bindings are up to date
+        working-directory: src-tauri
+        run: cargo run --bin export-bindings --features export-bindings
+
+      - name: Check for bindings drift
+        run: git diff --exit-code -- src/bindings.ts
 
       - name: Frontend type-check
         run: npx vue-tsc --noEmit

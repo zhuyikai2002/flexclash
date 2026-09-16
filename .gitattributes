@@ -1,0 +1,12 @@
+# ============================================================================
+# Line endings for generated files.
+#
+# `src/bindings.ts` is a build artifact: it is written by a Rust exporter that
+# always emits LF, and a CI step regenerates it and fails if the result differs
+# from what is committed. Under `core.autocrlf=true` (the default on Windows) a
+# fresh checkout would hand that step a CRLF file, so the diff would report a
+# difference on every run for a file that is in fact up to date -- a gate that
+# always fails is worse than no gate. Pin the endings instead of relying on
+# every machine's local git config.
+# ============================================================================
+src/bindings.ts text eol=lf
