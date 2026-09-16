@@ -9,10 +9,12 @@
 
 import {
   closeAllConnections,
-  closeConnection as mihomoCloseConnection,
   getConnections,
+  killConnection,
+  killConnectionsBy,
 } from '@/services/clash'
 import type { Connection, ConnectionRow } from '@/types/clash'
+import type { ConnectionFilter, KillReport } from '@/bindings'
 
 /** Pull the active connection list from Mihomo. */
 export async function fetchConnections() {
@@ -23,11 +25,16 @@ export async function fetchConnections() {
  *  per-id deletion (older builds) so the UI can fall back to close-all. */
 export async function dropConnection(id: string): Promise<void> {
   try {
-    await mihomoCloseConnection(id)
+    await killConnection(id)
   } catch (e) {
     // Surface the error so the caller can decide on a fallback.
     throw e
   }
+}
+
+/** Drop every connection matching a typed filter; returns the kill report. */
+export async function dropConnectionsBy(filter: ConnectionFilter): Promise<KillReport> {
+  return await killConnectionsBy(filter)
 }
 
 /** Drop all connections. */

@@ -16,6 +16,7 @@
 use serde_json::Value;
 
 use crate::config::profile::RESERVED_CONTROLLER;
+use crate::core::connections::{ConnectionFilter, KillReport};
 use crate::core::urlenc::percent_encode;
 use crate::error::AppError;
 
@@ -304,11 +305,18 @@ pub async fn get_mihomo_connections() -> CmdResult<String> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn close_mihomo_connection(id: String) -> CmdResult<()> {
-    let path = format!("/connections/{}", percent_encode(&id));
-    mihomo_request(reqwest::Method::DELETE, &path, None, DEFAULT_TIMEOUT_MS)
-        .await
-        .map(|_| ())
+pub async fn kill_connection(id: String) -> CmdResult<()> {
+    crate::core::connections::kill_one(&id).await
+}
+
+/// Kill every connection matching a typed `ConnectionFilter` — fetch the
+/// snapshot, filter by metadata, then DELETE the survivors one by one with rate
+/// limiting. The filter is AND-combined and an empty filter is rejected (it
+/// would otherwise mean "close the whole pool").
+#[tauri::command]
+#[specta::specta]
+pub async fn kill_connections_by(filter: ConnectionFilter) -> CmdResult<KillReport> {
+    crate::core::connections::kill_by_filter(&filter).await
 }
 
 #[tauri::command]

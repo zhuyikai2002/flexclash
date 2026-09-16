@@ -1,9 +1,11 @@
+pub mod connections;
 pub mod elevate;
 pub mod geo_staging;
 pub mod geodata;
 pub mod ingest;
 pub mod job_object;
 pub mod kernel_events;
+pub mod log_parse;
 pub mod route_guard;
 pub mod shutdown;
 pub mod sidecar;

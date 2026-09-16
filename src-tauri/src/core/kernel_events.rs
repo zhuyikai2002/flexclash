@@ -142,3 +142,51 @@ pub struct GeoDataUpdatedPayload {
     /// Receipt time, as Unix epoch milliseconds.
     pub at_ms: i64,
 }
+
+/// A machine-extracted network anomaly, parsed defensively from a raw `/logs`
+/// text payload by `core::log_parse`.
+///
+/// This is *physically separate* from `LogBatch`: the raw text stream keeps
+/// flowing to the log panel unchanged, while only lines that carry a known
+/// connectivity signature are promoted into this strongly-typed event. It is a
+/// deliberately small set — every variant is a first-class connectivity signal,
+/// never a high-frequency noise source (rule hits are *not* anomalies and are
+/// deliberately absent).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LogAnomaly {
+    /// A name could not be resolved (`no such host`, `NXDOMAIN`, …).
+    DnsResolveFailed {
+        /// The domain that failed to resolve (best-effort; empty if unknown).
+        host: String,
+        /// Short stable reason token: `no such host` | `nxdomain` | `timeout` | `resolve failed`.
+        detail: String,
+    },
+    /// A dial to a destination timed out (`dial tcp …: i/o timeout`).
+    DialTimeout {
+        /// The `IP:port` being dialled (best-effort).
+        address: String,
+        /// Duration when the text carries one; mihomo's text form usually does
+        /// not, so this is typically `None`.
+        elapsed_ms: Option<u32>,
+    },
+    /// A TCP connect was refused.
+    ConnectRefused {
+        /// The `IP:port` that refused the connection (best-effort).
+        address: String,
+    },
+    /// A TLS handshake or certificate verification failure.
+    TlsError {
+        /// The host whose TLS handshake failed (best-effort).
+        host: String,
+        /// Short stable reason token: `x509` | `certificate` | `tls`.
+        detail: String,
+    },
+    /// The active node of a selector group switched.
+    ProxySwitch {
+        /// Previous node, when the text names it (mihomo usually does not).
+        from: Option<String>,
+        /// The node switched to (best-effort).
+        to: String,
+    },
+}

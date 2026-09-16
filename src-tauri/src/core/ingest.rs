@@ -260,6 +260,12 @@ async fn logs_session<R: Runtime>(app: AppHandle<R>, mut ws: WsStream) {
                         break;
                     } else if let Ok(text) = msg.to_text() {
                         if let Some(entry) = parse_log(text) {
+                            // Promote connectivity anomalies into a typed event.
+                            // These are rare, so they are emitted immediately
+                            // rather than riding the 500 ms raw-log batch.
+                            if let Some(anomaly) = crate::core::log_parse::parse_anomaly(&entry) {
+                                let _ = anomaly.emit(&app);
+                            }
                             // Bounded: a log storm drops the oldest line rather
                             // than growing the queue without limit. The kernel
                             // is the only writer, so this is never hit in

@@ -86,7 +86,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::commands::mihomo::select_mihomo_proxy,
             crate::commands::mihomo::get_mihomo_proxy_delay,
             crate::commands::mihomo::get_mihomo_connections,
-            crate::commands::mihomo::close_mihomo_connection,
+            crate::commands::mihomo::kill_connection,
+            crate::commands::mihomo::kill_connections_by,
             crate::commands::mihomo::close_all_mihomo_connections,
             crate::commands::mihomo::get_mihomo_rules,
             // -- geo databases (v0.4.x silent hot-refresh) -----------------
@@ -186,6 +187,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::core::sidecar::ConfigRefreshPayload,
             crate::core::kernel_events::GeoDataUpdatedPayload,
             crate::core::supervisor::SupervisorEvent,
+            crate::core::kernel_events::LogAnomaly,
         ])
 }
 

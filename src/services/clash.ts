@@ -13,7 +13,7 @@
 // superseded and have been removed.
 // ============================================================================
 
-import { commands } from '@/bindings'
+import { commands, type ConnectionFilter, type KillReport } from '@/bindings'
 import { guardInTauri, isTauri, unwrap, type CmdResult } from '@/utils/tauri-bridge'
 import type {
   Config,
@@ -152,9 +152,16 @@ export async function closeAllConnections(): Promise<void> {
   unwrap(await commands.closeAllMihomoConnections())
 }
 
-export async function closeConnection(id: string): Promise<void> {
-  guardInTauri('close_mihomo_connection')
-  unwrap(await commands.closeMihomoConnection(id))
+export async function killConnection(id: string): Promise<void> {
+  guardInTauri('kill_connection')
+  unwrap(await commands.killConnection(id))
+}
+
+/** Kill every connection matching a typed `ConnectionFilter` (AND-combined;
+ *  an empty filter is rejected backend-side). Returns the kill report. */
+export async function killConnectionsBy(filter: ConnectionFilter): Promise<KillReport> {
+  guardInTauri('kill_connections_by')
+  return unwrap(await commands.killConnectionsBy(filter))
 }
 
 // ============================================================================

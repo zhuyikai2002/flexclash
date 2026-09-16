@@ -36,7 +36,14 @@ export const commands = {
 	/**  GET /proxies/{name}/delay?url=…&timeout=… */
 	getMihomoProxyDelay: (name: string, url: string | null, timeoutMs: number | null) => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_proxy_delay", { name, url, timeoutMs })),
 	getMihomoConnections: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_connections")),
-	closeMihomoConnection: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("close_mihomo_connection", { id })),
+	killConnection: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_connection", { id })),
+	/**
+	 *  Kill every connection matching a typed `ConnectionFilter` — fetch the
+	 *  snapshot, filter by metadata, then DELETE the survivors one by one with rate
+	 *  limiting. The filter is AND-combined and an empty filter is rejected (it
+	 *  would otherwise mean "close the whole pool").
+	 */
+	killConnectionsBy: (filter: ConnectionFilter) => typedError<KillReport, AppError>(__TAURI_INVOKE("kill_connections_by", { filter })),
 	closeAllMihomoConnections: () => typedError<null, AppError>(__TAURI_INVOKE("close_all_mihomo_connections")),
 	getMihomoRules: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_rules")),
 	/**  Current state of the refresh pipeline. Cheap: one small JSON read. */
@@ -290,6 +297,7 @@ export const commands = {
 export const events = {
 	configRefreshPayload: makeEvent<ConfigRefreshPayload>("config-refresh-payload"),
 	geoDataUpdatedPayload: makeEvent<GeoDataUpdatedPayload>("geo-data-updated-payload"),
+	logAnomaly: makeEvent<LogAnomaly>("log-anomaly"),
 	logBatch: makeEvent<LogBatch>("log-batch"),
 	supervisorEvent: makeEvent<SupervisorEvent>("supervisor-event"),
 	trafficPayload: makeEvent<TrafficPayload>("traffic-payload"),
@@ -340,6 +348,26 @@ export type ConfigRefreshPayload =
 { kind: "schema_bumped"; from_version: number; to_version: number; from_port: number | null; to_port: number } | 
 /**  File exists and port already matches; no write performed. */
 { kind: "unchanged" };
+
+/**
+ *  A flat, AND-combined predicate over a connection's metadata.
+ * 
+ *  Every `Some` field must match; a `None` field is a wildcard. All fields
+ *  match as case-insensitive substrings except `destination`, which matches the
+ *  destination IP exactly, or the `IP:port` form as a prefix.
+ */
+export type ConnectionFilter = {
+	/**  Match `metadata.host` or `metadata.sniffHost`. */
+	host: string | null,
+	/**  Match `metadata.process` or `metadata.processPath`. */
+	process: string | null,
+	/**  Match the matched rule (`rule` or `rulePayload`). */
+	rule: string | null,
+	/**  Match any element of `chains` or `providerChains` (egress proxy). */
+	proxy: string | null,
+	/**  Match the destination IP (exact) or `IP:port` (prefix). */
+	destination: string | null,
+};
 
 /**  Incremental progress push — one event per `BATCH_SIZE` results. */
 export type DelayBatch = {
@@ -466,6 +494,62 @@ export type KernelState = "stopped" | "starting" | "running" | "stopping" |
  *  supervised relaunch is already scheduled (see `core::supervisor`).
  */
 "recovering" | "crashed";
+
+/**  The outcome of a conditional kill. */
+export type KillReport = {
+	/**  How many connections matched the filter (before any DELETE). */
+	matched: number,
+	/**  How many DELETEs the controller accepted. */
+	killed: number,
+	/**  How many DELETEs failed (connection already gone, controller hiccup…). */
+	failed: number,
+	/**  The UUIDs that were successfully closed. */
+	killedIds: string[],
+};
+
+/**
+ *  A machine-extracted network anomaly, parsed defensively from a raw `/logs`
+ *  text payload by `core::log_parse`.
+ * 
+ *  This is *physically separate* from `LogBatch`: the raw text stream keeps
+ *  flowing to the log panel unchanged, while only lines that carry a known
+ *  connectivity signature are promoted into this strongly-typed event. It is a
+ *  deliberately small set — every variant is a first-class connectivity signal,
+ *  never a high-frequency noise source (rule hits are *not* anomalies and are
+ *  deliberately absent).
+ */
+export type LogAnomaly = 
+/**  A name could not be resolved (`no such host`, `NXDOMAIN`, …). */
+{ kind: "dns_resolve_failed"; 
+/**  The domain that failed to resolve (best-effort; empty if unknown). */
+host: string; 
+/**  Short stable reason token: `no such host` | `nxdomain` | `timeout` | `resolve failed`. */
+detail: string } | 
+/**  A dial to a destination timed out (`dial tcp …: i/o timeout`). */
+{ kind: "dial_timeout"; 
+/**  The `IP:port` being dialled (best-effort). */
+address: string; 
+/**
+ *  Duration when the text carries one; mihomo's text form usually does
+ *  not, so this is typically `None`.
+ */
+elapsed_ms: number | null } | 
+/**  A TCP connect was refused. */
+{ kind: "connect_refused"; 
+/**  The `IP:port` that refused the connection (best-effort). */
+address: string } | 
+/**  A TLS handshake or certificate verification failure. */
+{ kind: "tls_error"; 
+/**  The host whose TLS handshake failed (best-effort). */
+host: string; 
+/**  Short stable reason token: `x509` | `certificate` | `tls`. */
+detail: string } | 
+/**  The active node of a selector group switched. */
+{ kind: "proxy_switch"; 
+/**  Previous node, when the text names it (mihomo usually does not). */
+from: string | null; 
+/**  The node switched to (best-effort). */
+to: string };
 
 /**
  *  One flush of buffered log lines — the `/logs` ingest pushes a *batch* every
