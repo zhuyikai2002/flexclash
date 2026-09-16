@@ -63,9 +63,12 @@ fn sanitize_overwrites_reserved_fields() {
     assert_eq!(m.get("ipv6").unwrap().as_bool(), Some(false));
     assert_eq!(m.get("secret").unwrap().as_str(), Some(""));
 
-    // mixed-port 9999 was a custom value but we ONLY fill in if absent.
-    // The hostile yaml HAD a mixed-port, so it should be preserved.
-    assert_eq!(m.get("mixed-port").unwrap().as_u64(), Some(9999));
+    // mixed-port is the one inbound port FlexClash owns end to end: a
+    // subscription shipping 7890 (or the legacy port/socks-port pair)
+    // collides with any other Clash-family client already running, so it is
+    // *always* rewritten rather than merely filled in when absent.
+    // (The hostile yaml set 9999; that must not survive.)
+    assert_eq!(m.get("mixed-port").unwrap().as_u64(), Some(7897));
 }
 
 #[test]
