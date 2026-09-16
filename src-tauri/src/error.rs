@@ -56,6 +56,9 @@ pub enum AppError {
     #[error("mihomo api error: {0}")]
     Mihomo(String),
 
+    #[error("geo-data error: {0}")]
+    Geo(String),
+
     #[error("kernel already running")]
     AlreadyRunning,
 

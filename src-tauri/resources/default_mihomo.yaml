@@ -7,9 +7,9 @@
 # in a backwards-incompatible way (e.g. adding new bypass rules).  The
 # `ensure_default_config` helper in core/sidecar.rs checks for this
 # line; if it's missing or older than the bundled version, the file
-# is rewritten and `kernel://config-refreshed` is emitted so the UI
+# is rewritten and a typed `ConfigRefreshPayload` is emitted so the UI
 # can prompt the user to restart.
-# flexclash-config-version: 4
+# flexclash-config-version: 5
 
 mixed-port: 7897
 allow-lan: false
@@ -38,6 +38,29 @@ external-controller-cors:
     - "DELETE"
     - "OPTIONS"
 secret: ""
+
+# ----------------------------------------------------------------------------
+# Geo databases (v0.4.x refresh pipeline).
+#
+# FlexClash owns GeoIP.dat / GeoSite.dat and refreshes them from its own
+# scheduler (core::geodata), so mihomo's built-in ticker MUST stay off: two
+# schedulers over the same files buy nothing and merely race, and mihomo's
+# `updatingGeo` guard would turn the loser into a spurious skip error.
+#
+# `geodata-mode: true` is load-bearing rather than cosmetic. In the default
+# MMDB mode the kernel matches GEOIP rules against an MMDB we do not manage
+# and ignores the .dat we keep fresh — the refresh would appear to succeed
+# while changing nothing.
+#
+# `geox-url` is deliberately absent. mihomo can only apply refreshed geo data
+# through its own updater (`POST /configs/geo` — the sole thing that clears the
+# parsed-matcher cache), so that URL is repointed at the loopback staging
+# server by the transfer step instead of being pinned to GitHub here. Left
+# unset, mihomo keeps its stock upstream as a last-resort fallback.
+# ----------------------------------------------------------------------------
+geodata-mode: true
+geodata-loader: memconservative
+geo-auto-update: false
 
 profile:
   store-selected: false

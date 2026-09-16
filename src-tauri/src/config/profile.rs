@@ -88,6 +88,33 @@ const RESERVED_CORS_ORIGINS: &[&str] = &["tauri://localhost", "http://localhost:
 const RESERVED_CORS_METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 
 // ----------------------------------------------------------------------------
+// Reserved geo-data keys (v0.4.x refresh pipeline)
+// ----------------------------------------------------------------------------
+//
+// FlexClash owns `GeoIP.dat` / `GeoSite.dat` and refreshes them from its own
+// scheduler; see `core::geodata` for why the databases cannot simply be
+// downloaded and dropped in. These three keys are the whole contract that
+// makes that pipeline meaningful, so they are forced rather than defaulted.
+
+/// Match GEOIP rules against `GeoIP.dat` instead of the MMDB.
+///
+/// Load-bearing, not cosmetic: in mihomo's default MMDB mode the kernel reads
+/// a database FlexClash does not manage and ignores the `.dat` we keep fresh,
+/// so a refresh would look successful while changing no routing decision.
+pub const RESERVED_GEODATA_MODE: bool = true;
+
+/// `memconservative` keeps as much of the parsed databases off the heap as it
+/// can, which matters because the pair is ~21 MB on disk.
+pub const RESERVED_GEODATA_LOADER: &str = "memconservative";
+
+/// mihomo's own geo ticker must stay OFF.
+///
+/// Two schedulers racing over the same files buy nothing, and mihomo's
+/// `updatingGeo` guard turns the loser into an `ErrGetDatabaseUpdateSkip` that
+/// would surface in our logs as a failed refresh that never happened.
+pub const RESERVED_GEO_AUTO_UPDATE: bool = false;
+
+// ----------------------------------------------------------------------------
 // Storage
 // ----------------------------------------------------------------------------
 
@@ -332,6 +359,9 @@ pub fn activate_profile(storage: &ProfileStorage, id: &str) -> Result<ProfileMet
 ///   - `mode`                       : rule
 ///   - `log-level`                  : info
 ///   - `ipv6`                       : false
+///   - `geodata-mode`               : true (FlexClash owns the `.dat` pair)
+///   - `geodata-loader`             : memconservative
+///   - `geo-auto-update`            : false (FlexClash owns the schedule)
 pub fn patch_and_sanitize_yaml(raw_yaml: &str) -> Result<String, AppError> {
     // Parse as generic Value so we don't care about structure.
     let mut root: serde_yaml::Value = serde_yaml::from_str(raw_yaml)
@@ -348,6 +378,14 @@ pub fn patch_and_sanitize_yaml(raw_yaml: &str) -> Result<String, AppError> {
     insert_str(mapping, "log-level", RESERVED_LOG_LEVEL);
     insert_bool(mapping, "ipv6", false);
     insert_str(mapping, "secret", "");
+
+    // ---- FORCE geo-data keys (v0.4.x refresh pipeline owns these) ----------
+    // The whole refresh pipeline is meaningless unless these three agree, so
+    // they are rewritten unconditionally rather than "filled in if absent".
+    // See the `RESERVED_GEODATA_*` docs for why each one is load-bearing.
+    insert_bool(mapping, "geodata-mode", RESERVED_GEODATA_MODE);
+    insert_str(mapping, "geodata-loader", RESERVED_GEODATA_LOADER);
+    insert_bool(mapping, "geo-auto-update", RESERVED_GEO_AUTO_UPDATE);
 
     // CORS must be in place so the Tauri webview can call the API.
     inject_cors(mapping);
@@ -986,5 +1024,64 @@ mod inbound_port_tests {
     fn missing_inbound_port_gets_filled() {
         let out = patch_and_sanitize_yaml("mode: rule\n").unwrap();
         assert!(out.contains("mixed-port: 7897"), "got:\n{out}");
+    }
+
+    /// A subscription that ships its own geo keys must not win: the refresh
+    /// pipeline owns `geodata-mode` / `geodata-loader` / `geo-auto-update`,
+    /// and any one of them left at the profile's value silently defeats it
+    /// (mmdb mode ignores our `.dat`; a mihomo ticker races our scheduler).
+    #[test]
+    fn subscription_geo_keys_are_forced_to_reserved() {
+        let raw = "mode: rule\n\
+                   geodata-mode: false\n\
+                   geodata-loader: standard\n\
+                   geo-auto-update: true\n\
+                   proxies:\n  - name: a\n    type: ss\n";
+        let out = patch_and_sanitize_yaml(raw).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let m = doc.as_mapping().unwrap();
+        let key = |k: &str| serde_yaml::Value::String(k.to_string());
+        assert_eq!(
+            m.get(key("geodata-mode")).and_then(|v| v.as_bool()),
+            Some(RESERVED_GEODATA_MODE),
+            "geodata-mode not forced:\n{out}"
+        );
+        assert_eq!(
+            m.get(key("geodata-loader"))
+                .and_then(|v| v.as_str().map(String::from)),
+            Some(RESERVED_GEODATA_LOADER.to_string()),
+            "geodata-loader not forced:\n{out}"
+        );
+        assert_eq!(
+            m.get(key("geo-auto-update")).and_then(|v| v.as_bool()),
+            Some(RESERVED_GEO_AUTO_UPDATE),
+            "geo-auto-update not forced:\n{out}"
+        );
+        // The rewrite must not cost us any nodes.
+        assert!(out.contains("name: a"), "nodes lost:\n{out}");
+    }
+
+    #[test]
+    fn missing_geo_keys_get_filled() {
+        let out = patch_and_sanitize_yaml("mode: rule\n").unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let m = doc.as_mapping().unwrap();
+        let key = |k: &str| serde_yaml::Value::String(k.to_string());
+        assert_eq!(
+            m.get(key("geodata-mode")).and_then(|v| v.as_bool()),
+            Some(true),
+            "got:\n{out}"
+        );
+        assert_eq!(
+            m.get(key("geodata-loader"))
+                .and_then(|v| v.as_str().map(String::from)),
+            Some("memconservative".into()),
+            "got:\n{out}"
+        );
+        assert_eq!(
+            m.get(key("geo-auto-update")).and_then(|v| v.as_bool()),
+            Some(false),
+            "got:\n{out}"
+        );
     }
 }

@@ -1,4 +1,5 @@
 pub mod elevate;
+pub mod geodata;
 pub mod ingest;
 pub mod job_object;
 pub mod kernel_events;
