@@ -46,7 +46,27 @@ pub enum KernelState {
     Starting,
     Running,
     Stopping,
+    /// The supervisor is auto-restarting after a crash. A transient state the
+    /// renderer renders as "transitioning" — the kernel is down but a
+    /// supervised relaunch is already scheduled (see `core::supervisor`).
+    Recovering,
     Crashed,
+}
+
+/// Why the sidecar process exited, as observed by the drain task.
+///
+/// This is the *internal* signal the supervisor (`core::supervisor`) consumes
+/// to decide whether to auto-restart. Deliberately not a wire type: the
+/// renderer sees the derived `KernelState` plus the typed `SupervisorEvent`.
+#[derive(Debug, Clone)]
+pub enum ExitEvent {
+    /// Clean exit (code 0) or an intentional kill (`stop()` / app shutdown).
+    Clean,
+    /// Abnormal exit: the kernel crashed (non-zero exit or killed by signal).
+    Crash {
+        code: Option<i32>,
+        signal: Option<i32>,
+    },
 }
 
 /// Result of `ensure_default_config`, delivered to the renderer as the typed
@@ -82,7 +102,6 @@ pub enum ConfigRefreshPayload {
     Unchanged,
 }
 
-#[derive(Default)]
 pub struct SidecarInner {
     /// The spawned child. `take()`-en out to kill; replaced on restart.
     pub child: Option<CommandChild>,
@@ -91,6 +110,36 @@ pub struct SidecarInner {
     pub config_path: Option<PathBuf>,
     /// Bounded ring buffer of recent log lines, kept for crash diagnostics.
     pub recent_log_tail: Vec<String>,
+    /// Monotonic launch counter. The drain task snapshots it at spawn; on
+    /// `Terminated` it only acts if it is still the latest launch, so a stale
+    /// task from a superseded `start()` cannot clobber a newer state.
+    generation: u64,
+    /// Set when the child is killed *intentionally* (`stop()` / shutdown), so
+    /// the drain task can tell a clean stop from a crash. Cleared by the next
+    /// `start()`, which always launches a fresh child that is not being stopped.
+    stop_requested: bool,
+    /// Supervisor notification channel. The drain task sends an `ExitEvent`
+    /// here the instant the child terminates; `core::supervisor` claims the
+    /// receive half (once) and owns every restart decision.
+    crash_tx: tokio::sync::mpsc::UnboundedSender<ExitEvent>,
+    crash_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ExitEvent>>,
+}
+
+impl Default for SidecarInner {
+    fn default() -> Self {
+        let (crash_tx, crash_rx) = tokio::sync::mpsc::unbounded_channel();
+        Self {
+            child: None,
+            state: KernelState::Stopped,
+            work_dir: None,
+            config_path: None,
+            recent_log_tail: Vec::new(),
+            generation: 0,
+            stop_requested: false,
+            crash_tx,
+            crash_rx: Some(crash_rx),
+        }
+    }
 }
 
 /// Thread-safe handle exposed via `app.manage()`. Cheap to clone (Arc bump).
@@ -151,8 +200,19 @@ impl SidecarHandle {
     }
 
     /// Take the child out and kill it. Idempotent: safe to call when stopped.
+    ///
+    /// Marks the kill as *intentional* (`stop_requested`) so the drain task
+    /// reports a `Clean` exit instead of a crash — otherwise the supervisor
+    /// would auto-restart a kernel the user just stopped. This is the only
+    /// place the flag is armed, and both intentional-stop call sites (`stop()`
+    /// and app shutdown) go through here.
     pub fn try_kill(&self) -> Result<()> {
-        if let Some(child) = self.lock().child.take() {
+        // Two brief lock acquisitions, never held across the blocking `kill()`:
+        // matching the module's discipline that the mutex covers only trivial
+        // state mutations.
+        self.lock().stop_requested = true;
+        let child = self.lock().child.take();
+        if let Some(child) = child {
             // CommandChild::kill consumes self.
             child.kill().map_err(|e| AppError::Shell(e.to_string()))?;
         }
@@ -161,6 +221,44 @@ impl SidecarHandle {
 
     fn set_child(&self, child: Option<CommandChild>) {
         self.lock().child = child;
+    }
+
+    /// Mark the beginning of a fresh launch: clear the intentional-stop flag
+    /// and bump the generation, returning the new generation for the drain
+    /// task to snapshot against.
+    fn begin_launch(&self) -> u64 {
+        let mut g = self.lock();
+        g.stop_requested = false;
+        g.generation += 1;
+        g.generation
+    }
+
+    /// Current launch generation. The drain task compares its snapshot against
+    /// this to detect that it has been superseded by a newer `start()`.
+    fn generation(&self) -> u64 {
+        self.lock().generation
+    }
+
+    /// Read-and-clear the intentional-stop flag, for the drain task's
+    /// `Terminated` classification.
+    fn take_stop_requested(&self) -> bool {
+        let mut g = self.lock();
+        let was = g.stop_requested;
+        g.stop_requested = false;
+        was
+    }
+
+    /// Claim the crash-notification receiver. Called once by `core::supervisor`
+    /// at setup; returns `None` if already claimed.
+    pub fn take_crash_rx(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<ExitEvent>> {
+        self.lock().crash_rx.take()
+    }
+
+    /// Notify the supervisor that the child exited. Fire-and-forget: the
+    /// supervisor may be gone (e.g. during teardown), and a dropped receiver
+    /// is not an error.
+    fn notify_exit(&self, event: ExitEvent) {
+        let _ = self.lock().crash_tx.send(event);
     }
 
     fn push_log(&self, line: String) {
@@ -265,6 +363,11 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
     ]);
     let (mut rx, child) = cmd.spawn()?;
 
+    // Begin a fresh launch: clear any lingering intentional-stop flag and bump
+    // the generation so a stale drain task (from a superseded start) can never
+    // clobber this one's state.
+    let my_generation = handle.begin_launch();
+
     // Bind the child into the kill-on-close job BEFORE we publish it as
     // running. If the UI saw `Running` first and the main process died in
     // between, mihomo would be left orphaned — which is the exact failure
@@ -317,14 +420,22 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
                     let _ = app_for_task.emit(crate::events::KERNEL_LOG, line);
                 }
                 CommandEvent::Terminated(TerminatedPayload { code, signal }) => {
+                    // A stale drain task — superseded by a newer `start()` —
+                    // must not touch state or notify the supervisor. Its child
+                    // is gone and a newer one owns the handle now.
+                    if handle_for_task.generation() != my_generation {
+                        break;
+                    }
                     handle_for_task.set_child(None);
+                    let intentional = handle_for_task.take_stop_requested();
                     // Visible in dev-terminal + kernel log so a crash's real
                     // exit code / signal is never hidden by the watcher.
                     eprintln!("[sidecar] mihomo exited code={code:?} signal={signal:?}");
                     handle_for_task.push_log(format!(
                         "[sidecar] mihomo exited (code={code:?}, signal={signal:?})"
                     ));
-                    let new_state = if code == Some(0) {
+                    let clean = intentional || code == Some(0);
+                    let new_state = if clean {
                         KernelState::Stopped
                     } else {
                         KernelState::Crashed
@@ -335,6 +446,13 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
                         crate::events::KERNEL_TERMINATED,
                         serde_json::json!({ "code": code, "signal": signal }),
                     );
+                    // Hand the exit to the supervisor, which owns the restart
+                    // decision (backoff + circuit breaker). This task ends here.
+                    handle_for_task.notify_exit(if clean {
+                        ExitEvent::Clean
+                    } else {
+                        ExitEvent::Crash { code, signal }
+                    });
                     break;
                 }
                 _ => {}
@@ -348,8 +466,16 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
 /// Graceful stop. No-op if already stopped/crashed.
 pub fn stop(handle: SidecarHandle) -> Result<()> {
     let cur = handle.state();
-    if matches!(cur, KernelState::Stopped | KernelState::Crashed) {
-        return Ok(());
+    match cur {
+        KernelState::Stopped | KernelState::Crashed => return Ok(()),
+        KernelState::Recovering => {
+            // The supervisor is mid-backoff (no live child to kill). Park in
+            // `Stopped`; the supervisor's post-sleep check sees it and stands
+            // down instead of relaunching.
+            handle.set_state(KernelState::Stopped);
+            return Ok(());
+        }
+        _ => {}
     }
     handle.set_state(KernelState::Stopping);
     handle.try_kill()?;

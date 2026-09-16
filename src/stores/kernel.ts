@@ -93,13 +93,16 @@ let _unlisteners: UnlistenFn[] = []
 const lastErrorRef = ref<string | null>(null)
 
 /**
- * Auto-restart bookkeeping.  Lives outside `state()` because it's
- * process-local state with no UI binding; we only care that the
- * crash handler doesn't restart the kernel twice in parallel or
- * loop on a config-level crash forever.
+ * Anti-flicker hysteresis timer.  A crash (`crashed`) is, in the normal case,
+ * followed within a few hundred ms by `recovering` — the Rust supervisor's
+ * auto-restart.  Committing the UI to "crashed" during that gap makes the
+ * status badge flash rose→amber→green.  Instead we debounce: only paint
+ * `crashed` if the supervisor does NOT start recovering within
+ * `CRASH_SETTLE_MS` (which is exactly the circuit-breaker-trip case, where the
+ * kernel stays down and the error banner *should* appear).
  */
-let _restartInFlight = false
-let _restartAttempts = 0
+let _crashSettleTimer: ReturnType<typeof setTimeout> | null = null
+const CRASH_SETTLE_MS = 400
 
 export const useKernelStore = defineStore('kernel', {
   state: (): KernelStoreState => ({
@@ -116,7 +119,7 @@ export const useKernelStore = defineStore('kernel', {
   getters: {
     isRunning: (s): boolean => s.state === 'running',
     isTransitioning: (s): boolean =>
-      s.state === 'starting' || s.state === 'stopping',
+      s.state === 'starting' || s.state === 'stopping' || s.state === 'recovering',
     /** Latest error message, or `null` when no error is pending. */
     lastError: (): string | null => lastErrorRef.value,
   },
@@ -185,37 +188,13 @@ export const useKernelStore = defineStore('kernel', {
     },
 
     /**
-     * Crash auto-restart guard.  Called by App.vue's terminated-event
-     * listener.  Backs off with an exponential delay (1s, 2s, 4s,
-     * cap 30s) to avoid a tight restart loop if the kernel keeps
-     * dying on bad config.
-     *
-     * Bookkeeping lives in module-scope `let` bindings (not Pinia
-     * state) because there's no UI bound to it and we want the
-     * counters to survive a re-`init()`.
+     * Crash recovery is owned by the Rust supervisor (`core/supervisor`), NOT
+     * this store.  The backend applies exponential backoff + circuit breaker
+     * and emits `events.supervisorEvent`; the frontend only consumes the
+     * resulting `kernel://state` stream and the structured error event.  There
+     * is deliberately no restart-on-crash logic here anymore — the kernel must
+     * keep healing itself even when this window is closed or destroyed.
      */
-    async autoRestartOnCrash(): Promise<void> {
-      if (_restartInFlight) return
-      _restartInFlight = true
-      _restartAttempts += 1
-      const attempt = _restartAttempts
-      const backoffMs = Math.min(30_000, 1_000 * 2 ** (attempt - 1))
-      this.recentLogs.push(
-        `[auto-restart] kernel crashed — retry #${attempt} in ${backoffMs}ms`,
-      )
-      try {
-        await new Promise((r) => setTimeout(r, backoffMs))
-        await this.restart()
-        // success → reset counter
-        _restartAttempts = 0
-      } catch (e) {
-        // log only; next crash event will try again with longer backoff
-        // eslint-disable-next-line no-console
-        console.warn('[kernel] auto-restart failed:', e)
-      } finally {
-        _restartInFlight = false
-      }
-    },
 
     async subscribeEvents(): Promise<void> {
       // Idempotent: if already subscribed, do nothing.
@@ -223,10 +202,27 @@ export const useKernelStore = defineStore('kernel', {
 
       _unlisteners.push(
         await safeListen<KernelState>('kernel://state', (e) => {
-          this.state = e.payload
-          if (e.payload === 'running') {
+          const s = e.payload
+          // Any real transition cancels a pending crash settle.
+          if (_crashSettleTimer) {
+            clearTimeout(_crashSettleTimer)
+            _crashSettleTimer = null
+          }
+          if (s === 'crashed') {
+            // Hysteresis: only commit to the error UI if the supervisor does
+            // not start recovering within the settle window.
+            _crashSettleTimer = setTimeout(() => {
+              this.state = 'crashed'
+              this.probeStatus = 'idle'
+              this.probeLatencyMs = null
+              _crashSettleTimer = null
+            }, CRASH_SETTLE_MS)
+            return
+          }
+          this.state = s
+          if (s === 'running') {
             void this.probe()
-          } else if (e.payload === 'stopped' || e.payload === 'crashed') {
+          } else if (s === 'stopped' || s === 'recovering') {
             this.probeStatus = 'idle'
             this.probeLatencyMs = null
           }
@@ -294,13 +290,21 @@ export const useKernelStore = defineStore('kernel', {
             this.recentLogs.push(
               `[terminated] code=${e.payload.code ?? 'null'} signal=${e.payload.signal ?? 'null'}`,
             )
-            // Background auto-restart.  Only react to non-zero exits
-            // (clean exit 0 = user clicked Stop, don't restart).
-            if (e.payload.code !== 0 && e.payload.code !== null) {
-              void this.autoRestartOnCrash()
-            }
+            // No restart decision here — the Rust supervisor owns recovery.
           },
         ),
+      )
+
+      _unlisteners.push(
+        // Typed event: supervisor lifecycle (Rust `core::supervisor`).
+        // `gave_up` carries the circuit-breaker reason, surfaced to the
+        // dashboard's error banner; the detailed lines already arrive on
+        // `kernel://log` as `[supervisor] …` banners.
+        await safeListenEvent(events.supervisorEvent, (e) => {
+          if (e.payload.kind === 'gave_up') {
+            lastErrorRef.value = e.payload.reason
+          }
+        }),
       )
     },
 
@@ -409,6 +413,10 @@ export const useKernelStore = defineStore('kernel', {
         try { u() } catch { /* noop */ }
       }
       _unlisteners = []
+      if (_crashSettleTimer) {
+        clearTimeout(_crashSettleTimer)
+        _crashSettleTimer = null
+      }
     },
   },
 })

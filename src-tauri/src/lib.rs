@@ -102,6 +102,12 @@ pub fn run() {
             // above, which installs the registry those emits resolve through.
             crate::core::ingest::spawn(&handle, app.state::<SidecarHandle>().inner().clone());
 
+            // v0.6.x Step 1: the crash supervisor. Owns every restart decision
+            // (exponential backoff + circuit breaker) so the kernel's self-healing
+            // no longer depends on the renderer staying alive. Also after
+            // `mount_events`, since it publishes a typed event.
+            crate::core::supervisor::spawn(&handle, app.state::<SidecarHandle>().inner().clone());
+
             // Step 4: the geo-data refresher. Silent, self-healing, and it
             // waits out startup before its first check. Also after
             // `mount_events`, since it publishes a typed event.

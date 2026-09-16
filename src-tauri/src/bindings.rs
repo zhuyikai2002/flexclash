@@ -185,6 +185,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::core::kernel_events::LogBatch,
             crate::core::sidecar::ConfigRefreshPayload,
             crate::core::kernel_events::GeoDataUpdatedPayload,
+            crate::core::supervisor::SupervisorEvent,
         ])
 }
 

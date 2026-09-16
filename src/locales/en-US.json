@@ -91,6 +91,7 @@
       "stopped": "Stopped",
       "starting": "Starting",
       "stopping": "Stopping",
+      "recovering": "Recovering",
       "crashed": "Crashed",
       "unknown": "Unknown"
     },

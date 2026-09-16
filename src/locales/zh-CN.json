@@ -91,6 +91,7 @@
       "stopped": "已停止",
       "starting": "启动中",
       "stopping": "停止中",
+      "recovering": "恢复中",
       "crashed": "已崩溃",
       "unknown": "未知"
     },

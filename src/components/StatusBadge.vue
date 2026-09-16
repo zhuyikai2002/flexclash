@@ -24,7 +24,14 @@ const variant = computed(() => {
   switch (props.state) {
     case 'running':   return { dot: 'bg-emerald-400', ping: 'bg-emerald-400', ring: 'shadow-emerald-500/30', label: 'dashboard.state.running' }
     case 'starting':
-    case 'stopping':  return { dot: 'bg-amber-400 animate-pulse', ping: '', ring: '', label: props.state === 'starting' ? 'dashboard.state.starting' : 'dashboard.state.stopping' }
+    case 'stopping':
+    case 'recovering': {
+      const label =
+        props.state === 'starting' ? 'dashboard.state.starting'
+          : props.state === 'stopping' ? 'dashboard.state.stopping'
+          : 'dashboard.state.recovering'
+      return { dot: 'bg-amber-400 animate-pulse', ping: '', ring: '', label }
+    }
     case 'crashed':   return { dot: 'bg-rose-500', ping: '', ring: 'shadow-rose-500/30', label: 'dashboard.state.crashed' }
     case 'stopped':   return { dot: 'bg-zinc-500', ping: '', ring: '', label: 'dashboard.state.stopped' }
     default:          return { dot: 'bg-zinc-700', ping: '', ring: '', label: 'dashboard.state.unknown' }
@@ -34,6 +41,7 @@ const variant = computed(() => {
 const labelText = computed(() => {
   if (variant.value.label === 'dashboard.state.starting') return t('dashboard.state.starting')
   if (variant.value.label === 'dashboard.state.stopping') return t('dashboard.state.stopping')
+  if (variant.value.label === 'dashboard.state.recovering') return t('dashboard.state.recovering')
   return t(variant.value.label)
 })
 </script>

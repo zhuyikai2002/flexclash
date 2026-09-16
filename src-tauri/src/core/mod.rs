@@ -9,6 +9,7 @@ pub mod shutdown;
 pub mod sidecar;
 pub mod speedtest;
 pub mod startup;
+pub mod supervisor;
 pub mod task_autostart;
 pub mod tun;
 pub mod uipi;

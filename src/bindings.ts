@@ -291,6 +291,7 @@ export const events = {
 	configRefreshPayload: makeEvent<ConfigRefreshPayload>("config-refresh-payload"),
 	geoDataUpdatedPayload: makeEvent<GeoDataUpdatedPayload>("geo-data-updated-payload"),
 	logBatch: makeEvent<LogBatch>("log-batch"),
+	supervisorEvent: makeEvent<SupervisorEvent>("supervisor-event"),
 	trafficPayload: makeEvent<TrafficPayload>("traffic-payload"),
 };
 
@@ -458,7 +459,13 @@ export type HistoryPoint = {
  */
 export type KernelLogLevel = "debug" | "info" | "warning" | "error";
 
-export type KernelState = "stopped" | "starting" | "running" | "stopping" | "crashed";
+export type KernelState = "stopped" | "starting" | "running" | "stopping" | 
+/**
+ *  The supervisor is auto-restarting after a crash. A transient state the
+ *  renderer renders as "transitioning" — the kernel is down but a
+ *  supervised relaunch is already scheduled (see `core::supervisor`).
+ */
+"recovering" | "crashed";
 
 /**
  *  One flush of buffered log lines — the `/logs` ingest pushes a *batch* every
@@ -609,6 +616,33 @@ export type SilentAutostartStatus = {
 	 */
 	registry_active: boolean,
 };
+
+/**
+ *  Typed event pushed whenever the supervisor acts. Registered in
+ *  `bindings.rs` so the renderer gets a typed listener with no hand mirror.
+ */
+export type SupervisorEvent = 
+/**  A supervised restart is scheduled after a crash. */
+{ kind: "recovering"; 
+/**  1-based attempt number within the current crash run. */
+attempt: number; 
+/**  Backoff delay before the relaunch, in milliseconds. */
+delay_ms: number; 
+/**  Crashes recorded inside the breaker window (incl. this one). */
+consecutive_crashes: number } | 
+/**  The kernel survived `STABLE_UPTIME` after a supervised restart. */
+{ kind: "recovered"; 
+/**  The attempt that ultimately succeeded. */
+attempt: number } | 
+/**
+ *  The circuit breaker tripped: no further auto-restarts until the user
+ *  intervenes (manual start/stop) or a clean stop resets the breaker.
+ */
+{ kind: "gave_up"; 
+/**  Human-readable reason (why the breaker tripped). */
+reason: string; 
+/**  Crashes recorded inside the breaker window. */
+consecutive_crashes: number };
 
 /**
  *  M7-shape sweep result kept stable for the `sweep_residual_routes`

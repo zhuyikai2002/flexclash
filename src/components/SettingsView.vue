@@ -167,23 +167,25 @@ const GITHUB_URL = 'https://github.com/zhuyikai2002/flexclash'
 
 const statusLabel = computed(() => {
   switch (kernel.state) {
-    case 'running':  return t('dashboard.state.running')
-    case 'starting': return t('dashboard.state.starting')
-    case 'stopping': return t('dashboard.state.stopping')
-    case 'stopped':  return t('dashboard.state.stopped')
-    case 'crashed':  return t('dashboard.state.crashed')
-    default:         return t('dashboard.state.unknown')
+    case 'running':    return t('dashboard.state.running')
+    case 'starting':   return t('dashboard.state.starting')
+    case 'stopping':   return t('dashboard.state.stopping')
+    case 'recovering': return t('dashboard.state.recovering')
+    case 'stopped':    return t('dashboard.state.stopped')
+    case 'crashed':    return t('dashboard.state.crashed')
+    default:           return t('dashboard.state.unknown')
   }
 })
 
 const statusColorClass = computed(() => {
   switch (kernel.state) {
-    case 'running':  return 'text-emerald-400'
+    case 'running':    return 'text-emerald-400'
     case 'starting':
-    case 'stopping': return 'text-amber-400'
-    case 'crashed':  return 'text-rose-400'
-    case 'stopped':  return 'text-zinc-500'
-    default:         return 'text-zinc-500'
+    case 'stopping':
+    case 'recovering': return 'text-amber-400'
+    case 'crashed':    return 'text-rose-400'
+    case 'stopped':    return 'text-zinc-500'
+    default:           return 'text-zinc-500'
   }
 })
 
@@ -374,7 +376,7 @@ onUnmounted(() => {
                 'w-2 h-2 rounded-full',
                 kernel.state === 'running' ? 'bg-emerald-400 shadow-lg shadow-emerald-400/50' :
                 kernel.state === 'crashed' ? 'bg-rose-400' :
-                kernel.state === 'starting' || kernel.state === 'stopping' ? 'bg-amber-400 animate-pulse' :
+                kernel.state === 'starting' || kernel.state === 'stopping' || kernel.state === 'recovering' ? 'bg-amber-400 animate-pulse' :
                 'bg-zinc-600'
               ]"
             ></span>
