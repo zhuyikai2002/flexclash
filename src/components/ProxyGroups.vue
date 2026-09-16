@@ -1,33 +1,91 @@
 <script setup lang="ts">
 /**
- * ProxyGroups — adaptive grid of node cards, grouped by selector type.
+ * ProxyGroups — the proxy-group tree, virtualised.
  *
- * Phase 4 redesign:
- *   - Each group is a section header + responsive grid (1→2→3→4 cols)
- *   - Each node is a small card:
- *       * left:  node name (truncate, tooltip)
- *       * right: latency pill (rounded-full, color-graded)
- *       * selected: sky-500/50 ring + bg + checkmark
- *       * hover:   lift -0.5, transition 200ms
- *   - Speed test is per-group, not per-node
- *   - Sort / refresh controls sit in the section header (sticky)
+ * Why a virtual list: a serious subscription can carry thousands of nodes, and
+ * before this the tab mounted one DOM node per card (plus a wrapper per group).
+ * Everything below exists to keep the mounted set proportional to the *viewport*
+ * rather than to the subscription.
+ *
+ * The model is a flattened row list, not a nested one:
+ *
+ *   [ header(A), nodes(A,0..3), nodes(A,4..7), …, header(B), nodes(B,0..3), … ]
+ *
+ * Each item is one visual row — a group band, or one line of `cols` cards — so a
+ * single scroll container can window group headers and grids together. The
+ * alternatives do not work here: virtualising whole groups still mounts every
+ * card in an expanded group, and a nested virtualiser per group needs its own
+ * scroll box, which turns one list into N scrollbars. `lanes` cannot express a
+ * header that spans the full width.
+ *
+ * The three pieces of the contract:
+ *   - Row heights are fixed, so the scroll geometry is exact and no measurement
+ *     pass is needed (`HEADER_H` / `NODE_ROW_H`).
+ *   - `cols` is derived from the same viewport breakpoints the old grid used, and
+ *     drives both the chunking here and the grid inside `ProxyNodeRow`.
+ *   - Collapsing a group removes its rows from the list instead of hiding them,
+ *     so a collapsed group costs no DOM at all.
+ *
+ * This component deliberately never reads node payloads while rendering. Rows and
+ * headers subscribe to their own group (see those components); if the list read
+ * `nodes` here, every speed-test batch would re-render the whole view.
  */
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
-  CheckCircle2, Loader2, Zap,
-  ArrowDownNarrowWide, ArrowDownWideNarrow, RefreshCw, ChevronDown, ChevronRight,
+  ArrowDownNarrowWide, ArrowDownWideNarrow, Loader2, RefreshCw,
 } from 'lucide-vue-next'
-import { useProxiesStore, type DelayStatus, type NodeDelayInfo } from '@/stores/proxies'
+
+import { useProxiesStore } from '@/stores/proxies'
 import { useKernelStore } from '@/stores/kernel'
 import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { useI18n } from '@/composables/useI18n'
+import ProxyGroupHeader from '@/components/ProxyGroupHeader.vue'
+import ProxyNodeRow from '@/components/ProxyNodeRow.vue'
+
+/**
+ * Fixed row heights, in px.
+ *
+ * Both kinds are genuinely fixed: a card truncates its name to one line and the
+ * group band is one name line plus one meta line, with `rem`-sized type in a
+ * webview at fixed zoom. Constant heights let the virtualiser size the scroll
+ * area exactly, which is what keeps a fast drag from jittering the scrollbar —
+ * measured heights would cost a second layout pass on every newly seen row.
+ *
+ * `HEADER_H` is **measured**, not derived: the bench harness (`npm run dev:web`
+ * → `/dev-proxy-bench.html`) reports the real rendered height of both kinds and
+ * the worst placement error between neighbours. It caught this at 60 vs an actual
+ * 64, which would have overlapped every group band by 4px. Re-run it after
+ * touching the card or band padding, and keep `maxGapErrorPx` at 0.
+ */
+const HEADER_H = 64
+const NODE_ROW_H = 51
+
+/** Rows kept mounted beyond the viewport, at 1–4 cards each. */
+const OVERSCAN = 8
+
+/**
+ * Height of the scroll box: the viewport minus the chrome that has to stay
+ * visible below it — `main`'s 24px padding top and bottom, this view's toolbar
+ * (28px) plus its 12px gap, the 24px gap above the footer, and the footer's 34px.
+ * Yielding to the footer is intentional: it keeps the panel from hiding it.
+ */
+const PANE_H = 'calc(100vh - 9.5rem)'
+
+/** One virtual row. Group bands and card rows share the list. */
+type RowItem =
+  | { kind: 'header'; key: string; group: string }
+  | { kind: 'nodes'; key: string; group: string; names: string[] }
 
 const proxies = useProxiesStore()
 const kernel = useKernelStore()
 const { t } = useI18n()
+
 const selecting = ref<Record<string, boolean>>({})
 const collapsed = ref<Record<string, boolean>>({})
 const unlistens: UnlistenFn[] = []
+
+const scrollEl = ref<HTMLElement | null>(null)
 
 // Always pull the freshest proxy tree on mount — a subscription activated
 // while the user was on the Profiles tab won't be visible otherwise.
@@ -61,9 +119,89 @@ onMounted(() => {
 onUnmounted(() => {
   for (const u of unlistens) u()
   unlistens.length = 0
+  syncColsOff()
 })
 
+// ---------------------------------------------------------------------------
+// Columns — mirrors the `sm: / lg: / xl:` breakpoints the grid used to carry,
+// measured against the viewport because that is what those prefixes mean. The
+// scroll box is narrower than the viewport (68px rail + padding), so deriving
+// this from the container would shift every breakpoint.
+// ---------------------------------------------------------------------------
+const COLS_BREAKPOINTS = ['(min-width: 640px)', '(min-width: 1024px)', '(min-width: 1280px)']
+const cols = ref(1)
+const mediaQueryLists: MediaQueryList[] = []
 
+function syncCols(): void {
+  let n = 1
+  for (const mql of mediaQueryLists) if (mql.matches) n++
+  cols.value = n
+}
+
+function syncColsOn(): void {
+  mediaQueryLists.length = 0
+  for (const query of COLS_BREAKPOINTS) {
+    const mql = window.matchMedia(query)
+    mediaQueryLists.push(mql)
+    mql.addEventListener('change', syncCols)
+  }
+  syncCols()
+}
+
+function syncColsOff(): void {
+  for (const mql of mediaQueryLists) mql.removeEventListener('change', syncCols)
+  mediaQueryLists.length = 0
+}
+
+syncColsOn()
+
+// ---------------------------------------------------------------------------
+// The flattened row list. Depends on structure only — group identity, display
+// order, collapse state, column count — so a speed-test batch never rebuilds it.
+// ---------------------------------------------------------------------------
+const flatItems = computed<RowItem[]>(() => {
+  const out: RowItem[] = []
+  for (const g of proxies.selectorGroups) {
+    out.push({ kind: 'header', key: `h:${g.name}`, group: g.name })
+    if (collapsed.value[g.name]) continue
+    // `sortedChildren` is the display order: mihomo's, or the coalesced
+    // latency order maintained by the store.
+    const names = proxies.sortedChildren(g.name)
+    for (let i = 0; i < names.length; i += cols.value) {
+      out.push({
+        kind: 'nodes',
+        // The group name is part of the key on purpose: with every group in one
+        // container, a bare node name would collide across groups.
+        key: `r:${g.name}:${i}`,
+        group: g.name,
+        names: names.slice(i, i + cols.value),
+      })
+    }
+  }
+  return out
+})
+
+const virtualizer = useVirtualizer({
+  get count() { return flatItems.value.length },
+  getScrollElement: () => scrollEl.value,
+  estimateSize: (index) => (flatItems.value[index]?.kind === 'header' ? HEADER_H : NODE_ROW_H),
+  getItemKey: (index) => flatItems.value[index]?.key ?? index,
+  overscan: OVERSCAN,
+})
+
+/** Virtual rows paired with their item, so the template can narrow on `kind`. */
+const visibleRows = computed(() =>
+  virtualizer.value.getVirtualItems().map((v) => ({
+    v,
+    item: flatItems.value[v.index] as RowItem,
+  })),
+)
+
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+// ---------------------------------------------------------------------------
+// Interaction
+// ---------------------------------------------------------------------------
 async function handleSelect(group: string, node: string) {
   const key = `${group}::${node}`
   if (selecting.value[key]) return
@@ -82,51 +220,13 @@ async function handleSpeedTest(group: string) {
 function toggleCollapse(group: string) {
   collapsed.value = { ...collapsed.value, [group]: !collapsed.value[group] }
 }
-
-function latencyText(delay: number | null, status: DelayStatus): string {
-  if (status === 'testing') return '…'
-  if (status === 'unreachable') return t('proxies.latency.failed')
-  if (status === 'timeout') return t('proxies.latency.timeout')
-  if (status === 'error') return 'err'
-  if (status === 'ok' && delay !== null) return t('proxies.latency.ms', { n: delay })
-  return '—'
-}
-
-/**
- * Tooltip for a node card: its name, plus why the last probe ended the way it
- * did. The Rust engine reports a specific reason per failure, so surfacing it
- * here is what distinguishes "this node is dead" from "the kernel is down" —
- * both of which used to render as the same grey pill.
- */
-function nodeTitle(name: string, info?: NodeDelayInfo): string {
-  const reason = info?.message
-  return reason ? `${name}\n${reason}` : name
-}
-
-function latencyPillClass(delay: number | null, status: DelayStatus): string {
-  if (status === 'testing') return 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-400/20'
-  if (status === 'ok' && delay !== null) {
-    if (delay < 200) return 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/20'
-    if (delay < 500) return 'bg-yellow-500/15 text-yellow-300 ring-1 ring-yellow-400/20'
-    return 'bg-orange-500/15 text-orange-300 ring-1 ring-orange-400/20'
-  }
-  if (status === 'timeout' || status === 'error') return 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-400/20'
-  if (status === 'unreachable') return 'bg-zinc-500/15 text-zinc-500 ring-1 ring-white/5'
-  return 'bg-white/5 text-zinc-500 ring-1 ring-white/5'
-}
-
-function groupTypeLabel(type: string): string {
-  const known: Record<string, string> = {
-    Selector: 'Selector', Fallback: 'Fallback', URLTest: 'URL Test',
-    LoadBalance: 'Load Balance', Relay: 'Relay', DIRECT: 'Direct', REJECT: 'Reject',
-  }
-  return known[type] ?? type
-}
 </script>
 
 <template>
-  <section class="space-y-4">
-    <header class="flex items-center justify-between">
+  <section class="flex flex-col">
+    <!-- Panel head: stays put while the list scrolls, so the controls remain
+         reachable no matter where the user is in a long subscription. -->
+    <header class="mb-3 flex items-center justify-between">
       <h2 class="text-sm font-semibold text-zinc-200">
         {{ t('proxies.title') }}
         <span class="ml-2 text-[11px] font-mono text-zinc-500">
@@ -169,114 +269,46 @@ function groupTypeLabel(type: string): string {
       </div>
     </div>
 
-    <div v-else class="space-y-4">
-      <article
-        v-for="group in proxies.selectorGroups"
-        :key="group.name"
-        class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md overflow-hidden"
+    <div
+      v-else
+      class="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md"
+    >
+      <div
+        ref="scrollEl"
+        class="overflow-auto overscroll-contain"
+        :style="{ height: PANE_H, minHeight: '280px' }"
       >
-        <!-- Group header (sticky-like: solid bg, sharp border) -->
-        <header
-          class="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/5 bg-white/[0.02]"
-        >
-          <button
-            class="flex items-center gap-2 min-w-0 text-left"
-            @click="toggleCollapse(group.name)"
+        <div class="relative w-full" :style="{ height: `${totalSize}px` }">
+          <div
+            v-for="row in visibleRows"
+            :key="row.item.key"
+            class="absolute top-0 left-0 w-full"
+            :style="{ transform: `translateY(${row.v.start}px)` }"
           >
-            <ChevronDown
-              v-if="!collapsed[group.name]"
-              class="h-3.5 w-3.5 text-zinc-500 shrink-0 transition-transform"
+            <ProxyGroupHeader
+              v-if="row.item.kind === 'header'"
+              :group="row.item.group"
+              :collapsed="collapsed[row.item.group] === true"
+              :first="row.v.index === 0"
+              @toggle="toggleCollapse(row.item.group)"
+              @test="handleSpeedTest(row.item.group)"
             />
-            <ChevronRight
+            <ProxyNodeRow
               v-else
-              class="h-3.5 w-3.5 text-zinc-500 shrink-0 transition-transform"
+              :group="row.item.group"
+              :names="row.item.names"
+              :cols="cols"
+              :selecting="selecting"
+              @select="handleSelect(row.item.group, $event)"
             />
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-zinc-100 truncate flex items-center gap-1.5">
-                {{ group.name }}
-                <span
-                  v-if="group.now"
-                  class="inline-flex items-center gap-1 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-mono text-sky-200 truncate max-w-[180px]"
-                >
-                  <CheckCircle2 class="h-2.5 w-2.5 shrink-0" />
-                  <span class="truncate">{{ group.now }}</span>
-                </span>
-              </div>
-              <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-mono">
-                {{ groupTypeLabel(group.type) }} · {{ group.all.length }} nodes
-              </div>
-            </div>
-          </button>
-          <button
-            @click="handleSpeedTest(group.name)"
-            :disabled="proxies.isGroupTesting(group.name)"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500/20 px-2.5 py-1 text-[11px] text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50 transition-colors"
-          >
-            <Loader2 v-if="proxies.isGroupTesting(group.name)" class="w-3 h-3 animate-spin" />
-            <Zap v-else class="w-3 h-3" />
-            {{ t('proxies.test') }}
-          </button>
-        </header>
-
-        <!-- Node grid (1→2→3→4 cols responsive) -->
-        <div
-          v-show="!collapsed[group.name]"
-          class="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5"
-        >
-          <button
-            v-for="node in proxies.sortedChildren(group.name)"
-            :key="node"
-            @click="handleSelect(group.name, node)"
-            :disabled="
-              proxies.isGroupTesting(group.name) ||
-              selecting[`${group.name}::${node}`] === true
-            "
-            :title="nodeTitle(node, group.nodes[node])"
-            :class="[
-              'group relative flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all duration-200',
-              'hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0',
-              group.now === node
-                ? 'border-sky-400/50 bg-sky-500/10 ring-1 ring-sky-400/30 text-zinc-50 shadow-md shadow-sky-500/10'
-                : 'border-white/5 bg-zinc-950/30 text-zinc-200 hover:border-white/15 hover:bg-white/[0.05]'
-            ]"
-          >
-            <CheckCircle2
-              v-if="group.now === node"
-              class="h-3.5 w-3.5 text-sky-300 shrink-0"
-            />
-            <span
-              v-else
-              class="h-3.5 w-3.5 shrink-0"
-              aria-hidden="true"
-            ></span>
-            <span class="text-[13px] font-medium truncate flex-1 leading-tight">
-              {{ node }}
-            </span>
-            <Loader2
-              v-if="selecting[`${group.name}::${node}`] === true"
-              class="h-3 w-3 animate-spin text-sky-300 shrink-0"
-            />
-            <span
-              v-else
-              :class="[
-                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium shrink-0',
-                latencyPillClass(group.nodes[node]?.delay ?? null, group.nodes[node]?.status ?? 'idle')
-              ]"
-            >
-              <Loader2
-                v-if="group.nodes[node]?.status === 'testing'"
-                class="h-2.5 w-2.5 animate-spin"
-              />
-              {{ latencyText(group.nodes[node]?.delay ?? null, group.nodes[node]?.status ?? 'idle') }}
-            </span>
-          </button>
+          </div>
         </div>
-      </article>
+      </div>
     </div>
 
     <div
       v-if="proxies.error"
-      class="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300 font-mono"
+      class="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-300 font-mono"
     >
       {{ proxies.error }}
     </div>
