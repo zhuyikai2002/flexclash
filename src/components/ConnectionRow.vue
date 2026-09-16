@@ -9,7 +9,7 @@
 import { computed } from 'vue'
 import { Loader2, X, Globe, Cpu, Network, Shield } from 'lucide-vue-next'
 
-import { formatRate } from '@/composables/useTrafficStream'
+import { formatRate } from '@/utils/format'
 import type { ConnectionRow } from '@/types/clash'
 
 const props = defineProps<{

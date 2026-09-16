@@ -38,3 +38,21 @@ export function formatBytes(n: number | null | undefined, placeholder = '-'): st
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
   return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`
 }
+
+/**
+ * Format a *rate* in bytes per second as B/s, KB/s, MB/s or GB/s (1 decimal).
+ *
+ * Distinct from `formatBytes`, which reports a size: the unit here is always
+ * per-second, so the two are not interchangeable. Lives in this module rather
+ * than next to its caller because three components share it and it is pure.
+ */
+export function formatRate(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s'
+  const KB = 1024
+  const MB = KB * 1024
+  const GB = MB * 1024
+  if (bytesPerSec < KB) return `${bytesPerSec.toFixed(0)} B/s`
+  if (bytesPerSec < MB) return `${(bytesPerSec / KB).toFixed(1)} KB/s`
+  if (bytesPerSec < GB) return `${(bytesPerSec / MB).toFixed(1)} MB/s`
+  return `${(bytesPerSec / GB).toFixed(2)} GB/s`
+}

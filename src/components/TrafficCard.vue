@@ -7,16 +7,25 @@
  *     (text-5xl / font-semibold) so the eye locks on the rate instantly.
  *   - Subtle gradient line + corner indicator for direction (down=emerald,
  *     up=indigo) so the panel reads correctly at a glance.
- *   - Tiny "live" pulse / "reconnect" CTA in the top-right.
- *   - Footer: total over the visible window + manual refresh.
+ *   - Tiny "live" pulse in the top-right.
+ *   - Footer: how stale the last sample is.
+ *
+ * DATA SOURCE (Phase 2): the rate no longer comes from a renderer-side
+ * WebSocket. Rust owns mihomo's `/traffic` stream (`core::ingest`), throttles
+ * it to one `TrafficPayload` per second, and the appstate store is the single
+ * projection of it. This component therefore reads plain reactive numbers and
+ * has no socket lifecycle of its own — it cannot leak one.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ArrowDown, ArrowUp, RefreshCw, Wifi, WifiOff } from 'lucide-vue-next'
-import { formatRate, useTrafficStream } from '@/composables/useTrafficStream'
+import { ArrowDown, ArrowUp } from 'lucide-vue-next'
+import { formatRate } from '@/utils/format'
 import { useI18n } from '@/composables/useI18n'
+import { useAppStateStore } from '@/stores/appstate'
+import { useKernelStore } from '@/stores/kernel'
 
 const { t } = useI18n()
-const { up, down, connected, lastUpdateAt, error, reconnect } = useTrafficStream()
+const appstate = useAppStateStore()
+const kernel = useKernelStore()
 
 const tick = ref(0)
 let tickTimer: ReturnType<typeof setInterval> | null = null
@@ -29,6 +38,24 @@ onUnmounted(() => {
     clearInterval(tickTimer)
     tickTimer = null
   }
+})
+
+const up = computed(() => appstate.uploadSpeed)
+const down = computed(() => appstate.downloadSpeed)
+const lastUpdateAt = computed(() => appstate.lastTrafficAt)
+
+/**
+ * "Live" = the kernel is up AND a sample landed recently.
+ *
+ * The 5s window is 5× the 1 Hz push cadence, so a single dropped tick does not
+ * flicker the indicator, while a genuinely dead socket (or a stopped kernel)
+ * does. `tick` is read so staleness is re-evaluated every second even when no
+ * new sample arrives to trigger reactivity.
+ */
+const connected = computed(() => {
+  void tick.value
+  if (!kernel.isRunning || lastUpdateAt.value === null) return false
+  return Date.now() - lastUpdateAt.value < 5_000
 })
 
 const upText = computed(() => formatRate(up.value))
@@ -74,14 +101,6 @@ const sinceText = computed(() => {
           live
         </span>
       </div>
-      <button
-        v-if="!connected"
-        @click="reconnect"
-        class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] text-amber-400 hover:bg-amber-500/20 transition-colors"
-      >
-        <WifiOff class="h-3 w-3" />
-        reconnect
-      </button>
     </header>
 
     <div class="grid grid-cols-2 gap-3">
@@ -145,17 +164,6 @@ const sinceText = computed(() => {
       class="mt-4 flex items-center justify-between text-[11px] font-mono text-zinc-500"
     >
       <span>{{ sinceText }}</span>
-      <span class="inline-flex items-center gap-2">
-        <span v-if="error" class="text-rose-400">{{ error }}</span>
-        <button
-          v-else
-          @click="reconnect"
-          class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-zinc-500 hover:bg-white/5 hover:text-zinc-300 transition-colors"
-          :title="t('common.refresh')"
-        >
-          <RefreshCw class="h-3 w-3" />
-        </button>
-      </span>
     </footer>
   </section>
 </template>

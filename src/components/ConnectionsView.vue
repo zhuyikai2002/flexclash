@@ -13,7 +13,7 @@ import { useConnectionsStore, type PollIntervalMs } from '@/stores/connections'
 import { useKernelStore } from '@/stores/kernel'
 import { useConnectionMonitor } from '@/composables/useConnectionMonitor'
 import ConnectionRow from '@/components/ConnectionRow.vue'
-import { formatRate } from '@/composables/useTrafficStream'
+import { formatRate } from '@/utils/format'
 import { useI18n } from '@/composables/useI18n'
 
 const props = defineProps<{ active: boolean }>()

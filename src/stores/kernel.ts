@@ -3,8 +3,11 @@
 //
 // Responsibilities:
 //   - Mirror the Rust-side `KernelState` enum onto the frontend.
-//   - Subscribe to `kernel://*` events emitted by sidecar.rs.
-//   - Drive the direct axios probe (does NOT go through Rust).
+//   - Subscribe to the sidecar's lifecycle events (`kernel://state`,
+//     `kernel://log`, `kernel://terminated`) plus the two *typed* events that
+//     replaced their string counterparts: `events.configRefreshPayload` and
+//     the batched `events.logBatch`.
+//   - Drive the health probe (through the Rust façade, not a direct socket).
 //
 // State machine:
 //   backend `KernelState` is single-writer on the Rust side.
@@ -22,12 +25,13 @@
 
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { commands, type KernelState } from '@/bindings'
+import { commands, events, type KernelState } from '@/bindings'
 import {
   call,
   guardInTauri,
   inTauri,
   safeListen,
+  safeListenEvent,
   type UnlistenFn,
 } from '@/utils/tauri-bridge'
 
@@ -239,28 +243,46 @@ export const useKernelStore = defineStore('kernel', {
       )
 
       _unlisteners.push(
-        await safeListen<ConfigRefreshPayload>('kernel://config-refreshed', (e) => {
+        // Typed event: `ConfigRefreshPayload` (Rust `core::sidecar`). Replaces
+        // the retired `kernel://config-refreshed` string channel and, with it,
+        // the hand-written mirror this file used to carry at the bottom.
+        await safeListenEvent(events.configRefreshPayload, (e) => {
           if (e.payload.kind === 'port_changed') {
             this.configRefresh = {
-              fromPort: e.payload.from_port ?? null,
+              fromPort: e.payload.from_port,
               toPort: e.payload.to_port,
             }
           } else if (e.payload.kind === 'schema_bumped') {
             // Surface a prominent restart-required notice.  The dashboard
             // renders an amber banner with a "Restart" CTA.
-            // `from_version` and `to_version` are guaranteed by the Rust
-            // `SchemaBumped` variant; default to 0 defensively in case
-            // a future payload omits them.
+            //
+            // `from_version` / `to_version` are non-optional in the
+            // discriminated union for this variant, so the old defensive
+            // `?? 0` fallbacks are gone — the type system now guarantees them.
             this.schemaBumped = {
-              fromVersion: e.payload.from_version ?? 0,
-              toVersion: e.payload.to_version ?? 0,
-              fromPort: e.payload.from_port ?? null,
+              fromVersion: e.payload.from_version,
+              toVersion: e.payload.to_version,
+              fromPort: e.payload.from_port,
               toPort: e.payload.to_port,
               needsRestart: true,
             }
             this.recentLogs.push(
               `[config] schema bumped v${e.payload.from_version} → v${e.payload.to_version} — restart kernel to apply`,
             )
+          }
+        }),
+      )
+
+      _unlisteners.push(
+        // Typed event: batched mihomo logs (Rust `core::ingest`, one push per
+        // 500 ms). The `kernel://log` channel above still carries FlexClash's
+        // own `[sidecar]` / `[ingest]` banners; this one carries the kernel's.
+        await safeListenEvent(events.logBatch, (e) => {
+          for (const entry of e.payload) {
+            this.recentLogs.push(`[${entry.level}] ${entry.message}`)
+          }
+          if (this.recentLogs.length > LOG_CAP) {
+            this.recentLogs.splice(0, this.recentLogs.length - LOG_CAP)
           }
         }),
       )
@@ -390,17 +412,3 @@ export const useKernelStore = defineStore('kernel', {
     },
   },
 })
-
-// Mirror of `ConfigRefresh` enum from sidecar.rs.
-//   created         → fresh install
-//   port_changed    → external-controller port was stale
-//   schema_bumped   → the bundled default changed in a backwards-
-//                     incompatible way; user should restart
-//   unchanged       → no rewrite performed
-interface ConfigRefreshPayload {
-  kind: 'created' | 'port_changed' | 'schema_bumped' | 'unchanged'
-  from_port?: number | null
-  to_port: number
-  from_version?: number
-  to_version?: number
-}

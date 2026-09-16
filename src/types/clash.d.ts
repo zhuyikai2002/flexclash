@@ -7,8 +7,11 @@
 // SCOPE — this file is for types Rust does NOT own:
 //   * responses from mihomo's own REST API (`/proxies`, `/rules`, …), which
 //     the renderer receives as a JSON *string* from the Rust façade and parses
-//     itself, and
-//   * the `/traffic` + `/connections` WebSocket push payloads.
+//     itself.
+//
+// The `/traffic` and `/logs` push payloads are NOT here any more: Rust owns
+// those sockets (`core::ingest`) and the renderer gets typed `TrafficPayload` /
+// `LogBatch` events from `src/bindings.ts` instead.
 //
 // Anything that crosses the Tauri IPC boundary as a typed value lives in
 // `src/bindings.ts`, generated from the Rust definitions — do NOT mirror an
@@ -21,15 +24,6 @@
 export interface MihomoVersion {
   meta: boolean
   version: string
-}
-
-// ----- /traffic  (WebSocket only — pushed messages) -------------------------
-
-export interface TrafficSample {
-  /** Upload bytes/sec, since the previous sample. */
-  up: number
-  /** Download bytes/sec, since the previous sample. */
-  down: number
 }
 
 // ----- /proxies -------------------------------------------------------------

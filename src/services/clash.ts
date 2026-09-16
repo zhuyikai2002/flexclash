@@ -6,7 +6,11 @@
 // the raw JSON body as a string; we parse here and hand the object to the
 // store — store parsing/mapping logic is unchanged.
 //
-// Push WebSocket streams (/traffic, /connections) stay renderer-side.
+// There is no WebSocket code here any more. The push streams (`/traffic`,
+// `/logs`) are owned by Rust (`core::ingest`) and reach the renderer as typed
+// events; the two renderer-side socket helpers that used to live at the bottom
+// of this file (`openTrafficSocket`, `openConnectionsSocket`) were dead or
+// superseded and have been removed.
 // ============================================================================
 
 import { commands } from '@/bindings'
@@ -18,12 +22,11 @@ import type {
   ProxiesResponse,
   Proxy,
   RulesResponse,
-  TrafficSample,
 } from '@/types/clash'
 
-// Kept for informational / WS URL purposes. All REST flows via Rust.
+// Kept for informational purposes (the pinned controller endpoint is also
+// declared Rust-side as `RESERVED_CONTROLLER`). All REST flows via Rust.
 export const MIHOMO_BASE_URL = 'http://127.0.0.1:9091'
-export const MIHOMO_WS_URL = 'ws://127.0.0.1:9091'
 
 /** Invoke a command returning a JSON string; parse it to an object.
  *
@@ -162,38 +165,6 @@ export async function getRules(): Promise<RulesResponse> {
   guardInTauri('get_mihomo_rules')
   const v = await getJson(commands.getMihomoRules())
   return v as unknown as RulesResponse
-}
-
-// ============================================================================
-// WebSockets — push streams cannot ride IPC; kept renderer-side.
-// ============================================================================
-
-export interface DisposableSocket {
-  close(): void
-}
-
-export function openTrafficSocket(
-  onSample: (s: TrafficSample) => void,
-  onError?: (e: Event) => void,
-): DisposableSocket {
-  const ws = new WebSocket(`${MIHOMO_WS_URL}/traffic`)
-  ws.onmessage = (e) => {
-    try { onSample(JSON.parse(e.data) as TrafficSample) } catch { /* ignore */ }
-  }
-  ws.onerror = onError ?? (() => {})
-  return { close: () => ws.close() }
-}
-
-export function openConnectionsSocket(
-  onSnapshot: (c: ConnectionsResponse) => void,
-  onError?: (e: Event) => void,
-): DisposableSocket {
-  const ws = new WebSocket(`${MIHOMO_WS_URL}/connections`)
-  ws.onmessage = (e) => {
-    try { onSnapshot(JSON.parse(e.data) as ConnectionsResponse) } catch { /* ignore */ }
-  }
-  ws.onerror = onError ?? (() => {})
-  return { close: () => ws.close() }
 }
 
 // ============================================================================

@@ -22,7 +22,7 @@
  * place); Sidebar.vue provides just the inner content.
  */
 import { onMounted, onUnmounted, ref } from 'vue'
-import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { safeListen, safeListenEvent, type UnlistenFn } from '@/utils/tauri-bridge'
 
 import { useKernelStore } from '@/stores/kernel'
 import { useProxiesStore } from '@/stores/proxies'
@@ -33,7 +33,7 @@ import { useConnectionsStore } from '@/stores/connections'
 import { useTunStore } from '@/stores/tun'
 import { useHistoryStore } from '@/stores/history'
 import { useAppStateStore } from '@/stores/appstate'
-import type { AppStateSnapshot } from '@/bindings'
+import { events, type AppStateSnapshot } from '@/bindings'
 
 import Sidebar from '@/components/Sidebar.vue'
 import TrafficCard from '@/components/TrafficCard.vue'
@@ -82,6 +82,14 @@ onMounted(async () => {
     (e) => appstate.apply(e.payload),
   )
   appstate.addListener(unlistenState)
+
+  // Phase 2: live rates now ride a *typed* tauri-specta event off Rust's
+  // own `/traffic` socket (core/ingest.rs, ≈1 Hz). No frontend socket is
+  // opened; the renderer only projects the sample into reactive state.
+  const unlistenTraffic = await safeListenEvent(events.trafficPayload, (e) => {
+    appstate.applyTraffic(e.payload)
+  })
+  appstate.addListener(unlistenTraffic)
 
   profiles.attach()
   void profiles.refresh()
@@ -175,7 +183,7 @@ onUnmounted(() => {
         <SubscribeDialog :open="dialogOpen" @close="dialogOpen = false" />
 
         <footer class="text-center text-xs text-zinc-600 pt-4">
-          Frontend ↔ Mihomo direct (no Rust in the data path). Rust only owns sidecar lifecycle.
+          Rust owns the mihomo data plane — kernel state, logs and live rates arrive as typed events.
         </footer>
       </div>
     </main>

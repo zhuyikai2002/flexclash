@@ -83,6 +83,30 @@ export async function safeListen<T>(
   return listen<T>(event, handler)
 }
 
+/**
+ * Subscribe to a *typed* tauri-specta event — an entry of the generated
+ * `events` object (`events.trafficPayload`, `events.logBatch`, …).
+ *
+ * Why not call `events.x.listen` directly: the generated helper is a thin
+ * wrapper over the raw `@tauri-apps/api/event` module, which is `undefined`
+ * outside the Tauri runtime, so a direct call throws in a plain browser
+ * preview — exactly what `safeListen` exists to prevent. Routing both through
+ * here keeps the "only this module touches the raw Tauri API" rule intact, and
+ * the payload type is inferred from the event rather than restated.
+ */
+export async function safeListenEvent<T>(
+  event: { listen: (cb: EventCallback<T>) => Promise<UnlistenFn> },
+  handler: EventCallback<T>,
+): Promise<UnlistenFn> {
+  if (!isTauri()) {
+    if (isDev) console.debug('[tauri-bridge] skip typed-event listen — not in Tauri runtime')
+    return () => {
+      /* no-op unlisten */
+    }
+  }
+  return event.listen(handler)
+}
+
 // ============================================================================
 // Typed-command layer (tauri-specta)
 // ============================================================================
