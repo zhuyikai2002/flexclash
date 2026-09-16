@@ -94,6 +94,15 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib
 
+      # The integration target is named explicitly rather than implied by a
+      # blanket `cargo test`: `tests/proxy.rs` mutates `HKCU` and must never run
+      # on a CI runner, which is why the gate has always stopped at `--lib`.
+      # `tests/profile.rs` is pure logic, and leaving it ungated is exactly how
+      # a stale assertion in it stayed red unnoticed.
+      - name: Rust integration tests (profile)
+        working-directory: src-tauri
+        run: cargo test --test profile
+
       # The committed bindings are an artifact: `bindings.rs` is the single
       # source of truth for the IPC surface and `src/bindings.ts` is generated
       # from it. Regenerating here and diffing is what stops the two drifting
