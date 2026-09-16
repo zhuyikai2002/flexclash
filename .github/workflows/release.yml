@@ -58,8 +58,19 @@ jobs:
         with:
           node-version: '20'
           # package-lock.json is committed, so the npm download cache is keyed
-          # on it and survives between releases.
+          # on it and survives between releases. NOTE: this only configures the
+          # cache -- it installs nothing. See the step below.
           cache: npm
+
+      # `cache: npm` above is not an install. Nothing has created
+      # `node_modules/` at this point, and `tauri` is a devDependency
+      # resolved from `node_modules/.bin/tauri`, so without this step the build
+      # dies with "'tauri' is not recognized as an internal or external
+      # command" -- after the sidecar has already been downloaded. The
+      # frontend compile runs inside `tauri build` via `beforeBuildCommand`
+      # (`vue-tsc --noEmit && vite build`), which needs these same deps.
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
 
       - name: Set up Python
         uses: actions/setup-python@v5
