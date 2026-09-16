@@ -37,6 +37,11 @@ pub fn run() {
     // this is not done with `tauri::generate_handler!` plus a parallel
     // `collect_commands!`.
     let builder = crate::bindings::builder();
+    // Take the owned dispatcher out *before* `setup` below takes `builder`:
+    // `setup` must keep the builder to call `mount_events`, and
+    // `invoke_handler()` only borrows `self` for the duration of the call while
+    // returning a `'static` closure, so the two usages never overlap.
+    let invoke_handler = builder.invoke_handler();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -62,6 +67,12 @@ pub fn run() {
         // across a `'static` future.
         .manage(Arc::new(SpeedTestRegistry::new()))
         .setup(move |app| {
+            // Install the event registry first. Every typed `emit`/`listen`
+            // resolves its wire name through it, and both the kernel ingest
+            // task and the sidecar's config-refresh path emit typed events from
+            // here on — emitting before this runs would panic on a name lookup.
+            builder.mount_events(app);
+
             let handle = app.handle().clone();
             crate::core::shutdown::install(&handle);
             // M9: hand the AppHandle to the elevate module so the
@@ -221,7 +232,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(builder.invoke_handler())
+        .invoke_handler(invoke_handler)
         .run(tauri::generate_context!())
         .expect("error while running FlexClash");
 }

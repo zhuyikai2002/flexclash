@@ -36,7 +36,7 @@
 // tauri-build links the resource with `cargo:rustc-link-arg-bins`.
 // ============================================================================
 
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 /// Where the generated TypeScript lands.
 ///
@@ -162,13 +162,25 @@ pub fn builder() -> Builder<tauri::Wry> {
         // so the transport is lossless, and add a targeted override here.
         .dangerously_cast_bigints_to_number()
         // Types that cross the IPC boundary but appear in no command
-        // signature: they arrive in the renderer as *event payloads*. Registering
-        // them as plain types puts them in `bindings.ts` so the listeners can be
-        // typed without a hand-written mirror. `collect_events!` lands in the
-        // WebSocket-ingest work, where these become typed `Event`s.
+        // signature: they arrive in the renderer as *event payloads*.
+        // Registering them as plain types puts them in `bindings.ts` so the
+        // listeners can be typed without a hand-written mirror.
         .typ::<crate::core::watcher::AppStateSnapshot>()
         .typ::<crate::core::speedtest::DelayBatch>()
         .typ::<crate::core::speedtest::DelayDone>()
+        // Typed events — the kernel data plane. Each payload carries
+        // `#[derive(tauri_specta::Event)]` (see `core::kernel_events` for the
+        // `/traffic` + `/logs` shapes and `core::sidecar` for the
+        // config-refresh notice). Registering it here does two things at once:
+        // it becomes emittable solely through the typed `.emit()` API, and its
+        // shape lands in `bindings.ts` under `events`, so the renderer's
+        // listeners are typed with no mirror to drift. `mount_events()` in
+        // `lib.rs` installs the registry these names resolve through.
+        .events(collect_events![
+            crate::core::kernel_events::TrafficPayload,
+            crate::core::kernel_events::LogBatch,
+            crate::core::sidecar::ConfigRefreshPayload,
+        ])
 }
 
 /// Regenerate `src/bindings.ts`. Returns the path written.

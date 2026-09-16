@@ -4,7 +4,11 @@
 pub const KERNEL_STATE: &str = "kernel://state";
 pub const KERNEL_LOG: &str = "kernel://log";
 pub const KERNEL_TERMINATED: &str = "kernel://terminated";
-pub const KERNEL_CONFIG_REFRESHED: &str = "kernel://config-refreshed";
+
+// NOTE: the config-refresh notice no longer lives here. It used to be the
+// string event `kernel://config-refreshed`; it is now the typed event
+// `ConfigRefreshPayload` (`core::sidecar`), registered in `bindings.rs` and
+// exported as `events.configRefreshPayload`.
 
 pub const PROFILE_LIST_CHANGED: &str = "profile://list-changed";
 pub const PROFILE_RELOADED: &str = "profile://reloaded";

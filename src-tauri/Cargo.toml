@@ -61,7 +61,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
-tauri-specta = { version = "=2.0.0-rc.25", features = ["javascript", "typescript"] }
+# `derive` pulls in `tauri-specta-macros` for the `#[derive(Event)]` macro that
+# turns the kernel data-plane payloads (`core/kernel_events.rs`, plus
+# `ConfigRefreshPayload`) into registry-checked typed events.
+tauri-specta = { version = "=2.0.0-rc.25", features = ["javascript", "typescript", "derive"] }
 # `chrono` supplies the `specta::Type` impls for `DateTime<Utc>`, which
 # `HistoryPoint.ts` and friends carry. Without it the IPC types cannot derive
 # `Type` at all.

@@ -18,6 +18,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent, TerminatedPayload};
 use tauri_plugin_shell::ShellExt;
+// Brings `Event::emit` into scope so `ConfigRefreshPayload` can be pushed with
+// the typed `emit(app)` API instead of a raw `app.emit("…", …)` string.
+use tauri_specta::Event;
 
 use crate::config::profile::{patch_and_sanitize_yaml, RESERVED_MIXED_PORT};
 use crate::error::{AppError, Result};
@@ -28,7 +31,7 @@ const LOG_TAIL_CAP: usize = 200;
 
 /// Expected external-controller port. The frontend hard-codes the same value
 /// in `src/services/clash.ts`. If either drifts, `ensure_default_config` will
-/// rewrite the on-disk yaml and emit `KERNEL_CONFIG_REFRESHED`.
+/// rewrite the on-disk yaml and emit `ConfigRefreshPayload`.
 pub const EXPECTED_CONTROLLER_PORT: u16 = 9091;
 
 // ---------------------------------------------------------------------------
@@ -46,11 +49,17 @@ pub enum KernelState {
     Crashed,
 }
 
-/// Result of `ensure_default_config`. Frontend can react via
-/// `kernel://config-refreshed` event.
-#[derive(Debug, Clone, Serialize)]
+/// Result of `ensure_default_config`, delivered to the renderer as the typed
+/// `ConfigRefreshPayload` event (see `core::kernel_events` for why the payloads
+/// are typed rather than raw).
+///
+/// This used to be emitted on the string event `kernel://config-refreshed`,
+/// with the renderer carrying a hand-written mirror of the enum in
+/// `stores/kernel.ts`. Deriving `Event` retires both: the discriminant and
+/// every field now have exactly one definition.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ConfigRefresh {
+pub enum ConfigRefreshPayload {
     /// File did not exist; just written.
     Created,
     /// File existed but `external-controller` port didn't match.
@@ -203,7 +212,7 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
 
     // Announce config outcome via logs + event.
     match refresh {
-        ConfigRefresh::Created => {
+        ConfigRefreshPayload::Created => {
             let msg = format!(
                 "[config] created default config at {}",
                 config_path.display()
@@ -211,7 +220,7 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
             handle.push_log(msg.clone());
             let _ = app.emit(crate::events::KERNEL_LOG, msg);
         }
-        ConfigRefresh::PortChanged { from_port, to_port } => {
+        ConfigRefreshPayload::PortChanged { from_port, to_port } => {
             let msg = format!(
                 "[config] external-controller port auto-refreshed: {} -> {}",
                 from_port
@@ -221,12 +230,9 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
             );
             handle.push_log(msg.clone());
             let _ = app.emit(crate::events::KERNEL_LOG, msg);
-            let _ = app.emit(
-                crate::events::KERNEL_CONFIG_REFRESHED,
-                ConfigRefresh::PortChanged { from_port, to_port },
-            );
+            let _ = ConfigRefreshPayload::PortChanged { from_port, to_port }.emit(app);
         }
-        ConfigRefresh::SchemaBumped {
+        ConfigRefreshPayload::SchemaBumped {
             from_version,
             to_version,
             from_port,
@@ -238,17 +244,15 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
             );
             handle.push_log(msg.clone());
             let _ = app.emit(crate::events::KERNEL_LOG, msg);
-            let _ = app.emit(
-                crate::events::KERNEL_CONFIG_REFRESHED,
-                ConfigRefresh::SchemaBumped {
-                    from_version,
-                    to_version,
-                    from_port,
-                    to_port,
-                },
-            );
+            let _ = ConfigRefreshPayload::SchemaBumped {
+                from_version,
+                to_version,
+                from_port,
+                to_port,
+            }
+            .emit(app);
         }
-        ConfigRefresh::Unchanged => {}
+        ConfigRefreshPayload::Unchanged => {}
     }
 
     // 2) Spawn sidecar.
@@ -419,14 +423,14 @@ fn ensure_work_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
 ///
 /// Phase 1 ships only one default yaml — `Real profiles` (M4) will land in
 /// `profiles/<id>/config.yaml` and will NOT be touched by this function.
-fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
+fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefreshPayload)> {
     let path = work_dir.join(DEFAULT_CONFIG_FILE);
     let bundled = include_str!("../../resources/default_mihomo.yaml");
     let expected = format!("127.0.0.1:{EXPECTED_CONTROLLER_PORT}");
 
     if !path.exists() {
         std::fs::write(&path, bundled)?;
-        return Ok((path, ConfigRefresh::Created));
+        return Ok((path, ConfigRefreshPayload::Created));
     }
 
     let existing = std::fs::read_to_string(&path)?;
@@ -457,7 +461,7 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
                 let _ = std::fs::write(&path, &sanitized);
             }
         }
-        return Ok((path, ConfigRefresh::Unchanged));
+        return Ok((path, ConfigRefreshPayload::Unchanged));
     }
 
     // Bump detection — only for configs we own (they carry the marker).
@@ -472,7 +476,7 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
             std::fs::write(&path, bundled)?;
             return Ok((
                 path,
-                ConfigRefresh::SchemaBumped {
+                ConfigRefreshPayload::SchemaBumped {
                     from_version: user_v,
                     to_version: bundled_v,
                     from_port,
@@ -483,14 +487,14 @@ fn ensure_default_config(work_dir: &Path) -> Result<(PathBuf, ConfigRefresh)> {
     }
 
     if existing.contains(&expected) {
-        return Ok((path, ConfigRefresh::Unchanged));
+        return Ok((path, ConfigRefreshPayload::Unchanged));
     }
 
     let from_port = extract_controller_port(&existing);
     std::fs::write(&path, bundled)?;
     Ok((
         path,
-        ConfigRefresh::PortChanged {
+        ConfigRefreshPayload::PortChanged {
             from_port,
             to_port: EXPECTED_CONTROLLER_PORT,
         },
