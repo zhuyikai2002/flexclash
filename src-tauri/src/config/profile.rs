@@ -901,9 +901,9 @@ mod inbound_port_tests {
         let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         let m = doc.as_mapping().unwrap();
         let key = |k: &str| serde_yaml::Value::String(k.to_string());
-        assert!(m.get(&key("port")).is_none(), "port survived:\n{out}");
+        assert!(m.get(key("port")).is_none(), "port survived:\n{out}");
         assert!(
-            m.get(&key("socks-port")).is_none(),
+            m.get(key("socks-port")).is_none(),
             "socks-port survived:\n{out}"
         );
     }

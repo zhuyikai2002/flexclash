@@ -13,6 +13,7 @@ use crate::error::AppError;
 /// the payload format:
 ///   * a plain browser UA  → webpage / Base64 node list
 ///   * a clash / mihomo UA → the full YAML with `proxy-groups`
+///
 /// We advertise `clash.meta` (plus an app suffix) so providers that
 /// recognise the meta line hand down the standard subscription YAML.
 pub const DEFAULT_USER_AGENT: &str = "clash.meta/v1.18.0 FlexClash/0.1.0";

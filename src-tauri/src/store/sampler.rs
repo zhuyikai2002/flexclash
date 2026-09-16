@@ -182,8 +182,12 @@ mod tests {
 
     /// The 30-day retention window must stay in days, not seconds, so
     /// the prune SQL filter uses the same timebase as `now_ms()`.
+    ///
+    /// The property is a fact about a constant, so it is asserted where the
+    /// compiler evaluates it — a bad edit now fails the *build* instead of a
+    /// test run. (clippy: `assertions_on_constants`.)
     #[test]
     fn retention_constant_is_in_days() {
-        assert!(RETENTION_DAYS > 0);
+        const _: () = assert!(RETENTION_DAYS > 0);
     }
 }

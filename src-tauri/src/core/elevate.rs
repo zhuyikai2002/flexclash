@@ -197,7 +197,7 @@ mod platform {
     /// `wait` is false (the elevate path does not block on the child —
     /// UAC consent is the only blocking step).
     pub(super) fn runas_spawn(
-        binary: &PathBuf,
+        binary: &Path,
         work_dir: &std::path::Path,
         config_path: &std::path::Path,
     ) -> Result<u32> {
@@ -228,7 +228,7 @@ mod platform {
             // child console here. Do NOT add SEE_MASK_NO_CONSOLE — in a
             // `tauri dev` run the parent *has* a console and the child
             // would inherit it instead of staying hidden.
-            nShow: SW_HIDE.0 as i32,
+            nShow: SW_HIDE.0,
             ..Default::default()
         };
 
@@ -289,7 +289,7 @@ mod platform {
             lpVerb: PCWSTR(verb.as_ptr()),
             lpFile: PCWSTR(file.as_ptr()),
             lpParameters: PCWSTR(parameters.as_ptr()),
-            nShow: SW_HIDE.0 as i32,
+            nShow: SW_HIDE.0,
             ..Default::default()
         };
 
@@ -339,7 +339,7 @@ mod platform {
         Ok(code as i32)
     }
 
-    fn resolve_pid_via_tasklist(binary: &PathBuf) -> std::io::Result<u32> {
+    fn resolve_pid_via_tasklist(binary: &Path) -> std::io::Result<u32> {
         let name = binary
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -349,10 +349,7 @@ mod platform {
             .creation_flags(CREATE_NO_WINDOW)
             .output()?;
         if !out.status.success() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "tasklist exit non-zero",
-            ));
+            return Err(std::io::Error::other("tasklist exit non-zero"));
         }
         let text = String::from_utf8_lossy(&out.stdout);
         // CSV header: "Image Name","PID","Session Name","Session#","Mem Usage"
@@ -553,13 +550,10 @@ fn probe_version(addr: SocketAddr) -> std::io::Result<()> {
     if text.starts_with("HTTP/") && text.split_whitespace().nth(1) == Some("200") {
         Ok(())
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "unexpected /version status: {}",
-                text.lines().next().unwrap_or("<no status line>")
-            ),
-        ))
+        Err(std::io::Error::other(format!(
+            "unexpected /version status: {}",
+            text.lines().next().unwrap_or("<no status line>")
+        )))
     }
 }
 

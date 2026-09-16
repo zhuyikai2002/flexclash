@@ -262,7 +262,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             {
                 let handle = app.handle();
-                if let Err(e) = crate::tray::install(&handle) {
+                if let Err(e) = crate::tray::install(handle) {
                     eprintln!("[startup] tray install failed: {e}");
                 }
             }

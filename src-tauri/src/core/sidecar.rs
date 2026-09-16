@@ -35,18 +35,15 @@ pub const EXPECTED_CONTROLLER_PORT: u16 = 9091;
 // State types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum KernelState {
+    #[default]
     Stopped,
     Starting,
     Running,
     Stopping,
     Crashed,
-}
-
-impl Default for KernelState {
-    fn default() -> Self { KernelState::Stopped }
 }
 
 /// Result of `ensure_default_config`. Frontend can react via
@@ -489,10 +486,10 @@ fn has_foreign_inbound_port(yaml: &str) -> bool {
         return false;
     };
     let key = |k: &str| serde_yaml::Value::String(k.to_string());
-    if m.contains_key(&key("port")) || m.contains_key(&key("socks-port")) {
+    if m.contains_key(key("port")) || m.contains_key(key("socks-port")) {
         return true;
     }
-    match m.get(&key("mixed-port")).and_then(|v| v.as_u64()) {
+    match m.get(key("mixed-port")).and_then(|v| v.as_u64()) {
         Some(p) => p != u64::from(RESERVED_MIXED_PORT),
         None => true,
     }
