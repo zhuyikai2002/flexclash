@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_updater::{UpdaterExt, Update};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 pub const UPDATER_PROGRESS: &str = "updater://progress";
 
@@ -119,10 +119,7 @@ pub async fn download_update(
 /// taskkill is the belt-and-suspenders net on top of this clean shutdown.
 #[tauri::command]
 #[specta::specta]
-pub async fn install_update(
-    app: AppHandle,
-    state: State<'_, PendingUpdate>,
-) -> Result<(), String> {
+pub async fn install_update(app: AppHandle, state: State<'_, PendingUpdate>) -> Result<(), String> {
     let (update, bytes) = state
         .0
         .lock()
