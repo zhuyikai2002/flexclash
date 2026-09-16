@@ -1,42 +1,29 @@
 // ============================================================================
-// services/autostart.ts — Tauri command surface for desktop integration (M7).
+// services/autostart.ts — Tauri command surface for desktop integration.
 //
 // All real work happens in Rust (commands/desktop.rs). The plugin's
-// `tauri-plugin-autostart` is wrapped here to keep the rest of the
-// frontend off the plugin-internal API.  `safeInvoke` is used so the
-// store can boot in a plain browser preview without DevTools errors.
+// `tauri-plugin-autostart` is wrapped there, so the renderer never touches
+// the plugin's own API.
+//
+// Wire types are the *generated* ones (`src/bindings.ts`), so a change to a
+// Rust DTO is a compile error here instead of a silent drift.
+//
+// Note the two command flavours the generated bindings expose:
+//   * `call(commands.x(...))` — the command returns `Result<T, AppError>`, so
+//     the error is carried on the typed channel and `call` throws it;
+//   * `await commands.x()`     — the command is infallible on the Rust side
+//     (`-> T`), so there is nothing to unwrap; it only rejects on a transport
+//     failure. `get_autostart_status`, `get_silent_autostart_status`,
+//     `get_silent_flag` and `sweep_residual_routes` are all of this kind.
 // ============================================================================
 
-import { safeInvoke, safeInvokeOr } from '@/utils/tauri-bridge'
-
-export interface AutostartStatus {
-  enabled: boolean
-  /** True when the binary was launched with `--silent` (autostart at boot). */
-  silent: boolean
-}
-
-export interface SweepResult {
-  deleted: number
-  ok: boolean
-}
-
-/**
- * Elevated (Task Scheduler) autostart.
- *
- * Distinct from the registry mechanism above: the scheduled task launches
- * the app with a full administrator token, so TUN mode works without a UAC
- * prompt on every toggle. The two are mutually exclusive in the backend --
- * enabling one clears the other, because two logon launches fight over the
- * reserved inbound port.
- */
-export interface SilentAutostartStatus {
-  /** The logon task is registered in Task Scheduler. */
-  enabled: boolean
-  /** False where the platform cannot support it; the UI hides the switch. */
-  available: boolean
-  /** The registry entry is the active mechanism instead. */
-  registry_active: boolean
-}
+import {
+  commands,
+  type AutostartStatus,
+  type SilentAutostartStatus,
+  type SweepResult,
+} from '@/bindings'
+import { call, guardInTauri, inTauri } from '@/utils/tauri-bridge'
 
 const DEFAULT_STATUS: AutostartStatus = { enabled: false, silent: false }
 
@@ -47,18 +34,18 @@ const DEFAULT_SILENT_STATUS: SilentAutostartStatus = {
 }
 
 export async function getAutostartStatus(): Promise<AutostartStatus> {
-  return await safeInvokeOr<AutostartStatus>('get_autostart_status', DEFAULT_STATUS)
+  if (!inTauri('get_autostart_status')) return DEFAULT_STATUS
+  return await commands.getAutostartStatus()
 }
 
 export async function setAutostart(enabled: boolean): Promise<AutostartStatus> {
-  return await safeInvoke<AutostartStatus>('set_autostart', { enabled })
+  guardInTauri('set_autostart')
+  return call(commands.setAutostart(enabled))
 }
 
 export async function getSilentAutostartStatus(): Promise<SilentAutostartStatus> {
-  return await safeInvokeOr<SilentAutostartStatus>(
-    'get_silent_autostart_status',
-    DEFAULT_SILENT_STATUS,
-  )
+  if (!inTauri('get_silent_autostart_status')) return DEFAULT_SILENT_STATUS
+  return await commands.getSilentAutostartStatus()
 }
 
 /**
@@ -71,13 +58,16 @@ export async function getSilentAutostartStatus(): Promise<SilentAutostartStatus>
 export async function setSilentAutostart(
   enabled: boolean,
 ): Promise<SilentAutostartStatus> {
-  return await safeInvoke<SilentAutostartStatus>('set_silent_autostart', { enabled })
+  guardInTauri('set_silent_autostart')
+  return call(commands.setSilentAutostart(enabled))
 }
 
 export async function getSilentFlag(): Promise<boolean> {
-  return await safeInvokeOr<boolean>('get_silent_flag', false)
+  if (!inTauri('get_silent_flag')) return false
+  return await commands.getSilentFlag()
 }
 
 export async function sweepResidualRoutes(): Promise<SweepResult> {
-  return await safeInvoke<SweepResult>('sweep_residual_routes')
+  guardInTauri('sweep_residual_routes')
+  return await commands.sweepResidualRoutes()
 }

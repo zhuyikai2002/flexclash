@@ -14,14 +14,15 @@
 // precisely the "wait for everything, then render" pattern this design exists
 // to avoid.
 //
-// Like `services/tun.ts`, the payload types are declared here rather than
-// pulled from the generated `@/bindings`: the speed-test commands are plain
-// `#[tauri::command]`s (see the note in `commands/speedtest.rs` for why), so
-// there is no generated type to import. Field names are camelCase because the
-// Rust DTOs carry `#[serde(rename_all = "camelCase")]`.
+// The `camelCase` payload types (`DelayBatch` / `DelayDone` / `NodeProbe` /
+// `ProbeStatus`) are the generated ones — the Rust DTOs carry
+// `#[serde(rename_all = "camelCase")]`, and they are registered as plain types
+// with the builder precisely because they cross the IPC line as *event*
+// payloads rather than as a command return.
 // ============================================================================
 
-import { safeInvoke, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { commands, type DelayBatch, type DelayDone } from '@/bindings'
+import { call, guardInTauri, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 
 // ---------------------------------------------------------------------------
 // Event names — must match the constants in `src-tauri/src/events.rs`.
@@ -40,44 +41,8 @@ export const DEFAULT_TEST_URL = 'http://www.gstatic.com/generate_204'
 export const DEFAULT_TIMEOUT_MS = 5_000
 export const DEFAULT_CONCURRENCY = 64
 
-// ---------------------------------------------------------------------------
-// Wire types (mirror `core/speedtest.rs`)
-// ---------------------------------------------------------------------------
-
-/** Terminal outcome of one probe. */
-export type ProbeStatus = 'ok' | 'timeout' | 'unreachable' | 'error'
-
-export interface NodeProbe {
-  name: string
-  status: ProbeStatus
-  /** RTT in ms; non-null iff `status === 'ok'`. */
-  delayMs: number | null
-  /** Why a non-`ok` probe ended that way. */
-  message: string | null
-}
-
-/** Incremental progress push — one event per batch of results. */
-export interface DelayBatch {
-  runId: number
-  group: string
-  results: NodeProbe[]
-  /** Nodes probed so far, including this batch. */
-  done: number
-  total: number
-}
-
-/** Terminal push — exactly one per run, including a cancelled run. */
-export interface DelayDone {
-  runId: number
-  group: string
-  total: number
-  /** How many were actually probed; `< total` iff `cancelled`. */
-  done: number
-  ok: number
-  failed: number
-  cancelled: boolean
-}
-
+/** Renderer-side options bag for {@link startSpeedTest}. Not an IPC mirror:
+ *  the command takes these as separate optional arguments. */
 export interface StartSpeedTestOptions {
   url?: string
   timeoutMs?: number
@@ -102,13 +67,16 @@ export async function startSpeedTest(
   nodes: string[],
   opts: StartSpeedTestOptions = {},
 ): Promise<number> {
-  return await safeInvoke<number>('speed_test_group', {
-    group,
-    nodes,
-    url: opts.url ?? null,
-    timeoutMs: opts.timeoutMs ?? null,
-    concurrency: opts.concurrency ?? null,
-  })
+  guardInTauri('speed_test_group')
+  return call(
+    commands.speedTestGroup(
+      group,
+      nodes,
+      opts.url ?? null,
+      opts.timeoutMs ?? null,
+      opts.concurrency ?? null,
+    ),
+  )
 }
 
 /**
@@ -117,7 +85,8 @@ export async function startSpeedTest(
  * teardown path guard for a condition that is not an error.
  */
 export async function cancelSpeedTest(group: string): Promise<void> {
-  await safeInvoke<null>('cancel_speed_test', { group })
+  guardInTauri('cancel_speed_test')
+  await call(commands.cancelSpeedTest(group))
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,19 @@
 // ============================================================================
-// Mihomo (Clash Meta) RESTful API types — Phase 2 surface only.
+// Mihomo (Clash Meta) RESTful API types — the payloads the *kernel* serves.
 // Field semantics follow https://wiki.metacubex.one/en/api/ and the mihomo
 // /help endpoint output. Fields not used by the FlexClash UI are intentionally
 // omitted to keep this file focused and the bundle small.
+//
+// SCOPE — this file is for types Rust does NOT own:
+//   * responses from mihomo's own REST API (`/proxies`, `/rules`, …), which
+//     the renderer receives as a JSON *string* from the Rust façade and parses
+//     itself, and
+//   * the `/traffic` + `/connections` WebSocket push payloads.
+//
+// Anything that crosses the Tauri IPC boundary as a typed value lives in
+// `src/bindings.ts`, generated from the Rust definitions — do NOT mirror an
+// IPC type here, because the mirror silently drifts from the Rust one and
+// nothing fails until runtime.
 // ============================================================================
 
 // ----- /version -------------------------------------------------------------
@@ -11,19 +22,6 @@ export interface MihomoVersion {
   meta: boolean
   version: string
 }
-
-// ----- Kernel lifecycle state (mirror of Rust `KernelState` enum) ----------
-// Re-exported from stores/kernel.ts; defined there because it travels with
-// the Pinia store. We surface it from here so components don't need to
-// pull in the whole store just to type a prop.
-
-export type KernelState =
-  | 'unknown'
-  | 'stopped'
-  | 'starting'
-  | 'running'
-  | 'stopping'
-  | 'crashed'
 
 // ----- /traffic  (WebSocket only — pushed messages) -------------------------
 
@@ -267,28 +265,4 @@ export interface RulesResponse {
 export interface ProxyDelayResponse {
   /** Delay in ms; 0 means unreachable. */
   delay: number
-}
-
-// ============================================================================
-// Profile management (M4) — mirror `commands::profile` Rust wire types.
-// ============================================================================
-
-export interface ProfileMeta {
-  id: string
-  name: string
-  url: string
-  node_count: number
-  updated_at: string
-  file_path: string
-  used_bytes?: number
-  remaining_bytes?: number
-  total_bytes?: number
-  expire_at?: string
-}
-
-export type ReloadStatus = 'reloaded' | 'staged' | 'failed'
-
-export interface ReloadResult {
-  status: ReloadStatus
-  detail: string
 }

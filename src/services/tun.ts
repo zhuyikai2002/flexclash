@@ -1,30 +1,12 @@
 // ============================================================================
-// services/tun.ts — Tauri command surface for M9 TUN mode.
+// services/tun.ts — Tauri command surface for TUN mode.
 //
 // All real work happens in Rust (commands/tun.rs → core::tun::TunManager).
-// The store + UI are kept off the raw invoke() calls so swap-outs stay
-// local.  `safeInvoke` is used so browser preview doesn't throw.
+// Wire types come from the generated bindings.
 // ============================================================================
 
-import { safeInvoke, safeInvokeOr } from '@/utils/tauri-bridge'
-
-export type TunState = 'off' | 'enabling' | 'on' | 'disabling' | 'failed'
-
-export interface TunStatus {
-  state: TunState
-  enabled: boolean
-  device: string
-  last_error: string | null
-  last_changed_at_ms: number
-  last_sweep: SweepResultFull | null
-}
-
-export interface SweepResultFull {
-  deleted_routes: number
-  deleted_adapters: number
-  ok: boolean
-  message: string
-}
+import { commands, type SweepResultFull, type TunStatus } from '@/bindings'
+import { call, guardInTauri, inTauri } from '@/utils/tauri-bridge'
 
 const DEFAULT_STATUS: TunStatus = {
   state: 'off',
@@ -36,9 +18,13 @@ const DEFAULT_STATUS: TunStatus = {
 }
 
 /**
- * The two switches from Settings -> "TUN Advanced". They are stamped onto
- * the `tun:` block of the active config at enable time — see
+ * The two switches from Settings -> "TUN Advanced", in the renderer's
+ * camelCase spelling. They are stamped onto the `tun:` block of the active
+ * config at enable time — see
  * `src-tauri/src/config/profile.rs::toggle_tun_block`.
+ *
+ * Deliberately a frontend-side input type, not an IPC mirror: the Rust side
+ * takes these as two separate `Option<bool>` arguments rather than a struct.
  */
 export interface TunAdvancedOptions {
   strictRoute: boolean
@@ -52,27 +38,29 @@ const TUN_ADVANCED_FALLBACK: TunAdvancedOptions = {
 }
 
 export async function getTunState(): Promise<TunStatus> {
-  return await safeInvokeOr<TunStatus>('get_tun_state', DEFAULT_STATUS)
+  if (!inTauri('get_tun_state')) return DEFAULT_STATUS
+  return call(commands.getTunState())
 }
 
 /**
  * Enable TUN, stamping the advanced switches onto the `tun:` block.
  *
- * Argument names are snake_case to match
- * `#[tauri::command(rename_all = "snake_case")]` on the Rust side — Tauri 2
- * defaults to camelCase, and the explicit annotation is what keeps the two
- * ends honest rather than relying on a convention nobody can see.
+ * NOTE ON ARGUMENT NAMES: `commands.enableTun` sends `{ strictRoute,
+ * dnsHijack }`. That is not a style choice — Tauri 2 defaults command
+ * arguments to camelCase, and tauri-specta hard-codes the same convention for
+ * the payload keys it generates regardless of any `rename_all` on the Rust
+ * command. This module previously hand-wrote `{ strict_route, dns_hijack }`,
+ * which the Rust side read as `None` (both switches silently reset to their
+ * defaults on every enable). Routing through the generated command is what
+ * makes that class of bug impossible.
  *
- * `advanced` is optional so an existing caller that does not care about the
- * switches keeps working; the backend then applies the same documented
- * defaults via `Option<bool>`.
+ * `advanced` is optional so a caller that does not care about the switches
+ * keeps working; the backend then applies the same documented defaults.
  */
 export async function enableTun(advanced?: TunAdvancedOptions): Promise<TunStatus> {
+  guardInTauri('enable_tun')
   const adv = advanced ?? TUN_ADVANCED_FALLBACK
-  return await safeInvoke<TunStatus>('enable_tun', {
-    strict_route: adv.strictRoute,
-    dns_hijack: adv.dnsHijack,
-  })
+  return call(commands.enableTun(adv.strictRoute, adv.dnsHijack))
 }
 
 /**
@@ -82,16 +70,16 @@ export async function enableTun(advanced?: TunAdvancedOptions): Promise<TunStatu
  * persisted and will be applied by the next {@link enableTun}.
  */
 export async function applyTunAdvanced(advanced: TunAdvancedOptions): Promise<TunStatus> {
-  return await safeInvoke<TunStatus>('apply_tun_advanced', {
-    strict_route: advanced.strictRoute,
-    dns_hijack: advanced.dnsHijack,
-  })
+  guardInTauri('apply_tun_advanced')
+  return call(commands.applyTunAdvanced(advanced.strictRoute, advanced.dnsHijack))
 }
 
 export async function disableTun(): Promise<TunStatus> {
-  return await safeInvoke<TunStatus>('disable_tun')
+  guardInTauri('disable_tun')
+  return call(commands.disableTun())
 }
 
 export async function sweepTunRoutes(): Promise<SweepResultFull> {
-  return await safeInvoke<SweepResultFull>('sweep_tun_routes')
+  guardInTauri('sweep_tun_routes')
+  return call(commands.sweepTunRoutes())
 }

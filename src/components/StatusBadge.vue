@@ -12,10 +12,10 @@
  */
 import { computed } from 'vue'
 import { useI18n } from '@/composables/useI18n'
-import type { KernelState } from '@/types/clash'
+import type { KernelUiState } from '@/stores/kernel'
 
 const props = withDefaults(
-  defineProps<{ state: KernelState; compact?: boolean }>(),
+  defineProps<{ state: KernelUiState; compact?: boolean }>(),
   { compact: false },
 )
 const { t } = useI18n()

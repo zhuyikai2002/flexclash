@@ -46,7 +46,7 @@ import {
 } from '@/services/profile'
 import { formatBytes, formatRelative } from '@/utils/format'
 import { useI18n } from '@/composables/useI18n'
-import type { ProfileMeta } from '@/types/clash'
+import type { ProfileMeta } from '@/bindings'
 
 const store = useProfilesStore()
 const proxiesStore = useProxiesStore()

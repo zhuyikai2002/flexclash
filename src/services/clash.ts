@@ -9,8 +9,8 @@
 // Push WebSocket streams (/traffic, /connections) stay renderer-side.
 // ============================================================================
 
-import { commands, type AppError } from '@/bindings'
-import { isTauri, NotInTauriError } from '@/utils/tauri-bridge'
+import { commands } from '@/bindings'
+import { guardInTauri, isTauri, unwrap, type CmdResult } from '@/utils/tauri-bridge'
 import type {
   Config,
   ConnectionsResponse,
@@ -25,37 +25,19 @@ import type {
 export const MIHOMO_BASE_URL = 'http://127.0.0.1:9091'
 export const MIHOMO_WS_URL = 'ws://127.0.0.1:9091'
 
-type CmdRes<T> =
-  | { status: 'ok'; data: T }
-  | { status: 'error'; error: AppError }
-
-function errText(e: AppError): string {
-  if (typeof e === 'string') return e
-  return JSON.stringify(e)
-}
-
-/** Unwrap a typed command result; throw a readable Error on `error`. */
-function ok<T>(r: CmdRes<T>): T {
-  if (r.status === 'ok') return r.data
-  throw new Error(errText(r.error))
-}
-
-/** Invoke a command returning a JSON string; parse it to an object. */
-async function getJson(
-  p: Promise<CmdRes<string>>,
-): Promise<unknown> {
-  const raw = ok(await p)
+/** Invoke a command returning a JSON string; parse it to an object.
+ *
+ *  `unwrap` (from the shared bridge) turns the typed `AppError` channel into a
+ *  thrown `Error`; everything below already runs inside try/catch.
+ */
+async function getJson(p: Promise<CmdResult<string>>): Promise<unknown> {
+  const raw = unwrap(await p)
   if (!raw) return null
   try {
     return JSON.parse(raw) as unknown
   } catch {
     return null
   }
-}
-
-/** Browser-preview guard: throw the same typed error the safe wrapper used. */
-function guardTauri(cmd: string): void {
-  if (!isTauri()) throw new NotInTauriError(cmd)
 }
 
 // ============================================================================
@@ -74,7 +56,7 @@ export async function isAlive(timeoutMs = 2_000): Promise<boolean> {
 }
 
 export async function getVersion(timeoutMs = 2_000): Promise<MihomoVersion> {
-  guardTauri('get_mihomo_version')
+  guardInTauri('get_mihomo_version')
   const v = await getJson(commands.getMihomoVersion())
   return v as unknown as MihomoVersion
 }
@@ -84,31 +66,31 @@ export async function getVersion(timeoutMs = 2_000): Promise<MihomoVersion> {
 // ============================================================================
 
 export async function getConfigs(): Promise<Config> {
-  guardTauri('get_mihomo_configs')
+  guardInTauri('get_mihomo_configs')
   const v = await getJson(commands.getMihomoConfigs())
   return v as unknown as Config
 }
 
 /** PATCH /configs — outbound mode switch. Only `mode` is wired today. */
 export async function patchConfigs(patch: Partial<Config>): Promise<void> {
-  guardTauri('patch_mihomo_config')
+  guardInTauri('patch_mihomo_config')
   const mode = String((patch as { mode?: string }).mode ?? 'rule')
   const r = await commands.patchMihomoConfig(mode)
-  ok(r)
+  unwrap(r)
 }
 
 /** PUT /configs?force=true — reload current on-disk config. */
 export async function reloadConfigs(force = true): Promise<void> {
-  guardTauri('reload_mihomo_config')
+  guardInTauri('reload_mihomo_config')
   const r = await commands.reloadMihomoConfig(null, force)
-  ok(r)
+  unwrap(r)
 }
 
 /** PUT /configs?force=true { path } — hot-load a specific profile yaml. */
 export async function reloadConfig(path: string, force = true): Promise<void> {
-  guardTauri('reload_mihomo_config')
+  guardInTauri('reload_mihomo_config')
   const r = await commands.reloadMihomoConfig(path, force)
-  ok(r)
+  unwrap(r)
 }
 
 /** Outbound mode: 'rule' | 'global' | 'direct'. */
@@ -123,20 +105,20 @@ export async function setMode(
 // ============================================================================
 
 export async function getProxies(): Promise<ProxiesResponse> {
-  guardTauri('get_mihomo_proxies')
+  guardInTauri('get_mihomo_proxies')
   const v = await getJson(commands.getMihomoProxies())
   return v as unknown as ProxiesResponse
 }
 
 export async function getProxy(name: string): Promise<Proxy> {
-  guardTauri('get_mihomo_proxy')
+  guardInTauri('get_mihomo_proxy')
   const v = await getJson(commands.getMihomoProxy(name))
   return v as unknown as Proxy
 }
 
 /** Switch the active node of a Selector group; returns refreshed group. */
 export async function selectProxy(group: string, name: string): Promise<Proxy> {
-  guardTauri('select_mihomo_proxy')
+  guardInTauri('select_mihomo_proxy')
   const v = await getJson(commands.selectMihomoProxy(group, name))
   // Rust re-GETs the group so this is normally the full object; fall back
   // to a minimal shape so callers never dereference `null.now`.
@@ -157,19 +139,19 @@ export async function selectProxy(group: string, name: string): Promise<Proxy> {
 // ============================================================================
 
 export async function getConnections(): Promise<ConnectionsResponse> {
-  guardTauri('get_mihomo_connections')
+  guardInTauri('get_mihomo_connections')
   const v = await getJson(commands.getMihomoConnections())
   return v as unknown as ConnectionsResponse
 }
 
 export async function closeAllConnections(): Promise<void> {
-  guardTauri('close_all_mihomo_connections')
-  ok(await commands.closeAllMihomoConnections())
+  guardInTauri('close_all_mihomo_connections')
+  unwrap(await commands.closeAllMihomoConnections())
 }
 
 export async function closeConnection(id: string): Promise<void> {
-  guardTauri('close_mihomo_connection')
-  ok(await commands.closeMihomoConnection(id))
+  guardInTauri('close_mihomo_connection')
+  unwrap(await commands.closeMihomoConnection(id))
 }
 
 // ============================================================================
@@ -177,7 +159,7 @@ export async function closeConnection(id: string): Promise<void> {
 // ============================================================================
 
 export async function getRules(): Promise<RulesResponse> {
-  guardTauri('get_mihomo_rules')
+  guardInTauri('get_mihomo_rules')
   const v = await getJson(commands.getMihomoRules())
   return v as unknown as RulesResponse
 }

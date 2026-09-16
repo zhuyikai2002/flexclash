@@ -10,8 +10,8 @@
  *
  * Design language matches the dashboard (glass surface, gradient
  * accents, ring-1 borders).  The component is presentation-only:
- * every action is wired through the existing Pinia stores so
- * `safeInvoke` / `safeListen` continue to guard the IPC layer.
+ * every action is wired through the existing Pinia stores, so all
+ * IPC stays behind `@/bindings` + `@/utils/tauri-bridge`.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
@@ -30,8 +30,9 @@ import {
   applyTunAdvanced,
   type TunAdvancedOptions,
 } from '@/services/tun'
-import { getAppVersion, safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
-import { resetApplication, onResetCompleted, clearClientState, type ResetReport } from '@/services/reset'
+import { getAppVersion, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { resetApplication, onResetCompleted, clearClientState } from '@/services/reset'
+import type { ResetReport } from '@/bindings'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const { t, locale, setLocale, supportedLocales } = useI18n()
@@ -247,28 +248,18 @@ async function restartKernel() {
   })
 }
 
-/** Read the current mixed-port + controller port from the
- *  bundled yaml and surface them as read-only badges.  The real
- *  "edit + persist" flow lands when the Rust config-write Tauri
- *  command ships (Phase 8). */
+/** Read-only port badges, seeded with the reserved values the Rust side
+ *  stamps onto every sanitised profile (`RESERVED_MIXED_PORT` = 7897,
+ *  `RESERVED_CONTROLLER` = 127.0.0.1:9091).  The "edit + persist" flow
+ *  lands when the Rust config-write command ships.
+ *
+ *  This used to `invoke('get_kernel_ports')` — a command that exists nowhere
+ *  in the Rust registry, so every mount fired an IPC call that could only
+ *  reject (and was swallowed by the trailing `.catch`).  The literals below
+ *  are therefore exactly what the UI has always displayed. */
 const mixedPort = ref(7897)
 const controllerPort = ref(9091)
 const socksPort = ref(7892)
-
-void safeInvokeOr<{
-  mixedPort: number
-  socksPort: number
-  controller: string
-} | null>('get_kernel_ports', null).then((res) => {
-  if (res) {
-    if (typeof res.mixedPort === 'number') mixedPort.value = res.mixedPort
-    if (typeof res.socksPort === 'number') socksPort.value = res.socksPort
-    if (res.controller) {
-      const m = res.controller.match(/:(\d+)$/)
-      if (m) controllerPort.value = Number(m[1])
-    }
-  }
-}).catch(() => { /* noop — fall back to bundled defaults */ })
 
 /** Sweep residual routes.  Reuses the TUN store's `runSweep`
  *  action so we don't need a new Tauri command — the Rust side

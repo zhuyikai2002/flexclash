@@ -24,7 +24,7 @@ import {
   EVT_PROFILE_RELOADED,
 } from '@/services/profile'
 import { reloadConfig as clashReload } from '@/services/clash'
-import type { ProfileMeta, ReloadResult } from '@/types/clash'
+import type { ProfileMeta, ReloadResult } from '@/bindings'
 
 export const useProfilesStore = defineStore('profiles', () => {
   const profiles = ref<ProfileMeta[]>([])

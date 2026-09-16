@@ -14,11 +14,9 @@ import {
   disableTun,
   getTunState,
   sweepTunRoutes,
-  type TunState,
-  type TunStatus,
-  type SweepResultFull,
   type TunAdvancedOptions,
 } from '@/services/tun'
+import type { SweepResultFull, TunState, TunStatus } from '@/bindings'
 import { useSettingsStore } from '@/stores/settings'
 
 interface TunState_ {

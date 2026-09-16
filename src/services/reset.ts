@@ -1,35 +1,23 @@
 // ============================================================================
-// services/reset.ts — Phase 8 "Reset Application" wrapper.
+// services/reset.ts — "Reset Application" wrapper.
 //
 // The heavy lifting (kill mihomo, wipe work dir, rewrite default config,
 // emit `app://reset-completed`) lives in the Rust command
-// `commands::reset::reset_application`.  This file is a thin, typed
-// wrapper that:
-//   - routes through the Tauri IPC chokepoint (`safeInvoke`)
-//   - attaches a listener for the `app://reset-completed` event so the
-//     frontend can clear localStorage + show a "restarting" toast
-//     before invoking `app.exit(0)` from the UI thread.
+// `commands::reset::reset_application`. This file:
+//   - routes the call through the typed-command layer,
+//   - attaches a listener for `app://reset-completed` so the frontend can
+//     clear localStorage + show a "restarting" toast before exiting.
 // ============================================================================
 
-import { safeInvoke, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { commands, type ResetReport } from '@/bindings'
+import { call, guardInTauri, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
 import { useProxiesStore } from '@/stores/proxies'
 import { useRulesStore } from '@/stores/rules'
 
-/** Mirrors `commands::reset::ResetReport` (snake_case fields, Rust
- *  → JSON keeps the names as-is). */
-export interface ResetReport {
-  removed_profiles: number
-  removed_history_bytes: number
-  swept_routes: boolean
-  proxy_disabled: boolean
-  kernel_was_running: boolean
-  tun_was_on: boolean
-  detail: string
-}
-
 /** Invoke the destructive reset on the Rust side. */
 export async function resetApplication(): Promise<ResetReport> {
-  return safeInvoke<ResetReport>('reset_application')
+  guardInTauri('reset_application')
+  return call(commands.resetApplication())
 }
 
 /** Subscribe to the post-reset completion event. The frontend

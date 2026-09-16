@@ -22,10 +22,26 @@
 
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { safeInvoke, safeInvokeOr, safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { commands, type KernelState } from '@/bindings'
+import {
+  call,
+  guardInTauri,
+  inTauri,
+  safeListen,
+  type UnlistenFn,
+} from '@/utils/tauri-bridge'
 
 import { getVersion, MIHOMO_BASE_URL, pollUntil, isAlive } from '@/services/clash'
-import type { KernelState } from '@/types/clash'
+
+/**
+ * The store's public lifecycle field.
+ *
+ * `KernelState` is the generated binding for the Rust enum; the extra
+ * `'unknown'` is *renderer-only* — the sentinel held before
+ * `get_kernel_state` has answered. The backend never reports it, which is why
+ * it is not part of the generated type.
+ */
+export type KernelUiState = KernelState | 'unknown'
 
 interface ConfigRefreshNotice {
   fromPort: number | null
@@ -50,7 +66,7 @@ interface SchemaBumpedNotice {
  * data derived from REST probes.
  */
 export interface KernelStoreState {
-  state: KernelState
+  state: KernelUiState
   version: string | null
   endpoint: string
   probeStatus: 'idle' | 'probing' | 'healthy' | 'error'
@@ -106,7 +122,7 @@ export const useKernelStore = defineStore('kernel', {
     async init(): Promise<void> {
       await this.subscribeEvents()
       try {
-        this.state = await safeInvokeOr<KernelState>('get_kernel_state', 'unknown')
+        if (inTauri('get_kernel_state')) this.state = await commands.getKernelState()
       } catch (e) {
         lastErrorRef.value = String(e)
       }
@@ -141,10 +157,12 @@ export const useKernelStore = defineStore('kernel', {
      */
     async ensureRunning(): Promise<void> {
       try {
-        const s = await safeInvokeOr<KernelState>('get_kernel_state', 'unknown')
-        if (s === 'running' || s === 'starting') {
-          this.state = s
-          return
+        if (inTauri('get_kernel_state')) {
+          const s = await commands.getKernelState()
+          if (s === 'running' || s === 'starting') {
+            this.state = s
+            return
+          }
         }
       } catch {
         // fall through to start()
@@ -326,7 +344,8 @@ export const useKernelStore = defineStore('kernel', {
     async start(): Promise<void> {
       lastErrorRef.value = null
       try {
-        this.state = await safeInvoke<KernelState>('start_kernel')
+        guardInTauri('start_kernel')
+        this.state = await call(commands.startKernel())
         // start() itself only flips state to Starting; Running arrives via event.
       } catch (e) {
         lastErrorRef.value = String(e)
@@ -337,7 +356,8 @@ export const useKernelStore = defineStore('kernel', {
     async stop(): Promise<void> {
       lastErrorRef.value = null
       try {
-        this.state = await safeInvoke<KernelState>('stop_kernel')
+        guardInTauri('stop_kernel')
+        this.state = await call(commands.stopKernel())
       } catch (e) {
         lastErrorRef.value = String(e)
         throw e
@@ -349,7 +369,8 @@ export const useKernelStore = defineStore('kernel', {
       this.version = null
       this.probeLatencyMs = null
       try {
-        this.state = await safeInvoke<KernelState>('restart_kernel')
+        guardInTauri('restart_kernel')
+        this.state = await call(commands.restartKernel())
         // Mihomo needs ~1-2s to rebind 9091. Use the full backoff window
         // instead of a fixed 700ms sleep so MMDB download / Wintun init
         // don't trip a false "unreachable".

@@ -28,13 +28,13 @@ import {
 import { useI18n } from '@/composables/useI18n'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import StatusBadge from './StatusBadge.vue'
-import type { KernelState } from '@/types/clash'
+import type { KernelUiState } from '@/stores/kernel'
 
 type TabId = 'dashboard' | 'proxies' | 'connections' | 'profiles' | 'stats' | 'settings'
 
 const props = defineProps<{
   modelValue: TabId
-  kernelState: KernelState
+  kernelState: KernelUiState
   connCount: number
   profileCount: number
 }>()

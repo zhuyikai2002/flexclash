@@ -17,9 +17,8 @@ import {
   disableSystemProxy,
   getSystemProxyStatus,
   SYSTEM_PROXY_CHANGED_EVENT,
-  type ProxyStatus,
-  type ProxyToggleResult,
 } from '@/services/proxy'
+import type { ProxyStatus, ProxyToggleResult } from '@/bindings'
 
 interface ProxyState {
   status: ProxyStatus | null

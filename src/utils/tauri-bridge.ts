@@ -17,27 +17,28 @@
 //
 // Strategy
 // --------
-// We wrap both surfaces once, here, and direct all module-level imports
-// at the wrapper. The wrapper:
-//   * probes `window.__TAURI_INTERNALS__` / `window.__TAURI__` on every
-//     call (cheap, just an `in` check),
-//   * logs once per call when the runtime is missing (DEV-only — keeps
-//     prod noise at zero),
-//   * throws a typed `NotInTauriError` for write operations, so the
-//     click handler can surface a friendly "preview mode" hint instead
-//     of a stack-trace dump,
-//   * returns a no-op unsubscribe for `safeListen` so event subscriptions
-//     can be set up in the same `onMounted` code path used in production
-//     without guarding every call site.
+// Two surfaces live here, and nothing else in the renderer is allowed to
+// touch the raw Tauri API:
 //
-// The prod path inside Tauri is a single `await invoke(...)` — no extra
-// branch, no perf cost.  The dev / browser-preview path is the one that
-// actually saves a console-spam storm.
+//   * **Events** — `safeListen` wraps `listen` and returns a no-op
+//     unsubscribe outside Tauri, so a component can subscribe in the same
+//     `onMounted` path in production and preview alike.
+//
+//   * **Commands** — `unwrap` / `call` / `guardInTauri` / `inTauri` wrap the
+//     *generated* `commands` object from `@/bindings`. They are the only
+//     place the two shapes a tauri-specta command can have (`Result<T, E>`
+//     vs. infallible `T`) are collapsed into the `T`-or-throw contract the
+//     stores use. Services must call `commands.*` through them; a bare
+//     `invoke('some_name')` is what this file exists to prevent, because a
+//     string command name is checked by nothing.
+//
+// Both probes are cheap (`in` checks, DEV-only logging), so the prod path
+// inside Tauri costs one branch and nothing else.
 // ============================================================================
 
-import { invoke, type InvokeArgs } from '@tauri-apps/api/core'
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
+import type { AppError } from '@/bindings'
 
 /** True iff the renderer is hosted inside a Tauri webview. */
 export function isTauri(): boolean {
@@ -47,7 +48,7 @@ export function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window || '__TAURI__' in window
 }
 
-/** Thrown by `safeInvoke` when the renderer is not in a Tauri context. */
+/** Thrown by `guardInTauri` when a write is attempted outside a Tauri context. */
 export class NotInTauriError extends Error {
   readonly cmd: string
   constructor(cmd: string) {
@@ -62,34 +63,6 @@ export class NotInTauriError extends Error {
 }
 
 const isDev = typeof import.meta !== 'undefined' && Boolean(import.meta.env?.DEV)
-
-/**
- * Invoke a Tauri command. In the Tauri runtime this is a zero-cost
- * pass-through. In a plain browser it throws `NotInTauriError` so the
- * caller can show a "preview mode" message instead of an opaque
- * `TypeError`.
- */
-export async function safeInvoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
-  if (!isTauri()) {
-    if (isDev) console.debug(`[tauri-bridge] skip ${cmd} — not in Tauri runtime`)
-    throw new NotInTauriError(cmd)
-  }
-  return invoke<T>(cmd, args)
-}
-
-/**
- * Variant of `safeInvoke` for read-only probes: instead of throwing,
- * returns the supplied `fallback` when outside Tauri. Useful for
- * `init()` / `refresh()` flows that should silently no-op in browser
- * preview so the UI can still render with default state.
- */
-export async function safeInvokeOr<T>(cmd: string, fallback: T, args?: InvokeArgs): Promise<T> {
-  if (!isTauri()) {
-    if (isDev) console.debug(`[tauri-bridge] skip ${cmd} — using fallback`)
-    return fallback
-  }
-  return invoke<T>(cmd, args)
-}
 
 /**
  * Subscribe to a Tauri event. In the Tauri runtime this is a zero-cost
@@ -110,11 +83,85 @@ export async function safeListen<T>(
   return listen<T>(event, handler)
 }
 
-/** Re-export so call sites that already imported from the Tauri package
- *  can switch in one line.  (We never *use* these in the bridge; they
- *  exist so `services/*` can `import { safeInvoke as invoke }` and
- *  the diff stays small.) */
-export { invoke, listen, type UnlistenFn, type EventCallback, type InvokeArgs }
+// ============================================================================
+// Typed-command layer (tauri-specta)
+// ============================================================================
+//
+// `src/bindings.ts` is generated from the Rust command surface and exports a
+// `commands` object. Each entry is one of exactly two shapes:
+//
+//   * a `Result<T, AppError>` command — the generated `typedError` wrapper
+//     resolves it to `{ status: 'ok', data } | { status: 'error', error }`,
+//     so the failure channel is *typed*. A bare `invoke` rejects with
+//     `unknown`, which is why this shape is worth carrying;
+//   * an infallible command (`-> T`, no `Result`), which resolves straight
+//     to `T` and only rejects on a transport failure.
+//
+// The helpers below are the single place those shapes are collapsed into the
+// `T`-or-throw contract every store already expects, so no service repeats the
+// unwrap and none of them hand-rolls a `commands.x()` call or its own copy of
+// `ok()` / `errText()`.
+
+/** Result of a tauri-specta command declared `-> Result<T, E>`. */
+export type CmdResult<T, E = AppError> =
+  | { status: 'ok'; data: T }
+  | { status: 'error'; error: E }
+
+/**
+ * Render a typed-error payload as a message worth showing.
+ *
+ * `AppError` serialises to a plain string today (see `specta(type = String)`
+ * on the Rust enum), but the guard keeps this honest if it ever grows a
+ * structured variant.
+ */
+export function appErrorText(e: unknown): string {
+  return typeof e === 'string' ? e : JSON.stringify(e)
+}
+
+/**
+ * Unwrap a settled typed result, throwing on the error channel.
+ *
+ * Throwing rather than returning the discriminated union is deliberate: every
+ * existing call site is a `try { … } catch (e) { show(e.message) }`, so the
+ * union never had to escape this module.
+ */
+export function unwrap<T, E = AppError>(r: CmdResult<T, E>): T {
+  if (r.status === 'ok') return r.data
+  throw new Error(appErrorText(r.error))
+}
+
+/** Await a typed command and return its `data`, or throw its error. */
+export async function call<T, E = AppError>(p: Promise<CmdResult<T, E>>): Promise<T> {
+  return unwrap(await p)
+}
+
+/**
+ * Browser-preview guard for a *write*: throws `NotInTauriError` outside the
+ * Tauri runtime so the click handler can surface the "preview mode" hint.
+ */
+export function guardInTauri(cmd: string): void {
+  if (!isTauri()) throw new NotInTauriError(cmd)
+}
+
+/**
+ * Browser-preview guard for a *read*: returns `false` (and logs once in DEV)
+ * outside the Tauri runtime, so the caller falls back to a default and the UI
+ * still renders. Reads compose as
+ *
+ * ```ts
+ * if (!inTauri('list_profiles')) return []
+ * ```
+ */
+export function inTauri(cmd: string): boolean {
+  if (isTauri()) return true
+  if (isDev) console.debug(`[tauri-bridge] skip ${cmd} — not in Tauri runtime`)
+  return false
+}
+
+/** `UnlistenFn` is re-exported because every store that subscribes to an
+ *  event needs the type, and pulling it from `@tauri-apps/api/event` in a
+ *  dozen places would let those modules drift back onto the raw API. */
+export type { UnlistenFn }
 
 /**
  * Read the version of the running application bundle — i.e. the `version`

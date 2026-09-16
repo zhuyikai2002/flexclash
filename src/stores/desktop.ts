@@ -13,9 +13,8 @@ import {
   setAutostart as setAutostartInvoke,
   setSilentAutostart as setSilentAutostartInvoke,
   sweepResidualRoutes,
-  type SilentAutostartStatus,
-  type SweepResult,
 } from '@/services/autostart'
+import type { SilentAutostartStatus, SweepResult } from '@/bindings'
 
 interface DesktopState {
   enabled: boolean

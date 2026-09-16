@@ -42,10 +42,8 @@ import {
   onDelayBatch,
   onDelayDone,
   DEFAULT_TEST_URL,
-  type DelayBatch,
-  type DelayDone,
-  type ProbeStatus,
 } from '@/services/speedtest'
+import type { DelayBatch, DelayDone, ProbeStatus } from '@/bindings'
 import type { UnlistenFn } from '@/utils/tauri-bridge'
 import type { Proxy, ProxyType } from '@/types/clash'
 

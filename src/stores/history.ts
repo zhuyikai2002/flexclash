@@ -17,8 +17,8 @@ import {
   getHistorySampleCount,
   getHistoryDbPath,
   type HistoryRange,
-  type TrafficHistory,
 } from '@/services/history'
+import type { TrafficHistory } from '@/bindings'
 
 interface HistoryState_ {
   range: HistoryRange
