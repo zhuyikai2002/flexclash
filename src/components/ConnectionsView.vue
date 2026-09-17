@@ -3,10 +3,10 @@
  * ConnectionsView.vue — M8 main panel: toolbar + virtual list.
  * (Style refactor only; virtualization math untouched.)
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Component } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
-  AlertTriangle, Filter, Globe, Loader2, Pause, Play, Plug, RefreshCw, Search, Shield, Trash2, X, XCircle,
+  AlertTriangle, Filter, Globe, Loader2, Pause, Play, Plug, RefreshCw, Search, Shield, Trash2, X, XCircle, Zap,
 } from 'lucide-vue-next'
 
 import { useConnectionsStore, type PollIntervalMs } from '@/stores/connections'
@@ -102,18 +102,66 @@ function onCloseRow(id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Right-click context menu (kill current / same-host / same-rule).
-// A single Teleported menu (position: fixed) avoids clipping by the scroll box.
+// Right-click context menu (kill current / same-host / same-rule). A single
+// Teleported menu (position: fixed) avoids clipping inside the virtual list's
+// scroll box. It also supports full keyboard navigation (↑/↓/Enter/Esc) and an
+// Alt "batch-kill" mode (⚡ 断开该节点下所有死链).
 // ---------------------------------------------------------------------------
 interface RowMenu { x: number; y: number; row: ConnectionRowType }
 const rowMenu = ref<RowMenu | null>(null)
 const menuBusy = ref(false)
 
+/** Alt held when the menu opened (or live-held while open) → batch mode. */
+const altMode = ref(false)
+/** Keyboard-highlighted item index (↑/↓). */
+const activeIndex = ref(0)
+
+/** Resolve the egress node name from a connection's proxy chain. */
+function nodeOf(row: ConnectionRowType): string | null {
+  const c = row.chains
+  return c && c.length ? c[c.length - 1] : null
+}
+
+interface MenuItem {
+  key: string
+  label: string
+  icon: 'x' | 'globe' | 'shield' | 'zap'
+  disabled?: boolean
+  action: () => void
+}
+const ICONS: Record<string, Component> = { x: X, globe: Globe, shield: Shield, zap: Zap }
+
 function onRowContextMenu(ev: MouseEvent, row: ConnectionRowType) {
+  altMode.value = ev.altKey
   rowMenu.value = { x: ev.clientX, y: ev.clientY, row }
 }
 
 function closeRowMenu() { rowMenu.value = null }
+
+/** The menu's visible items, reshaped when Alt is held. */
+const menuItems = computed<MenuItem[]>(() => {
+  const rm = rowMenu.value
+  if (!rm) return []
+  const r = rm.row
+  if (altMode.value) {
+    const node = nodeOf(r)
+    if (node) {
+      // Batch-kill panel: ⚡ 断开该节点下所有死链 (force-kill entry point).
+      return [{
+        key: 'batch-node',
+        label: t('connections.kill_by_proxy'),
+        icon: 'zap',
+        action: () => runBatchKill(node),
+      }]
+    }
+    // No resolvable node → fall through to the normal list so it's never empty.
+  }
+  return [
+    { key: 'current', label: t('connections.kill_current'), icon: 'x', action: () => void killCurrent(r) },
+    { key: 'host', label: t('connections.kill_same_host'), icon: 'globe', disabled: !r.host, action: () => void killByHost(r) },
+    { key: 'rule', label: t('connections.kill_same_rule'), icon: 'shield', disabled: !r.rule, action: () => void killByRule(r) },
+  ]
+})
 
 function notifyKill(r: KillReport) {
   if (r.killed > 0) toast.push('success', t('connections.killed_n', { n: r.killed }))
@@ -142,6 +190,12 @@ async function killByRule(row: ConnectionRowType) {
   await runKill(() => store.closeByRule(row.rule))
 }
 
+/** Alt-mode entry: force-kill every connection egressing through `node`. */
+function runBatchKill(node: string) {
+  closeRowMenu()
+  void runKill(() => store.closeByProxy(node))
+}
+
 async function runKill(fn: () => Promise<KillReport>) {
   if (menuBusy.value) return
   menuBusy.value = true
@@ -153,6 +207,49 @@ async function runKill(fn: () => Promise<KillReport>) {
     menuBusy.value = false
   }
 }
+
+// Keyboard navigation: ↑/↓ move, Enter confirms, Esc closes. Alt is tracked
+// live, so holding/releasing it reshapes the menu on the fly. Listeners are
+// bound only while the menu is open, so it never steals keys from the app.
+function onMenuKeydown(e: KeyboardEvent) {
+  if (!rowMenu.value) return
+  altMode.value = e.altKey
+  const items = menuItems.value
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    activeIndex.value = items.length ? (activeIndex.value + 1) % items.length : 0
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    activeIndex.value = items.length ? (activeIndex.value - 1 + items.length) % items.length : 0
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    const item = items[activeIndex.value]
+    if (item && !item.disabled) item.action()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    closeRowMenu()
+  }
+}
+function onMenuKeyup(e: KeyboardEvent) {
+  if (e.key === 'Alt') altMode.value = false
+}
+
+watch(rowMenu, (v) => {
+  if (v) {
+    activeIndex.value = 0
+    window.addEventListener('keydown', onMenuKeydown)
+    window.addEventListener('keyup', onMenuKeyup)
+  } else {
+    window.removeEventListener('keydown', onMenuKeydown)
+    window.removeEventListener('keyup', onMenuKeyup)
+    altMode.value = false
+  }
+})
+
+// Keep the highlight in range when the item set changes (Alt toggle).
+watch(menuItems, (items) => {
+  if (activeIndex.value >= items.length) activeIndex.value = 0
+})
 </script>
 
 <template>
@@ -398,51 +495,46 @@ async function runKill(fn: () => Promise<KillReport>) {
       </div>
     </Teleport>
 
-    <!-- Right-click row context menu. A full-screen click-catcher closes it; the
-         menu itself is position: fixed at the cursor so it never clips inside
-         the virtual list's scroll box. -->
+    <!-- Right-click row context menu. Teleported to <body> so it never clips
+         inside the virtual list's scroll box. A full-screen catcher closes it;
+         the panel itself gets a Scale (0.95→1) + Fade-in transition, supports
+         ↑/↓/Enter/Esc, and reshapes into a ⚡ batch-kill panel while Alt is held. -->
     <Teleport to="body">
       <div
         v-if="rowMenu"
         class="fixed inset-0 z-[90]"
         @click="closeRowMenu"
         @contextmenu.prevent="closeRowMenu"
-      >
+      ></div>
+      <Transition name="menu">
         <div
-          class="absolute flex min-w-[200px] flex-col rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-1 shadow-2xl"
+          v-if="rowMenu"
+          class="absolute z-[91] flex min-w-[200px] flex-col rounded-xl border border-white/10 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur-xl"
           :style="{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }"
           @click.stop
         >
           <button
+            v-for="(item, i) in menuItems"
+            :key="item.key"
             type="button"
-            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-200 hover:bg-white/10 transition-colors"
-            @click="killCurrent(rowMenu.row)"
+            :disabled="item.disabled || menuBusy"
+            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors"
+            :class="[
+              item.disabled || menuBusy ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/10',
+              i === activeIndex ? 'bg-white/10 text-zinc-100' : 'text-zinc-200',
+            ]"
+            @click="item.action()"
+            @mouseenter="activeIndex = i"
           >
-            <X class="h-3.5 w-3.5 text-zinc-400" />
-            {{ t('connections.kill_current') }}
-          </button>
-          <button
-            type="button"
-            :disabled="!rowMenu.row.host"
-            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-200 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            :title="rowMenu.row.host || undefined"
-            @click="killByHost(rowMenu.row)"
-          >
-            <Globe class="h-3.5 w-3.5 text-zinc-400" />
-            {{ t('connections.kill_same_host') }}
-          </button>
-          <button
-            type="button"
-            :disabled="!rowMenu.row.rule"
-            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-200 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            :title="rowMenu.row.rule || undefined"
-            @click="killByRule(rowMenu.row)"
-          >
-            <Shield class="h-3.5 w-3.5 text-zinc-400" />
-            {{ t('connections.kill_same_rule') }}
+            <component
+              :is="ICONS[item.icon]"
+              class="h-3.5 w-3.5"
+              :class="item.icon === 'zap' ? 'text-amber-400' : 'text-zinc-400'"
+            />
+            {{ item.label }}
           </button>
         </div>
-      </div>
+      </Transition>
     </Teleport>
   </section>
 </template>
@@ -477,5 +569,19 @@ async function runKill(fn: () => Promise<KillReport>) {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* menu — the right-click context panel grows from the cursor corner
+   (Scale 0.95→1) while fading in, so it feels like it springs from the
+   pointer rather than popping into existence. */
+.menu-enter-active,
+.menu-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform-origin: top left;
+}
+.menu-enter-from,
+.menu-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
 }
 </style>

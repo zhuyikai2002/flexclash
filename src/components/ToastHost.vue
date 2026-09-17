@@ -125,4 +125,14 @@ function iconClass(kind: ToastKind): string {
   opacity: 0;
   transform: translateX(12px);
 }
+/* Slide the surviving cards into their new slots with an elegant curve
+   instead of snapping. The leaving card is pulled out of flow (absolute) so
+   its siblings can glide up beneath it. */
+.toast-move {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.toast-leave-active {
+  position: absolute;
+  width: 100%;
+}
 </style>

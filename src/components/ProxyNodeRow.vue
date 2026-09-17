@@ -166,7 +166,7 @@ async function killNode(node: string) {
         </span>
         <button
           type="button"
-          class="shrink-0 rounded-md p-1 text-amber-300/70 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-amber-500/20 hover:text-amber-200 transition-opacity"
+          class="shrink-0 rounded-md p-1 text-amber-300/70 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-amber-500/20 hover:text-amber-200 transition-opacity duration-200"
           :title="t('connections.kill_by_proxy')"
           @click.stop="killNode(node)"
           @keydown.stop

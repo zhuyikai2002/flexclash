@@ -49,8 +49,8 @@ const hint = computed(() => {
     @click="store.toggle()"
   >
     <div
-      v-if="store.enabled && !store.envLocked"
-      class="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent"
+      class="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent transition-opacity duration-200"
+      :class="store.enabled && !store.envLocked ? 'opacity-100' : 'opacity-0'"
     ></div>
 
     <div class="relative flex items-center gap-3">
