@@ -18,10 +18,12 @@
  * pitch. The owning list relies on that to size the scroll area without
  * measuring anything.
  */
-import { computed } from 'vue'
-import { CheckCircle2, Loader2 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { CheckCircle2, Loader2, Zap } from 'lucide-vue-next'
 
 import { useProxiesStore, type DelayStatus, type NodeDelayInfo } from '@/stores/proxies'
+import { useConnectionsStore } from '@/stores/connections'
+import { useToastStore } from '@/stores/toast'
 import { useI18n } from '@/composables/useI18n'
 
 const props = defineProps<{
@@ -38,10 +40,15 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [node: string] }>()
 
 const proxies = useProxiesStore()
+const conns = useConnectionsStore()
+const toast = useToastStore()
 const { t } = useI18n()
 
 const meta = computed(() => proxies.groups[props.group])
 const testing = computed(() => proxies.isGroupTesting(props.group))
+
+/** `${node}` → a "kill dead links" run for that node is in flight. */
+const killing = ref<Record<string, boolean>>({})
 
 function delayOf(node: string): NodeDelayInfo | undefined {
   return meta.value?.nodes[node]
@@ -78,6 +85,30 @@ function latencyPillClass(delay: number | null, status: DelayStatus): string {
   if (status === 'unreachable') return 'bg-zinc-500/15 text-zinc-500 ring-1 ring-white/5'
   return 'bg-white/5 text-zinc-500 ring-1 ring-white/5'
 }
+
+/** The card's select click is a no-op while the group is testing or the node's
+ *  own selection is in flight — the kill button below stays independent. */
+function onCardClick(node: string) {
+  if (testing.value || props.selecting[`${props.group}::${node}`] === true) return
+  emit('select', node)
+}
+
+/** Kill every connection currently egressing through this node. */
+async function killNode(node: string) {
+  if (killing.value[node]) return
+  killing.value = { ...killing.value, [node]: true }
+  try {
+    const r = await conns.closeByProxy(node)
+    if (r.killed > 0) toast.push('success', t('connections.killed_n', { n: r.killed }))
+    else toast.push('info', t('connections.kill_none'))
+  } catch (e) {
+    toast.push('error', t('connections.kill_failed', { msg: e instanceof Error ? e.message : String(e) }))
+  } finally {
+    const next = { ...killing.value }
+    delete next[node]
+    killing.value = next
+  }
+}
 </script>
 
 <template>
@@ -86,15 +117,19 @@ function latencyPillClass(delay: number | null, status: DelayStatus): string {
       class="grid gap-2.5"
       :style="{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }"
     >
-      <button
+      <div
         v-for="node in names"
         :key="node"
-        @click="emit('select', node)"
-        :disabled="testing || selecting[`${group}::${node}`] === true"
+        role="button"
+        tabindex="0"
+        @click="onCardClick(node)"
+        @keydown.enter.prevent="onCardClick(node)"
+        @keydown.space.prevent="onCardClick(node)"
         :title="nodeTitle(node, delayOf(node))"
         :class="[
           'group relative flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-[transform,box-shadow,background-color,border-color] duration-200',
-          'hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.99] disabled:opacity-50 disabled:hover:translate-y-0',
+          'hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.99]',
+          (testing || selecting[`${group}::${node}`] === true) ? 'opacity-50' : '',
           meta?.now === node
             ? 'border-sky-400/50 bg-sky-500/10 ring-1 ring-sky-400/30 text-zinc-50 shadow-md shadow-sky-500/10'
             : 'border-white/5 bg-zinc-950/30 text-zinc-200 hover:border-white/15 hover:bg-white/[0.05]'
@@ -129,7 +164,17 @@ function latencyPillClass(delay: number | null, status: DelayStatus): string {
           />
           {{ latencyText(delayOf(node)?.delay ?? null, delayOf(node)?.status ?? 'idle') }}
         </span>
-      </button>
+        <button
+          type="button"
+          class="shrink-0 rounded-md p-1 text-amber-300/70 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-amber-500/20 hover:text-amber-200 transition-opacity"
+          :title="t('connections.kill_by_proxy')"
+          @click.stop="killNode(node)"
+          @keydown.stop
+        >
+          <Loader2 v-if="killing[node] === true" class="h-3.5 w-3.5 animate-spin" />
+          <Zap v-else class="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   </div>
 </template>

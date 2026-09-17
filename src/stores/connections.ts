@@ -16,11 +16,16 @@ import {
   deriveSpeeds,
   dropAllConnections,
   dropConnection,
+  dropConnectionsBy,
   fetchConnections,
+  filterByHost,
+  filterByProxy,
+  filterByRule,
   hashConnections,
   projectConnection,
 } from '@/services/connections'
 import type { Connection, ConnectionRow } from '@/types/clash'
+import type { KillReport } from '@/bindings'
 
 export type PollIntervalMs = 1000 | 2000 | 5000
 
@@ -203,6 +208,27 @@ export const useConnectionsStore = defineStore('connections', {
       await dropAllConnections()
       // Re-fetch to converge.
       await this.forceRefresh()
+    },
+
+    /** Kill every connection sharing a host; returns the report and refreshes. */
+    async closeByHost(host: string): Promise<KillReport> {
+      const report = await dropConnectionsBy(filterByHost(host))
+      await this.forceRefresh()
+      return report
+    },
+
+    /** Kill every connection matched by a rule; returns the report and refreshes. */
+    async closeByRule(rule: string): Promise<KillReport> {
+      const report = await dropConnectionsBy(filterByRule(rule))
+      await this.forceRefresh()
+      return report
+    },
+
+    /** Kill every connection egressing through a proxy node; returns the report. */
+    async closeByProxy(proxy: string): Promise<KillReport> {
+      const report = await dropConnectionsBy(filterByProxy(proxy))
+      await this.forceRefresh()
+      return report
     },
 
     /** Wipe in-memory counters. Call when leaving the tab. */

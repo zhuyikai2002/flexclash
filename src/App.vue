@@ -34,6 +34,7 @@ import { useTunStore } from '@/stores/tun'
 import { useHistoryStore } from '@/stores/history'
 import { useAppStateStore } from '@/stores/appstate'
 import { useUpdaterStore } from '@/stores/updater'
+import { useAnomaliesStore } from '@/stores/anomalies'
 import { events, type AppStateSnapshot } from '@/bindings'
 
 import Sidebar from '@/components/Sidebar.vue'
@@ -52,6 +53,7 @@ import ConnectionsView from '@/components/ConnectionsView.vue'
 import StatsView from '@/components/StatsView.vue'
 import SettingsView from '@/components/SettingsView.vue'
 import UpdateDialog from '@/components/UpdateDialog.vue'
+import ToastHost from '@/components/ToastHost.vue'
 
 const kernel = useKernelStore()
 const proxies = useProxiesStore()
@@ -63,6 +65,7 @@ const tun = useTunStore()
 const history = useHistoryStore()
 const appstate = useAppStateStore()
 const updater = useUpdaterStore()
+const anomalies = useAnomaliesStore()
 
 type TabId = 'dashboard' | 'proxies' | 'connections' | 'profiles' | 'stats' | 'settings'
 const tab = ref<TabId>('dashboard')
@@ -103,6 +106,9 @@ onMounted(async () => {
     tun.onStateChanged(e.payload as Parameters<typeof tun.onStateChanged>[0])
   })
   void history.init()
+  // Subscribe to the typed anomaly stream (DNS / TLS / dial failures) so fatal
+  // ones can surface as toasts and all of them land in the diagnostics ring.
+  anomalies.init()
   // Cold-start update check: silent, non-blocking. If a newer release is
   // found, the updater store raises `promptOpen` and UpdateDialog takes over.
   void updater.init()
@@ -112,6 +118,7 @@ onUnmounted(() => {
   if (unlistenTun) unlistenTun()
   appstate.release()
   history.dispose()
+  anomalies.dispose()
   kernel.dispose()
 })
 </script>
@@ -190,6 +197,9 @@ onUnmounted(() => {
 
         <!-- Cold-start update prompt; self-managed via the updater store. -->
         <UpdateDialog />
+
+        <!-- Global toast stack (anomaly alerts, kill reports). -->
+        <ToastHost />
 
         <footer class="text-center text-xs text-zinc-600 pt-4">
           Rust owns the mihomo data plane — kernel state, logs and live rates arrive as typed events.

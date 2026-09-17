@@ -195,6 +195,13 @@
     "disconnect_confirm_title": "Disconnect all connections?",
     "disconnect_confirm_body": "This will immediately close all {n} connections currently routed through FlexClash.",
     "disconnect_confirm_ok": "Disconnect all",
+    "kill_current": "Kill this connection",
+    "kill_same_host": "Kill all with the same host",
+    "kill_same_rule": "Kill all with the same rule",
+    "kill_by_proxy": "Kill dead links on this node",
+    "killed_n": "Killed {n} connection(s)",
+    "kill_none": "No matching connections",
+    "kill_failed": "Kill failed: {msg}",
     "filter": {
       "all": "All",
       "active": "Active",
@@ -210,6 +217,12 @@
       "upload": "Upload",
       "download": "Download",
       "action": "Action"
+    }
+  },
+  "anomalies": {
+    "toast": {
+      "dns": "DNS resolution failed",
+      "tls": "TLS error"
     }
   },
   "profiles": {

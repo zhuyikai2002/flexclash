@@ -37,6 +37,21 @@ export async function dropConnectionsBy(filter: ConnectionFilter): Promise<KillR
   return await killConnectionsBy(filter)
 }
 
+/** A `ConnectionFilter` scoped to a single host (all other fields wildcard). */
+export function filterByHost(host: string): ConnectionFilter {
+  return { host, process: null, rule: null, proxy: null, destination: null }
+}
+
+/** A `ConnectionFilter` scoped to a single matched rule. */
+export function filterByRule(rule: string): ConnectionFilter {
+  return { host: null, process: null, rule, proxy: null, destination: null }
+}
+
+/** A `ConnectionFilter` scoped to a single egress proxy (node name). */
+export function filterByProxy(proxy: string): ConnectionFilter {
+  return { host: null, process: null, rule: null, proxy, destination: null }
+}
+
 /** Drop all connections. */
 export async function dropAllConnections(): Promise<void> {
   await closeAllConnections()

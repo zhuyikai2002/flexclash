@@ -195,6 +195,13 @@
     "disconnect_confirm_title": "断开所有连接？",
     "disconnect_confirm_body": "这将立即关闭当前通过 FlexClash 转发的所有连接（{n} 条）。",
     "disconnect_confirm_ok": "全部断开",
+    "kill_current": "断开当前连接",
+    "kill_same_host": "断开相同 Host 的所有连接",
+    "kill_same_rule": "断开相同规则的所有连接",
+    "kill_by_proxy": "清理该节点死链",
+    "killed_n": "已断开 {n} 条连接",
+    "kill_none": "没有匹配的连接",
+    "kill_failed": "断开失败: {msg}",
     "filter": {
       "all": "全部",
       "active": "活跃",
@@ -210,6 +217,12 @@
       "upload": "上行",
       "download": "下行",
       "action": "操作"
+    }
+  },
+  "anomalies": {
+    "toast": {
+      "dns": "DNS 解析失败",
+      "tls": "TLS 错误"
     }
   },
   "profiles": {

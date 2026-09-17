@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close', id: string): void
+  (e: 'contextmenu', ev: MouseEvent): void
 }>()
 
 const upText = computed(() => formatRate(props.row.uploadSpeed))
@@ -64,6 +65,7 @@ function close() {
     :class="row.closing ? 'opacity-50' : ''"
     style="height: 40px"
     :data-conn-id="row.id"
+    @contextmenu.prevent="emit('contextmenu', $event)"
   >
     <!-- 1. Host / IP -->
     <div class="flex-1 min-w-0 flex items-center gap-1.5">

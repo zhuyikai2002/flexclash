@@ -6,20 +6,24 @@
 import { computed, ref, toRef, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
-  Filter, Loader2, Pause, Play, Plug, RefreshCw, Search, Trash2, XCircle,
+  Filter, Globe, Loader2, Pause, Play, Plug, RefreshCw, Search, Shield, Trash2, X, XCircle,
 } from 'lucide-vue-next'
 
 import { useConnectionsStore, type PollIntervalMs } from '@/stores/connections'
 import { useKernelStore } from '@/stores/kernel'
+import { useToastStore } from '@/stores/toast'
 import { useConnectionMonitor } from '@/composables/useConnectionMonitor'
 import ConnectionRow from '@/components/ConnectionRow.vue'
 import { formatRate } from '@/utils/format'
 import { useI18n } from '@/composables/useI18n'
+import type { ConnectionRow as ConnectionRowType } from '@/types/clash'
+import type { KillReport } from '@/bindings'
 
 const props = defineProps<{ active: boolean }>()
 
 const store = useConnectionsStore()
 const kernel = useKernelStore()
+const toast = useToastStore()
 const { t } = useI18n()
 
 const keyword = ref('')
@@ -77,6 +81,59 @@ const totalDownText = computed(() => formatRate(
 
 function onCloseRow(id: string) {
   store.closeOne(id).catch((e) => { console.error('[connections] closeOne failed', e) })
+}
+
+// ---------------------------------------------------------------------------
+// Right-click context menu (kill current / same-host / same-rule).
+// A single Teleported menu (position: fixed) avoids clipping by the scroll box.
+// ---------------------------------------------------------------------------
+interface RowMenu { x: number; y: number; row: ConnectionRowType }
+const rowMenu = ref<RowMenu | null>(null)
+const menuBusy = ref(false)
+
+function onRowContextMenu(ev: MouseEvent, row: ConnectionRowType) {
+  rowMenu.value = { x: ev.clientX, y: ev.clientY, row }
+}
+
+function closeRowMenu() { rowMenu.value = null }
+
+function notifyKill(r: KillReport) {
+  if (r.killed > 0) toast.push('success', t('connections.killed_n', { n: r.killed }))
+  else toast.push('info', t('connections.kill_none'))
+}
+
+async function killCurrent(row: ConnectionRowType) {
+  closeRowMenu()
+  try {
+    await store.closeOne(row.id)
+    toast.push('success', t('connections.killed_n', { n: 1 }))
+  } catch (e) {
+    toast.push('error', t('connections.kill_failed', { msg: e instanceof Error ? e.message : String(e) }))
+  }
+}
+
+async function killByHost(row: ConnectionRowType) {
+  closeRowMenu()
+  if (!row.host) return
+  await runKill(() => store.closeByHost(row.host))
+}
+
+async function killByRule(row: ConnectionRowType) {
+  closeRowMenu()
+  if (!row.rule) return
+  await runKill(() => store.closeByRule(row.rule))
+}
+
+async function runKill(fn: () => Promise<KillReport>) {
+  if (menuBusy.value) return
+  menuBusy.value = true
+  try {
+    notifyKill(await fn())
+  } catch (e) {
+    toast.push('error', t('connections.kill_failed', { msg: e instanceof Error ? e.message : String(e) }))
+  } finally {
+    menuBusy.value = false
+  }
 }
 </script>
 
@@ -231,7 +288,11 @@ function onCloseRow(id: string) {
             transform: `translateY(${vrow.start}px)`,
           }"
         >
-          <ConnectionRow :row="filteredRows[vrow.index]" @close="onCloseRow" />
+          <ConnectionRow
+            :row="filteredRows[vrow.index]"
+            @close="onCloseRow"
+            @contextmenu="onRowContextMenu($event, filteredRows[vrow.index])"
+          />
         </div>
       </div>
     </div>
@@ -268,6 +329,53 @@ function onCloseRow(id: string) {
               {{ t('connections.disconnect_confirm_ok') }}
             </button>
           </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Right-click row context menu. A full-screen click-catcher closes it; the
+         menu itself is position: fixed at the cursor so it never clips inside
+         the virtual list's scroll box. -->
+    <Teleport to="body">
+      <div
+        v-if="rowMenu"
+        class="fixed inset-0 z-[90]"
+        @click="closeRowMenu"
+        @contextmenu.prevent="closeRowMenu"
+      >
+        <div
+          class="absolute flex min-w-[200px] flex-col rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-1 shadow-2xl"
+          :style="{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }"
+          @click.stop
+        >
+          <button
+            type="button"
+            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-200 hover:bg-white/10 transition-colors"
+            @click="killCurrent(rowMenu.row)"
+          >
+            <X class="h-3.5 w-3.5 text-zinc-400" />
+            {{ t('connections.kill_current') }}
+          </button>
+          <button
+            type="button"
+            :disabled="!rowMenu.row.host"
+            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-200 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            :title="rowMenu.row.host || undefined"
+            @click="killByHost(rowMenu.row)"
+          >
+            <Globe class="h-3.5 w-3.5 text-zinc-400" />
+            {{ t('connections.kill_same_host') }}
+          </button>
+          <button
+            type="button"
+            :disabled="!rowMenu.row.rule"
+            class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-zinc-200 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            :title="rowMenu.row.rule || undefined"
+            @click="killByRule(rowMenu.row)"
+          >
+            <Shield class="h-3.5 w-3.5 text-zinc-400" />
+            {{ t('connections.kill_same_rule') }}
+          </button>
         </div>
       </div>
     </Teleport>
