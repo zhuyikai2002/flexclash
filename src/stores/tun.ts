@@ -18,12 +18,12 @@ import {
 } from '@/services/tun'
 import type { SweepResultFull, TunState, TunStatus } from '@/bindings'
 import { useSettingsStore } from '@/stores/settings'
+import { useNoticesStore } from '@/stores/notices'
 
 interface TunState_ {
   state: TunState
   enabled: boolean
   device: string
-  lastError: string | null
   lastChangedAtMs: number
   lastSweep: SweepResultFull | null
   busy: boolean
@@ -38,7 +38,6 @@ export const useTunStore = defineStore('tun', {
     state: 'off',
     enabled: false,
     device: 'flexclash-tun',
-    lastError: null,
     lastChangedAtMs: 0,
     lastSweep: null,
     busy: false,
@@ -47,6 +46,9 @@ export const useTunStore = defineStore('tun', {
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('tun')?.message ?? null,
     /** Convenience for the UI badge: a single boolean for the toggle. */
     isOn: (s): boolean => s.state === 'on',
     /** True while a transition is in flight (Enabling / Disabling). */
@@ -70,7 +72,7 @@ export const useTunStore = defineStore('tun', {
         const s = await getTunState()
         this.applyStatus(s)
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('tun', e)
       } finally {
         this.initialised = true
       }
@@ -80,7 +82,10 @@ export const useTunStore = defineStore('tun', {
       this.state = s.state
       this.enabled = s.enabled
       this.device = s.device
-      this.lastError = s.last_error
+      // Rust's own error field is authoritative: a non-null value replaces
+      // whatever we thought, a null one means the last failure is over.
+      if (s.last_error) useNoticesStore().raise('tun', 'error', s.last_error)
+      else useNoticesStore().clearSource('tun')
       this.lastChangedAtMs = s.last_changed_at_ms
       this.lastSweep = s.last_sweep
     },
@@ -93,7 +98,7 @@ export const useTunStore = defineStore('tun', {
     async setEnabled(enabled: boolean, advanced?: TunAdvancedOptions): Promise<void> {
       if (this.busy) return
       this.busy = true
-      this.lastError = null
+      useNoticesStore().clearSource('tun')
       // Suppress the next event because we already have the local
       // snapshot returned by the invoke() result.
       this.suppressNextEvent = true
@@ -106,7 +111,7 @@ export const useTunStore = defineStore('tun', {
         const s = enabled ? await enableTun(adv) : await disableTun()
         this.applyStatus(s)
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('tun', e)
         // Re-fetch authoritative state in case the failure was a
         // partial transition.
         try { await this.refresh() } catch { /* ignore */ }
@@ -140,7 +145,7 @@ export const useTunStore = defineStore('tun', {
       // Surface non-OK transitions as lastError; the UI listens on
       // lastError to render a toast.
       if (s.state === 'failed' && s.last_error) {
-        this.lastError = s.last_error
+        useNoticesStore().raise('tun', 'error', s.last_error)
       }
       // Reset suppress flag if the event happened to carry a failure
       // (in that case we DO want to notify).

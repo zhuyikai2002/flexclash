@@ -23,6 +23,7 @@
 
 import { defineStore } from 'pinia'
 import { getAutokillState, setAutokill } from '@/services/deadlink'
+import { useNoticesStore } from '@/stores/notices'
 
 interface AutokillStoreState {
   /** Whether a cleanup will actually delete connections right now. */
@@ -32,7 +33,6 @@ interface AutokillStoreState {
   /** False until the first successful read, so the UI can avoid flashing. */
   initialised: boolean
   busy: boolean
-  lastError: string | null
 }
 
 export const useAutokillStore = defineStore('autokill', {
@@ -41,10 +41,12 @@ export const useAutokillStore = defineStore('autokill', {
     envLocked: false,
     initialised: false,
     busy: false,
-    lastError: null,
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('autokill')?.message ?? null,
     /** The toggle is inert while busy or while the environment vetoes. */
     isLocked: (s): boolean => s.busy || s.envLocked,
   },
@@ -52,14 +54,14 @@ export const useAutokillStore = defineStore('autokill', {
   actions: {
     /** Read the switch from Rust. Safe to call more than once. */
     async refresh(): Promise<void> {
-      this.lastError = null
+      useNoticesStore().clearSource('autokill')
       try {
         const s = await getAutokillState()
         this.enabled = s.enabled
         this.envLocked = s.envLocked
         this.initialised = true
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('autokill', e)
       }
     },
 
@@ -74,14 +76,14 @@ export const useAutokillStore = defineStore('autokill', {
     async set(enabled: boolean): Promise<void> {
       if (this.busy || this.envLocked) return
       this.busy = true
-      this.lastError = null
+      useNoticesStore().clearSource('autokill')
       try {
         const s = await setAutokill(enabled)
         this.enabled = s.enabled
         this.envLocked = s.envLocked
         this.initialised = true
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('autokill', e)
       } finally {
         this.busy = false
       }

@@ -11,6 +11,7 @@
 
 import { defineStore } from 'pinia'
 import { safeListen, type UnlistenFn } from '@/utils/tauri-bridge'
+import { useNoticesStore } from '@/stores/notices'
 
 import {
   enableSystemProxy,
@@ -23,7 +24,6 @@ import type { ProxyStatus, ProxyToggleResult } from '@/bindings'
 interface ProxyState {
   status: ProxyStatus | null
   toggling: boolean
-  lastError: string | null
   _unlisteners: UnlistenFn[]
 }
 
@@ -31,12 +31,14 @@ export const useProxyStore = defineStore('proxy', {
   state: (): ProxyState => ({
     status: null,
     toggling: false,
-    lastError: null,
     _unlisteners: [],
   }),
 
   getters: {
     enabled: (s): boolean => s.status?.enabled === true,
+    /** Thin proxy over the unified notice channel — see stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('proxy')?.message ?? null,
     /** Effective port the system proxy points to (defaults to 7897 / mihomo mixed-port). */
     port: (s): number | null => {
       if (!s.status?.enabled || !s.status.server) return null
@@ -54,9 +56,9 @@ export const useProxyStore = defineStore('proxy', {
     async refresh(): Promise<void> {
       try {
         this.status = await getSystemProxyStatus()
-        this.lastError = null
+        useNoticesStore().clearSource('proxy')
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxy', e)
       }
     },
 
@@ -75,13 +77,13 @@ export const useProxyStore = defineStore('proxy', {
 
     async enable(port = 7897): Promise<ProxyToggleResult> {
       this.toggling = true
-      this.lastError = null
+      useNoticesStore().clearSource('proxy')
       try {
         const res = await enableSystemProxy(port)
         await this.refresh()
         return res
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxy', e)
         throw e
       } finally {
         this.toggling = false
@@ -90,13 +92,13 @@ export const useProxyStore = defineStore('proxy', {
 
     async disable(): Promise<ProxyToggleResult> {
       this.toggling = true
-      this.lastError = null
+      useNoticesStore().clearSource('proxy')
       try {
         const res = await disableSystemProxy()
         await this.refresh()
         return res
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxy', e)
         throw e
       } finally {
         this.toggling = false

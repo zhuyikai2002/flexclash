@@ -12,6 +12,7 @@
 
 import { defineStore } from 'pinia'
 import { fetchRules } from '@/services/rules'
+import { useNoticesStore } from '@/stores/notices'
 import type { Rule, RuleType } from '@/types/clash'
 
 export type RuleTypeFilter = 'all' | RuleType
@@ -20,7 +21,6 @@ interface RulesState_ {
   rules: Rule[]
   loading: boolean
   lastFetchAt: number | null
-  lastError: string | null
   /** Free-text search, case-insensitive, matches payload OR proxy. */
   search: string
   /** Type filter. `all` is the no-op default. */
@@ -32,12 +32,14 @@ export const useRulesStore = defineStore('rules', {
     rules: [],
     loading: false,
     lastFetchAt: null,
-    lastError: null,
     search: '',
     typeFilter: 'all',
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — see stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('rules')?.message ?? null,
     /** True iff the user has narrowed the list at all. */
     isFiltered: (s): boolean => s.search.trim() !== '' || s.typeFilter !== 'all',
     /** All distinct proxy targets in the current rule set (for the
@@ -73,12 +75,12 @@ export const useRulesStore = defineStore('rules', {
     async fetch(): Promise<void> {
       if (this.loading) return
       this.loading = true
-      this.lastError = null
+      useNoticesStore().clearSource('rules')
       try {
         this.rules = await fetchRules()
         this.lastFetchAt = Date.now()
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('rules', e)
       } finally {
         this.loading = false
       }

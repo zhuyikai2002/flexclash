@@ -19,6 +19,8 @@ import {
   type HistoryRange,
 } from '@/services/history'
 import type { TrafficHistory } from '@/bindings'
+import { useNoticesStore } from '@/stores/notices'
+import { useKernelStore } from '@/stores/kernel'
 
 interface HistoryState_ {
   range: HistoryRange
@@ -26,7 +28,6 @@ interface HistoryState_ {
   cache: Partial<Record<HistoryRange, TrafficHistory>>
   loading: boolean
   lastFetchAtMs: number | null
-  lastError: string | null
   /** "Currently buffering N rows" line. */
   sampleCount: number | null
   dbPath: string | null
@@ -41,13 +42,15 @@ export const useHistoryStore = defineStore('history', {
     cache: {},
     loading: false,
     lastFetchAtMs: null,
-    lastError: null,
     sampleCount: null,
     dbPath: null,
     refreshTimer: null,
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('history')?.message ?? null,
     current: (s): TrafficHistory | null => s.cache[s.range] ?? null,
     hasData: (s): boolean => (s.cache[s.range]?.buckets?.length ?? 0) > 0,
     /** Sum of upload bytes for the active range. */
@@ -87,13 +90,13 @@ export const useHistoryStore = defineStore('history', {
     async refresh(): Promise<void> {
       if (this.loading) return
       this.loading = true
-      this.lastError = null
+      useNoticesStore().clearSource('history')
       try {
         const h = await getTrafficHistory(this.range)
         this.cache = { ...this.cache, [this.range]: h }
         this.lastFetchAtMs = Date.now()
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('history', e)
       } finally {
         this.loading = false
       }
@@ -102,11 +105,20 @@ export const useHistoryStore = defineStore('history', {
     async tick(): Promise<void> {
       // Refresh the active range + the live row counter. Errors during
       // a tick are silent — the cached value keeps the chart rendering.
+      //
+      // Skipped entirely while the kernel is unreachable: this loop used to
+      // poll regardless, so a dead controller produced a failure every 15 s
+      // for something that was never going to answer.
+      if (useKernelStore().availability !== 'up') return
       try {
         const h = await getTrafficHistory(this.range)
         this.cache = { ...this.cache, [this.range]: h }
         this.lastFetchAtMs = Date.now()
-      } catch { /* ignore — next tick retries */ }
+      } catch (e) {
+        // `warn`, not `error`: the cached series keeps the chart rendering,
+        // so this is degraded rather than broken — and it must not toast.
+        useNoticesStore().raise('history', 'warn', e instanceof Error ? e.message : String(e))
+      }
       try { this.sampleCount = await getHistorySampleCount() } catch { /* ignore */ }
     },
   },

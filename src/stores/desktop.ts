@@ -15,12 +15,12 @@ import {
   sweepResidualRoutes,
 } from '@/services/autostart'
 import type { SilentAutostartStatus, SweepResult } from '@/bindings'
+import { useNoticesStore } from '@/stores/notices'
 
 interface DesktopState {
   enabled: boolean
   silent: boolean
   busy: boolean
-  lastError: string | null
   /** Last sweep result, surfaced in the UI as a toast or footer note. */
   lastSweep: SweepResult | null
   /** True after the first `init()` has resolved. UI uses this to avoid
@@ -33,7 +33,6 @@ interface DesktopState {
   /** Separate busy flag: enabling raises UAC, so it is a much longer and
    *  more interruptible operation than flipping the registry entry. */
   taskBusy: boolean
-  taskError: string | null
 }
 
 export const useDesktopStore = defineStore('desktop', {
@@ -41,16 +40,21 @@ export const useDesktopStore = defineStore('desktop', {
     enabled: false,
     silent: false,
     busy: false,
-    lastError: null,
     lastSweep: null,
     initialised: false,
     taskEnabled: false,
     taskAvailable: false,
     taskBusy: false,
-    taskError: null,
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('desktop')?.message ?? null,
+    /** Same, for the elevated (Task Scheduler) mechanism. Kept distinct
+     *  from `lastError` so the two cards never show each other's message. */
+    taskError: (): string | null =>
+      useNoticesStore().latestFor('desktopTask')?.message ?? null,
     /** True when the app was launched from the autostart hook. */
     startedInBackground: (s): boolean => s.silent,
     /** Exactly one mechanism may be armed at a time (backend invariant). */
@@ -64,12 +68,12 @@ export const useDesktopStore = defineStore('desktop', {
         this.enabled = status.enabled
         this.silent = status.silent
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('desktop', e)
       }
       try {
         this.applySilentStatus(await getSilentAutostartStatus())
       } catch (e) {
-        this.taskError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('desktopTask', e)
       } finally {
         this.initialised = true
       }
@@ -94,7 +98,7 @@ export const useDesktopStore = defineStore('desktop', {
 
     async setAutostart(enabled: boolean): Promise<void> {
       this.busy = true
-      this.lastError = null
+      useNoticesStore().clearSource('desktop')
       try {
         const status = await setAutostartInvoke(enabled)
         this.enabled = status.enabled
@@ -104,7 +108,7 @@ export const useDesktopStore = defineStore('desktop', {
           this.applySilentStatus(await getSilentAutostartStatus())
         }
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('desktop', e)
         throw e
       } finally {
         this.busy = false
@@ -117,7 +121,7 @@ export const useDesktopStore = defineStore('desktop', {
 
     async setSilentAutostart(enabled: boolean): Promise<void> {
       this.taskBusy = true
-      this.taskError = null
+      useNoticesStore().clearSource('desktopTask')
       try {
         this.applySilentStatus(await setSilentAutostartInvoke(enabled))
         // Re-read the registry side too: enabling the task clears it.
@@ -125,7 +129,7 @@ export const useDesktopStore = defineStore('desktop', {
         this.enabled = status.enabled
         this.silent = status.silent
       } catch (e) {
-        this.taskError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('desktopTask', e)
         throw e
       } finally {
         this.taskBusy = false

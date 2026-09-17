@@ -39,6 +39,7 @@ import {
   UploadCloud,
 } from 'lucide-vue-next'
 import { useProfilesStore } from '@/stores/profiles'
+import { useToastStore } from '@/stores/toast'
 import { useProxiesStore } from '@/stores/proxies'
 import {
   openProfileInEditor,
@@ -67,12 +68,10 @@ const isDragOver = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const importBusy = ref(false)
 
-const importToast = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
-let toastTimer: ReturnType<typeof setTimeout> | null = null
+/** Hand the outcome to the global toast bus — see stores/toast.ts. The
+ *  previous local ref + 3.5 s timer was a second, competing toast stack. */
 function flashToast(kind: 'ok' | 'err', text: string) {
-  importToast.value = { kind, text }
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { importToast.value = null }, 3500)
+  useToastStore().push(kind === 'ok' ? 'success' : 'error', text)
 }
 
 function isYamlName(name: string): boolean {
@@ -401,14 +400,6 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
       {{ store.lastError }}
     </p>
 
-    <p v-if="importToast" :class="[
-      'rounded-lg border px-3 py-2 text-xs',
-      importToast.kind === 'ok'
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-        : 'border-rose-500/20 bg-rose-500/10 text-rose-300',
-    ]">
-      {{ importToast.text }}
-    </p>
 
     <p v-if="!store.loading && !store.profiles.length" class="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-6 text-center text-sm text-zinc-400">
       {{ t('profiles.empty') }}. Click <em>{{ t('common.import') }}</em> to add a subscription.

@@ -26,6 +26,7 @@ import {
 } from '@/services/connections'
 import type { Connection, ConnectionRow } from '@/types/clash'
 import type { KillReport } from '@/bindings'
+import { useNoticesStore } from '@/stores/notices'
 
 export type PollIntervalMs = 1000 | 2000 | 5000
 
@@ -45,11 +46,19 @@ interface ConnectionsState {
   pollIntervalMs: PollIntervalMs
   isPaused: boolean
   busy: boolean
-  lastError: string | null
   /** Hash of the last fully-projected snapshot, used to skip identical frames. */
   lastContentHash: string
   /** True after the first fetch resolves. */
   initialised: boolean
+  /**
+   * Last known data is on screen but can no longer be trusted: the kernel
+   * stopped being reachable since it was fetched.
+   *
+   * NOT the same as empty. Before this existed, a vanished controller and an
+   * idle network rendered identically, which is how "the kernel died" came
+   * to look like "nothing is connected".
+   */
+  stale: boolean
 }
 
 export const useConnectionsStore = defineStore('connections', {
@@ -66,12 +75,15 @@ export const useConnectionsStore = defineStore('connections', {
     pollIntervalMs: 2000,
     isPaused: false,
     busy: false,
-    lastError: null,
     lastContentHash: '',
     initialised: false,
+    stale: false,
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('connections')?.message ?? null,
     /** Filtered rows (search keyword + policy dropdown). Iterates the
      *  source array, never allocates intermediate wrappers. */
     filteredRows(state): ConnectionRow[] {
@@ -146,10 +158,11 @@ export const useConnectionsStore = defineStore('connections', {
         this.totalConnections = connections.length
         this.uploadTotal = snap.uploadTotal || 0
         this.downloadTotal = snap.downloadTotal || 0
-        this.lastError = null
+        useNoticesStore().clearSource('connections')
         this.initialised = true
+        this.stale = false
       } catch (e) {
-        this.lastError = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('connections', e)
       } finally {
         this.busy = false
       }
@@ -231,6 +244,14 @@ export const useConnectionsStore = defineStore('connections', {
       return report
     },
 
+    /**
+     * Mark the current rows as possibly out of date. Called by the data pump
+     * on the up -> not-up edge; the rows deliberately stay on screen.
+     */
+    markStale(): void {
+      if (this.rows.length > 0) this.stale = true
+    },
+
     /** Wipe in-memory counters. Call when leaving the tab. */
     reset(): void {
       this.rows = []
@@ -239,7 +260,8 @@ export const useConnectionsStore = defineStore('connections', {
       this.lastContentHash = ''
       this.searchKeyword = ''
       this.selectedPolicyFilter = ''
-      this.lastError = null
+      this.stale = false
+      useNoticesStore().clearSource('connections')
     },
   },
 })

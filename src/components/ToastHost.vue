@@ -4,11 +4,53 @@
 //
 // Mounted once in App.vue. It is the only consumer of `useToastStore` that
 // *renders*; producers just call `toast.push(...)` from anywhere.
+//
+// It is also the one place the unified notice channel (Step 5.2) is projected
+// onto the screen — see `TOASTED_SOURCES` for why that set is deliberately
+// small rather than "every error goes here".
 // ============================================================================
+import { onUnmounted, watch } from 'vue'
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-vue-next'
 import { useToastStore, type ToastKind } from '@/stores/toast'
+import { useNoticesStore, type NoticeSource } from '@/stores/notices'
 
 const toast = useToastStore()
+const notices = useNoticesStore()
+
+/**
+ * Notice sources with **no inline error surface of their own**.
+ *
+ * Everything else on the channel is already rendered where it happened — next
+ * to the TUN switch, under the profile list, inside the update dialog — and a
+ * second copy of the same sentence in the top-right corner is noise, not
+ * information. These two are the exceptions: `kernel.lastError` and
+ * `history.lastError` were written to for months and read by *nothing at all*,
+ * which is how a dead controller could fail silently. They get a toast now.
+ */
+const TOASTED_SOURCES: readonly NoticeSource[] = ['kernel', 'history']
+
+/** Highest notice id already toasted, so a re-render cannot re-toast. */
+let lastToastedId = 0
+
+const stopWatching = watch(
+  () => notices.latest,
+  (n) => {
+    if (!n || n.id <= lastToastedId) return
+    lastToastedId = n.id
+    // `warn` deliberately stays off-screen: it means "degraded but working"
+    // (e.g. a background history tick that failed while the chart kept its
+    // cached series). It belongs in the diagnostics log, not on the user's face.
+    if (n.severity !== 'error') return
+    if (!TOASTED_SOURCES.includes(n.source)) return
+    toast.push('error', sourceTitle(n.source), n.message)
+  },
+)
+
+onUnmounted(stopWatching)
+
+function sourceTitle(source: NoticeSource): string {
+  return source === 'history' ? 'Traffic history' : 'Kernel'
+}
 
 function iconFor(kind: ToastKind) {
   switch (kind) {

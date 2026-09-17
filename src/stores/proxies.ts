@@ -60,6 +60,7 @@ import {
 import type { DelayBatch, DelayDone, ProbeStatus } from '@/bindings'
 import type { UnlistenFn } from '@/utils/tauri-bridge'
 import type { Proxy, ProxyType } from '@/types/clash'
+import { useNoticesStore } from '@/stores/notices'
 
 export type DelayStatus =
   | 'idle'
@@ -101,7 +102,9 @@ interface ProxiesStoreState {
   groups: Record<string, ProxyGroupState>
   byName: Record<string, Proxy>
   loading: boolean
-  error: string | null
+  /** Last known tree is on screen but may be out of date — see
+   *  `connections.stale` for why this is distinct from empty. */
+  stale: boolean
   lastFetchAt: number | null
   /** Groups currently being delay-tested; re-assigned as a new Set to trigger reactivity. */
   testingGroups: string[]
@@ -222,7 +225,7 @@ export const useProxiesStore = defineStore('proxies', {
     groups: {},
     byName: {},
     loading: false,
-    error: null,
+    stale: false,
     lastFetchAt: null,
     testingGroups: [],
     sortMode: 'default',
@@ -231,6 +234,8 @@ export const useProxiesStore = defineStore('proxies', {
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    error: (): string | null => useNoticesStore().latestFor('proxies')?.message ?? null,
     selectorGroups: (s): ProxyGroupState[] => {
       return Object.values(s.groups)
         .filter((g) => GROUP_TYPES.has(g.type))
@@ -359,12 +364,21 @@ export const useProxiesStore = defineStore('proxies', {
      * Preserves any existing per-node delay info so a refresh doesn't wipe
      * the user's recent speed-test results.
      */
+    /**
+     * The node tree can no longer be trusted. Called by the data pump on the
+     * up -> not-up edge; the tree deliberately stays rendered, marked.
+     */
+    markStale(): void {
+      if (this.selectorGroups.length > 0) this.stale = true
+    },
+
     async fetchProxies(): Promise<void> {
       this.loading = true
-      this.error = null
+      useNoticesStore().clearSource('proxies')
       try {
         const r = await getProxies()
         this.byName = r.proxies
+        this.stale = false
 
         const next: Record<string, ProxyGroupState> = {}
         for (const [name, proxy] of Object.entries(r.proxies)) {
@@ -391,7 +405,7 @@ export const useProxiesStore = defineStore('proxies', {
         // stale — and in `latency_asc` mode the new group needs one.
         this.scheduleSort(true)
       } catch (e) {
-        this.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxies', e)
       } finally {
         this.loading = false
       }
@@ -417,7 +431,7 @@ export const useProxiesStore = defineStore('proxies', {
         // change has to be reflected now rather than on the next batch.
         this.scheduleSort(true)
       } catch (e) {
-        this.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxies', e)
         throw e
       }
     },
@@ -442,7 +456,7 @@ export const useProxiesStore = defineStore('proxies', {
         batchUnlisten = null
         doneUnlisten = null
         streamReady = null
-        self.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxies', e)
       })
     },
 
@@ -594,7 +608,7 @@ export const useProxiesStore = defineStore('proxies', {
           }
           this.scheduleSort(true)
         }
-        this.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('proxies', e)
         throw e
       }
     },

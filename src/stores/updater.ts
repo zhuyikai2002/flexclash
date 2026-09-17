@@ -14,6 +14,7 @@
 
 import { defineStore } from 'pinia'
 import type { UpdateInfo } from '@/bindings'
+import { useNoticesStore } from '@/stores/notices'
 import {
   checkUpdate,
   downloadUpdate,
@@ -36,7 +37,6 @@ interface UpdaterState {
   info: UpdateInfo | null
   /** Download progress 0..100 (0 while unknown). */
   progress: number
-  error: string | null
   /** Whether the cold-start "update available" dialog should be open. */
   promptOpen: boolean
   /** Guards the progress listener against double-attach. */
@@ -48,12 +48,13 @@ export const useUpdaterStore = defineStore('updater', {
     phase: 'idle',
     info: null,
     progress: 0,
-    error: null,
     promptOpen: false,
     listening: false,
   }),
 
   getters: {
+    /** Thin proxy over the unified notice channel — stores/notices.ts. */
+    error: (): string | null => useNoticesStore().latestFor('updater')?.message ?? null,
     isBusy: (s): boolean =>
       s.phase === 'checking' || s.phase === 'downloading' || s.phase === 'installing',
     isReady: (s): boolean => s.phase === 'ready',
@@ -84,7 +85,7 @@ export const useUpdaterStore = defineStore('updater', {
     async check(opts: { silent?: boolean } = {}): Promise<void> {
       if (this.isBusy) return
       this.phase = 'checking'
-      this.error = null
+      useNoticesStore().clearSource('updater')
       try {
         const info = await checkUpdate()
         if (info) {
@@ -97,7 +98,7 @@ export const useUpdaterStore = defineStore('updater', {
         }
       } catch (e) {
         this.phase = 'error'
-        this.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('updater', e)
       }
     },
 
@@ -108,7 +109,7 @@ export const useUpdaterStore = defineStore('updater', {
       if (this.phase === 'downloading' || this.phase === 'installing') return
       this.phase = 'downloading'
       this.progress = 0
-      this.error = null
+      useNoticesStore().clearSource('updater')
       try {
         const info = await downloadUpdate()
         this.info = info
@@ -116,7 +117,7 @@ export const useUpdaterStore = defineStore('updater', {
         this.phase = 'ready'
       } catch (e) {
         this.phase = 'error'
-        this.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('updater', e)
         throw e
       }
     },
@@ -126,13 +127,13 @@ export const useUpdaterStore = defineStore('updater', {
     async install(): Promise<void> {
       if (this.phase !== 'ready') return
       this.phase = 'installing'
-      this.error = null
+      useNoticesStore().clearSource('updater')
       try {
         await installUpdate()
         this.phase = 'ready'
       } catch (e) {
         this.phase = 'error'
-        this.error = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('updater', e)
         throw e
       }
     },

@@ -24,13 +24,13 @@ import {
   EVT_PROFILE_RELOADED,
 } from '@/services/profile'
 import { reloadConfig as clashReload } from '@/services/clash'
+import { useNoticesStore } from '@/stores/notices'
 import type { ProfileMeta, ReloadResult } from '@/bindings'
 
 export const useProfilesStore = defineStore('profiles', () => {
   const profiles = ref<ProfileMeta[]>([])
   const activeId = ref<string | null>(null)
   const loading = ref(false)
-  const lastError = ref<string | null>(null)
   const unlistens: UnlistenFn[] = []
   /** Per-id "is currently being updated" map (M6). */
   const updating = ref<Record<string, boolean>>({})
@@ -40,17 +40,21 @@ export const useProfilesStore = defineStore('profiles', () => {
     () => profiles.value.find((p) => p.id === activeId.value) ?? null,
   )
   const hasProfiles = computed(() => profiles.value.length > 0)
+  /** Thin proxy over the unified notice channel — stores/notices.ts. */
+  const lastError = computed<string | null>(
+    () => useNoticesStore().latestFor('profiles')?.message ?? null,
+  )
 
   // ---- actions ------------------------------------------------------------
   async function refresh(): Promise<void> {
     loading.value = true
-    lastError.value = null
+    useNoticesStore().clearSource('profiles')
     try {
       profiles.value = await fetchList()
       const a = await fetchActive()
       activeId.value = a?.id ?? null
     } catch (e) {
-      lastError.value = e instanceof Error ? e.message : String(e)
+      useNoticesStore().raiseError('profiles', e)
     } finally {
       loading.value = false
     }
@@ -108,7 +112,7 @@ export const useProfilesStore = defineStore('profiles', () => {
       await refresh()
       return result
     } catch (e) {
-      lastError.value = e instanceof Error ? e.message : String(e)
+      useNoticesStore().raiseError('profiles', e)
       throw e
     } finally {
       const next = { ...updating.value }

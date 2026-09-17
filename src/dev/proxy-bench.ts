@@ -36,6 +36,7 @@ import {
   type ProxyGroupState,
   type SortMode,
 } from '@/stores/proxies'
+import { useNoticesStore } from '@/stores/notices'
 import type { DelayBatch, NodeProbe, ProbeStatus } from '@/bindings'
 import type { ProxyType } from '@/types/clash'
 
@@ -191,9 +192,9 @@ async function reseed(sizes: number[]): Promise<void> {
   store.groups = seedGroups(sizes)
   store.lastFetchAt = Date.now()
   store.loading = false
-  // `fetchProxies` on mount threw its way into `error` (no Tauri runtime here);
-  // seeding happened afterwards, so clear the stale message.
-  store.error = null
+  // `fetchProxies` on mount threw its way onto the notice channel (no Tauri
+  // runtime here); seeding happened afterwards, so clear the stale message.
+  useNoticesStore().clearSource('proxies')
   // Mirror what `fetchProxies` does after swapping `groups`: the cached display
   // order belongs to the previous child lists. Without this the bench renders a
   // stale order — which is exactly the footgun the store now guards against.
