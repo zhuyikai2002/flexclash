@@ -186,7 +186,8 @@
       "URLTest": "URL 测试",
       "LoadBalance": "负载均衡",
       "Relay": "中转"
-    }
+    },
+    "stale_hint": "内核离线，当前节点列表可能已过期"
   },
   "connections": {
     "title": "活跃连接",
@@ -217,7 +218,8 @@
       "upload": "上行",
       "download": "下行",
       "action": "操作"
-    }
+    },
+    "stale_hint": "内核离线，以下数据可能已过期，仅供参考"
   },
   "anomalies": {
     "toast": {

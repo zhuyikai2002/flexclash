@@ -3,16 +3,17 @@
  * ConnectionsView.vue — M8 main panel: toolbar + virtual list.
  * (Style refactor only; virtualization math untouched.)
  */
-import { computed, ref, toRef, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
-  Filter, Globe, Loader2, Pause, Play, Plug, RefreshCw, Search, Shield, Trash2, X, XCircle,
+  AlertTriangle, Filter, Globe, Loader2, Pause, Play, Plug, RefreshCw, Search, Shield, Trash2, X, XCircle,
 } from 'lucide-vue-next'
 
 import { useConnectionsStore, type PollIntervalMs } from '@/stores/connections'
+import { useProxiesStore } from '@/stores/proxies'
 import { useKernelStore } from '@/stores/kernel'
 import { useToastStore } from '@/stores/toast'
-import { useConnectionMonitor } from '@/composables/useConnectionMonitor'
+import { useKernelDataPump } from '@/composables/useKernelDataPump'
 import ConnectionRow from '@/components/ConnectionRow.vue'
 import { formatRate } from '@/utils/format'
 import { useI18n } from '@/composables/useI18n'
@@ -22,6 +23,7 @@ import type { KillReport } from '@/bindings'
 const props = defineProps<{ active: boolean }>()
 
 const store = useConnectionsStore()
+const proxies = useProxiesStore()
 const kernel = useKernelStore()
 const toast = useToastStore()
 const { t } = useI18n()
@@ -56,7 +58,23 @@ async function doCloseAll() {
 async function manualRefresh() { await store.forceRefresh() }
 function togglePause() { store.setPaused(!store.isPaused) }
 
-useConnectionMonitor({ enabled: toRef(props, 'active') })
+useKernelDataPump({
+  tasks: [
+    {
+      name: 'connections',
+      intervalMs: () => store.pollIntervalMs,
+      enabled: () => props.active && !store.isPaused,
+      fetch: () => store.refresh(),
+    },
+  ],
+  // Kernel vanished: what is on screen is old, not empty. Mark both stores
+  // and let the first tick after recovery replace it.
+  onKernelDown: () => {
+    store.markStale()
+    proxies.markStale()
+  },
+  onKernelUp: () => store.forceRefresh(),
+})
 
 const scrollEl = ref<HTMLElement | null>(null)
 const filteredRows = computed(() => store.filteredRows)
@@ -212,7 +230,7 @@ async function runKill(fn: () => Promise<KillReport>) {
 
       <button
         type="button"
-        :disabled="!kernel.isRunning"
+        :disabled="!kernel.isUp"
         class="inline-flex items-center gap-1.5 rounded-lg border border-white/5 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-40 text-zinc-100 px-2.5 py-1.5 text-xs transition-colors"
         @click="manualRefresh"
       >
@@ -246,9 +264,18 @@ async function runKill(fn: () => Promise<KillReport>) {
       <div class="w-8 shrink-0"></div>
     </div>
 
+    <div
+      v-if="store.stale && total > 0"
+      class="flex items-center gap-2 px-3 py-2 border-b border-amber-500/20 bg-amber-500/[0.07] text-[11px] text-amber-300/90"
+    >
+      <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+      <span>{{ t('connections.stale_hint') }}</span>
+      <span class="ml-auto font-mono text-[10px] text-amber-300/60">{{ kernel.availability }}</span>
+    </div>
+
     <div ref="scrollEl" class="overflow-auto" style="height: 480px">
       <div
-        v-if="!kernel.isRunning"
+        v-if="!kernel.isUp"
         class="flex items-center justify-center h-full text-zinc-500 text-sm px-6 text-center"
       >
         Start the kernel to see live connections.

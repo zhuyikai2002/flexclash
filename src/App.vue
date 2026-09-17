@@ -132,7 +132,7 @@ onUnmounted(() => {
       <Sidebar
         v-model="tab"
         :kernel-state="kernel.state"
-        :conn-count="kernel.isRunning ? conns.totalConnections : 0"
+        :conn-count="kernel.isUp ? conns.totalConnections : 0"
         :profile-count="profiles.profiles.length"
       />
     </aside>
@@ -163,12 +163,12 @@ onUnmounted(() => {
           <NetworkStatsCard @open-connections="openConnections" />
 
           <!-- Row 4: live traffic — only when the kernel is up -->
-          <TrafficCard v-if="kernel.isRunning" />
+          <TrafficCard v-if="kernel.isUp" />
         </div><!-- /Dashboard tab -->
 
         <!-- ============== Proxies tab (full-width node grid) ============== -->
         <div v-else-if="tab === 'proxies'" class="space-y-6">
-          <ProxyGroups v-if="kernel.isRunning" />
+          <ProxyGroups v-if="kernel.isUp" />
           <div
             v-else
             class="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-12 text-center"

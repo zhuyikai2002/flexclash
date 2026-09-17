@@ -54,7 +54,7 @@ const lastUpdateAt = computed(() => appstate.lastTrafficAt)
  */
 const connected = computed(() => {
   void tick.value
-  if (!kernel.isRunning || lastUpdateAt.value === null) return false
+  if (!kernel.isUp || lastUpdateAt.value === null) return false
   return Date.now() - lastUpdateAt.value < 5_000
 })
 

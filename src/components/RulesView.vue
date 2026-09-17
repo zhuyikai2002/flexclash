@@ -12,7 +12,7 @@ const { t } = useI18n()
 const showTypeMenu = ref(false)
 
 onMounted(() => {
-  if (kernel.isRunning && !rules.lastFetchAt) {
+  if (kernel.isUp && !rules.lastFetchAt) {
     void rules.fetch()
   }
 })
@@ -115,7 +115,7 @@ function typeBadgeColor(type: string): string {
     </div>
 
     <div
-      v-if="!kernel.isRunning"
+      v-if="!kernel.isUp"
       class="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center text-sm text-zinc-500"
     >
       {{ t('common.loading') }}

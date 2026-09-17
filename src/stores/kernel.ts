@@ -24,7 +24,7 @@
 // ============================================================================
 
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { useNoticesStore } from '@/stores/notices'
 import { commands, events, type KernelState } from '@/bindings'
 import {
   call,
@@ -36,6 +36,25 @@ import {
 } from '@/utils/tauri-bridge'
 
 import { getVersion, MIHOMO_BASE_URL, pollUntil, isAlive } from '@/services/clash'
+
+/**
+ * The renderer's single answer to "can we talk to the kernel right now?"
+ *
+ * Before this, three fields could each claim to answer that question and
+ * nothing arbitrated between them: `state` (pushed by Rust), `probeStatus`
+ * (our own REST probe) and `appstate.online` (Rust's 1 s snapshot). They
+ * disagreed routinely — Rust says `running` while the port is not yet bound,
+ * or the probe fails while the supervisor is mid-restart — and every component
+ * picked a different one to believe.
+ *
+ * `availability` is derived, never written, and it is the only field the UI
+ * should branch on:
+ *   * `up`       — Rust says running and nothing contradicts it;
+ *   * `degraded` — Rust says running but our own probe failed, i.e. the
+ *                  process is there and the controller is not answering;
+ *   * `down`     — Rust says it is not running.
+ */
+export type KernelAvailability = 'up' | 'degraded' | 'down'
 
 /**
  * The store's public lifecycle field.
@@ -86,11 +105,11 @@ const LOG_CAP = 120
 // Internal (non-public) state.  Kept module-scoped because nothing in the
 // UI cares about them, and they avoid cluttering the public interface.
 // `_unlisteners` is a plain `let` because Tauri unlisten handles are
-// imperative, not reactive.  `lastErrorRef` IS reactive so the dashboard
-// toast / banner can render it via a getter on the store.
+// imperative, not reactive. There is deliberately no `lastError` ref here
+// any more: it reads through the unified notice channel (stores/notices.ts),
+// which is what finally makes `kernel.lastError` renderable at all.
 // ---------------------------------------------------------------------------
 let _unlisteners: UnlistenFn[] = []
-const lastErrorRef = ref<string | null>(null)
 
 /**
  * Anti-flicker hysteresis timer.  A crash (`crashed`) is, in the normal case,
@@ -118,10 +137,30 @@ export const useKernelStore = defineStore('kernel', {
 
   getters: {
     isRunning: (s): boolean => s.state === 'running',
+    /**
+     * The single truth about reachability — see `KernelAvailability`.
+     *
+     * `probing` counts as `up` on purpose: the port is being dialled and the
+     * answer is not in yet, and treating that as degraded would blank the
+     * proxy grid for the whole cold-start window on every single launch.
+     */
+    availability: (s): KernelAvailability => {
+      if (s.state !== 'running') return 'down'
+      return s.probeStatus === 'error' ? 'degraded' : 'up'
+    },
+    /** The gate every data-driven view should use. */
+    isUp(): boolean {
+      return this.availability === 'up'
+    },
+    /** Rust thinks it is up, we cannot reach it. Renders as `stale` (5.3). */
+    isDegraded(): boolean {
+      return this.availability === 'degraded'
+    },
     isTransitioning: (s): boolean =>
       s.state === 'starting' || s.state === 'stopping' || s.state === 'recovering',
     /** Latest error message, or `null` when no error is pending. */
-    lastError: (): string | null => lastErrorRef.value,
+    lastError: (): string | null =>
+      useNoticesStore().latestFor('kernel')?.message ?? null,
   },
 
   actions: {
@@ -131,7 +170,7 @@ export const useKernelStore = defineStore('kernel', {
       try {
         if (inTauri('get_kernel_state')) this.state = await commands.getKernelState()
       } catch (e) {
-        lastErrorRef.value = String(e)
+        useNoticesStore().raise('kernel', 'error', String(e))
       }
       // If the kernel is already running (post-restart, autostart) we still
       // need to poll until mihomo actually binds 9091 — otherwise the first
@@ -181,7 +220,7 @@ export const useKernelStore = defineStore('kernel', {
         // first run) but the bind usually lands in <1s.
         await this.probeWithBackoff()
       } catch (e) {
-        // Already recorded in `lastErrorRef` by `start()`.
+        // Already raised on the notice channel by `start()`.
         // eslint-disable-next-line no-console
         console.warn('[kernel] auto-start failed:', e)
       }
@@ -302,7 +341,7 @@ export const useKernelStore = defineStore('kernel', {
         // `kernel://log` as `[supervisor] …` banners.
         await safeListenEvent(events.supervisorEvent, (e) => {
           if (e.payload.kind === 'gave_up') {
-            lastErrorRef.value = e.payload.reason
+            useNoticesStore().raise('kernel', 'error', e.payload.reason)
           }
         }),
       )
@@ -317,11 +356,11 @@ export const useKernelStore = defineStore('kernel', {
         this.version = ver.version
         this.probeLatencyMs = Math.round(performance.now() - t0)
         this.probeStatus = 'healthy'
-        lastErrorRef.value = null
+        useNoticesStore().clearSource('kernel')
       } catch (e) {
         this.probeStatus = 'error'
         this.probeLatencyMs = null
-        lastErrorRef.value = e instanceof Error ? e.message : String(e)
+        useNoticesStore().raiseError('kernel', e)
       }
     },
 
@@ -350,48 +389,49 @@ export const useKernelStore = defineStore('kernel', {
           this.version = ver.version
           this.probeLatencyMs = Math.round(performance.now() - t0)
           this.probeStatus = 'healthy'
-          lastErrorRef.value = null
+          useNoticesStore().clearSource('kernel')
         } catch (e) {
           // Shouldn't happen — `isAlive` just passed — but be defensive.
           this.probeStatus = 'error'
           this.probeLatencyMs = null
-          lastErrorRef.value = e instanceof Error ? e.message : String(e)
+          useNoticesStore().raiseError('kernel', e)
         }
       } else {
         this.probeStatus = 'error'
         this.probeLatencyMs = null
         const reason = result.lastError?.message ?? 'mihomo unreachable after 5s'
-        lastErrorRef.value = `${reason} (tried ${result.attempts} times)`
+        const message = `${reason} (tried ${result.attempts} times)`
+        useNoticesStore().raise('kernel', 'error', message)
         // eslint-disable-next-line no-console
-        console.warn(`[kernel] probeWithBackoff failed: ${lastErrorRef.value}`)
+        console.warn(`[kernel] probeWithBackoff failed: ${message}`)
       }
     },
 
     async start(): Promise<void> {
-      lastErrorRef.value = null
+      useNoticesStore().clearSource('kernel')
       try {
         guardInTauri('start_kernel')
         this.state = await call(commands.startKernel())
         // start() itself only flips state to Starting; Running arrives via event.
       } catch (e) {
-        lastErrorRef.value = String(e)
+        useNoticesStore().raise('kernel', 'error', String(e))
         throw e
       }
     },
 
     async stop(): Promise<void> {
-      lastErrorRef.value = null
+      useNoticesStore().clearSource('kernel')
       try {
         guardInTauri('stop_kernel')
         this.state = await call(commands.stopKernel())
       } catch (e) {
-        lastErrorRef.value = String(e)
+        useNoticesStore().raise('kernel', 'error', String(e))
         throw e
       }
     },
 
     async restart(): Promise<void> {
-      lastErrorRef.value = null
+      useNoticesStore().clearSource('kernel')
       this.version = null
       this.probeLatencyMs = null
       try {
@@ -402,7 +442,7 @@ export const useKernelStore = defineStore('kernel', {
         // don't trip a false "unreachable".
         await this.probeWithBackoff()
       } catch (e) {
-        lastErrorRef.value = String(e)
+        useNoticesStore().raise('kernel', 'error', String(e))
         throw e
       }
     },

@@ -186,7 +186,8 @@
       "URLTest": "URL Test",
       "LoadBalance": "Load Balance",
       "Relay": "Relay"
-    }
+    },
+    "stale_hint": "Kernel offline — this node list may be out of date"
   },
   "connections": {
     "title": "Active Connections",
@@ -217,7 +218,8 @@
       "upload": "Upload",
       "download": "Download",
       "action": "Action"
-    }
+    },
+    "stale_hint": "Kernel offline — the data below may be out of date"
   },
   "anomalies": {
     "toast": {

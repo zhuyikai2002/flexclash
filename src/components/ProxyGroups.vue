@@ -33,7 +33,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
-  ArrowDownNarrowWide, ArrowDownWideNarrow, Loader2, RefreshCw,
+  AlertTriangle, ArrowDownNarrowWide, ArrowDownWideNarrow, Loader2, RefreshCw,
 } from 'lucide-vue-next'
 
 import { useProxiesStore } from '@/stores/proxies'
@@ -103,7 +103,7 @@ onMounted(() => {
     .then((u) => unlistens.push(u))
     .catch(() => {})
   void safeListen('profile://list-changed', () => {
-    if (kernel.isRunning) void proxies.fetchProxies()
+    if (kernel.isUp) void proxies.fetchProxies()
   })
     .then((u) => unlistens.push(u))
     .catch(() => {})
@@ -111,7 +111,7 @@ onMounted(() => {
   // When the kernel transitions into Running while this tab is already
   // mounted (dashboard auto-start), pull the tree too.
   watch(
-    () => kernel.isRunning,
+    () => kernel.isUp,
     (running) => { if (running) void proxies.fetchProxies() },
   )
 })
@@ -304,6 +304,14 @@ function toggleCollapse(group: string) {
           </div>
         </div>
       </div>
+    </div>
+
+    <div
+      v-if="proxies.stale && !proxies.error"
+      class="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.07] p-3 text-xs text-amber-300/90"
+    >
+      <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+      {{ t('proxies.stale_hint') }}
     </div>
 
     <div

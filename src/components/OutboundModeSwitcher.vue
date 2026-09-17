@@ -19,13 +19,14 @@
  *    back and surface a single rose-line error.  The pill slides
  *    back the same way.
  *  - Talks DIRECTLY to mihomo (PATCH /configs) — Rust does not own
- *    the data path.  Gated by `kernel.isRunning` so a cold start
+ *    the data path.  Gated by `kernel.isUp` so a cold start
  *    can never emit a raw ECONNREFUSED toast.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { setMode, getConfigs } from '@/services/clash'
 import { useI18n } from '@/composables/useI18n'
 import { useKernelStore } from '@/stores/kernel'
+import { useToastStore } from '@/stores/toast'
 import { useAppStateStore } from '@/stores/appstate'
 
 type Mode = 'rule' | 'global' | 'direct'
@@ -35,16 +36,14 @@ const kernel = useKernelStore()
 const appstate = useAppStateStore()
 
 const current = ref<Mode>('rule')
-const lastError = ref<string | null>(null)
-let errorTimer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * Errors go to the global toast bus instead of a local ref + setTimeout:
+ * expiry is then owned in exactly one place (`stores/toast.ts`) rather than
+ * by a per-component timer that leaked whenever the card unmounted mid-flight.
+ */
 function flashError(msg: string) {
-  lastError.value = msg
-  if (errorTimer) clearTimeout(errorTimer)
-  errorTimer = setTimeout(() => {
-    lastError.value = null
-    errorTimer = null
-  }, 3000)
+  useToastStore().push('error', msg)
 }
 
 const modes: Array<{ id: Mode; labelKey: string; color: string; icon: string }> = [
@@ -56,7 +55,7 @@ const modes: Array<{ id: Mode; labelKey: string; color: string; icon: string }> 
 const activeIndex = computed(() => modes.findIndex((m) => m.id === current.value))
 
 async function refresh() {
-  if (!kernel.isRunning) return
+  if (!kernel.isUp) return
   try {
     const cfg = await getConfigs()
     if (cfg.mode === 'rule' || cfg.mode === 'global' || cfg.mode === 'direct') {
@@ -69,7 +68,7 @@ async function refresh() {
 
 onMounted(refresh)
 // Keep the capsule in sync when the kernel transitions Stopped → Running.
-watch(() => kernel.isRunning, (running) => {
+watch(() => kernel.isUp, (running) => {
   if (running) void refresh()
 })
 // Phase R3: the Rust state watcher is authoritative for outbound mode —
@@ -86,7 +85,7 @@ watch(
 
 async function pick(m: Mode) {
   if (m === current.value) return
-  if (!kernel.isRunning) {
+  if (!kernel.isUp) {
     flashError('kernel not running')
     return
   }
@@ -128,7 +127,7 @@ async function pick(m: Mode) {
         v-for="(m, i) in modes"
         :key="m.id"
         type="button"
-        :disabled="!kernel.isRunning"
+        :disabled="!kernel.isUp"
         :aria-pressed="current === m.id"
         :class="[
           'relative z-10 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-200',
@@ -156,11 +155,5 @@ async function pick(m: Mode) {
       {{ t('dashboard.outbound_mode.hint') }}
     </p>
 
-    <p
-      v-if="lastError"
-      class="text-[11px] text-rose-300/90 font-mono"
-    >
-      {{ lastError }}
-    </p>
   </section>
 </template>
