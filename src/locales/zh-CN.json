@@ -222,7 +222,8 @@
   "anomalies": {
     "toast": {
       "dns": "DNS 解析失败",
-      "tls": "TLS 错误"
+      "tls": "TLS 错误",
+      "cleanup": "⚡ 已自动清理 {node} 上的 {n} 条死链"
     }
   },
   "profiles": {

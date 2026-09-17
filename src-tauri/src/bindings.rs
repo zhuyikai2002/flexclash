@@ -188,6 +188,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::core::kernel_events::GeoDataUpdatedPayload,
             crate::core::supervisor::SupervisorEvent,
             crate::core::kernel_events::LogAnomaly,
+            crate::core::deadlink::DeadLinkCleanup,
         ])
 }
 

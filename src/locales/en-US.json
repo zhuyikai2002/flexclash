@@ -222,7 +222,8 @@
   "anomalies": {
     "toast": {
       "dns": "DNS resolution failed",
-      "tls": "TLS error"
+      "tls": "TLS error",
+      "cleanup": "⚡ Auto-cleaned {n} dead link(s) on {node}"
     }
   },
   "profiles": {

@@ -113,6 +113,16 @@ pub fn run() {
             // `mount_events`, since it publishes a typed event.
             crate::commands::geodata::spawn_scheduler(&handle);
 
+            // v0.6.x Step 4: the dead-link autopilot. It consumes the anomaly
+            // stream `core::ingest` produces and silently reaps connections
+            // stuck on a node that keeps failing, so the kernel re-routes
+            // without the user touching anything. Managed as state (not passed
+            // into `ingest::spawn`) so ingest stays correct even if this is
+            // never installed — see `AnomalySink::send`.
+            let (anomaly_sink, anomaly_rx) = crate::core::deadlink::AnomalySink::new();
+            handle.manage(anomaly_sink);
+            crate::core::deadlink::spawn(&handle, anomaly_rx);
+
             // M10: open the history DB at
             //   %LOCALAPPDATA%\com.flexclash.app\history.db
             // and register it as managed state so the Tauri commands

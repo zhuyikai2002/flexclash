@@ -60,7 +60,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_specta::Event;
 use tokio::net::TcpStream;
 use tokio::time::MissedTickBehavior;
@@ -264,6 +264,16 @@ async fn logs_session<R: Runtime>(app: AppHandle<R>, mut ws: WsStream) {
                             // These are rare, so they are emitted immediately
                             // rather than riding the 500 ms raw-log batch.
                             if let Some(anomaly) = crate::core::log_parse::parse_anomaly(&entry) {
+                                // Step 4: hand a copy to the dead-link
+                                // autopilot. Option-gated and non-blocking — if
+                                // the autopilot is not installed this is a
+                                // no-op, and nothing here depends on it
+                                // succeeding.
+                                if let Some(sink) =
+                                    app.try_state::<crate::core::deadlink::AnomalySink>()
+                                {
+                                    sink.send(anomaly.clone());
+                                }
                                 let _ = anomaly.emit(&app);
                             }
                             // Bounded: a log storm drops the oldest line rather

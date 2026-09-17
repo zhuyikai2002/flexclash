@@ -12,13 +12,19 @@
 //     about *now*; dial timeouts / refused / proxy switches are high-volume
 //     and stay in the records only.
 //
+// It also listens for `dead-link-cleanup` — the Step 4 autopilot reporting that
+// it reaped a node's dead connections. Self-healing the user cannot see is
+// self-healing the user cannot trust, so a cleanup that actually killed
+// something gets a toast. A suppressed or empty one must not: see
+// `noticeCleanup` for why those stay in the console.
+//
 // Anti-flood: a burst of failures (a dead DNS server can emit hundreds of
 // `no such host` lines a second) must not spray the screen with toasts. The
 // same `kind + host` is only allowed one toast per `THROTTLE_MS` window.
 // ============================================================================
 
 import { defineStore } from 'pinia'
-import { events, type LogAnomaly } from '@/bindings'
+import { events, type DeadLinkCleanup, type LogAnomaly } from '@/bindings'
 import { safeListenEvent, type UnlistenFn } from '@/utils/tauri-bridge'
 import { useToastStore } from '@/stores/toast'
 import { i18n } from '@/i18n'
@@ -38,6 +44,8 @@ const THROTTLE_MS = 4000
 
 /** Process-wide subscription, created once (mirrors the kernel store pattern). */
 let _unlisten: UnlistenFn | null = null
+/** Separate handle for the Step 4 cleanup stream. */
+let _unlistenCleanup: UnlistenFn | null = null
 let _seq = 0
 
 /** `kind:host` → last toast timestamp (module-scoped, not reactive). */
@@ -78,12 +86,37 @@ export const useAnomaliesStore = defineStore('anomalies', {
   }),
 
   actions: {
-    /** Subscribe to `events.logAnomaly`. Idempotent. */
+    /** Subscribe to `events.logAnomaly` + `events.deadLinkCleanup`. Idempotent. */
     init(): void {
       if (_unlisten) return
       safeListenEvent(events.logAnomaly, (e) => this.ingest(e.payload)).then((u) => {
         _unlisten = u
       })
+      // Step 4: the autopilot's own report. Independent of the anomaly stream —
+      // a cleanup can arrive without this store ever having seen the failures
+      // that caused it (they are high-volume and mostly un-toasted).
+      safeListenEvent(events.deadLinkCleanup, (e) => this.noticeCleanup(e.payload)).then((u) => {
+        _unlistenCleanup = u
+      })
+    },
+
+    /**
+     * Surface a Step 4 cleanup — but only when it actually did something.
+     *
+     * The escape hatch (`FLEXCLASH_AUTOKILL=off`) still publishes an event, with
+     * `killed = 0`, precisely so the suppression stays observable. Toasting that
+     * would announce work that did not happen, so it goes to the console only.
+     * Same for a cleanup whose matches had already vanished.
+     */
+    noticeCleanup(c: DeadLinkCleanup): void {
+      if (c.killed <= 0) {
+        console.debug(`[deadlink] ${c.node}: ${c.reason}`)
+        return
+      }
+      useToastStore().push(
+        'success',
+        i18n.global.t('anomalies.toast.cleanup', { node: c.node, n: c.killed }),
+      )
     },
 
     /** Record the anomaly, and toast it if it is fatal and not throttled. */
@@ -104,10 +137,12 @@ export const useAnomaliesStore = defineStore('anomalies', {
       useToastStore().push('error', titleOf(a), detailOf(a))
     },
 
-    /** Tear down the event subscription. */
+    /** Tear down the event subscriptions. */
     dispose(): void {
       _unlisten?.()
       _unlisten = null
+      _unlistenCleanup?.()
+      _unlistenCleanup = null
     },
   },
 })

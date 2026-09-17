@@ -296,6 +296,7 @@ export const commands = {
 /** Events */
 export const events = {
 	configRefreshPayload: makeEvent<ConfigRefreshPayload>("config-refresh-payload"),
+	deadLinkCleanup: makeEvent<DeadLinkCleanup>("dead-link-cleanup"),
 	geoDataUpdatedPayload: makeEvent<GeoDataUpdatedPayload>("geo-data-updated-payload"),
 	logAnomaly: makeEvent<LogAnomaly>("log-anomaly"),
 	logBatch: makeEvent<LogBatch>("log-batch"),
@@ -367,6 +368,27 @@ export type ConnectionFilter = {
 	proxy: string | null,
 	/**  Match the destination IP (exact) or `IP:port` (prefix). */
 	destination: string | null,
+};
+
+/**
+ *  The outcome of a dead-link cleanup, published as a typed event.
+ * 
+ *  Automatic deletion is otherwise invisible, and "why did my connections
+ *  drop?" is not answerable after the fact. Every cleanup — including the ones
+ *  that killed nothing and the ones suppressed by the escape hatch — produces
+ *  exactly one of these.
+ */
+export type DeadLinkCleanup = {
+	/**  The egress node whose dead links were closed. */
+	node: string,
+	/**  How many DELETEs the controller accepted. */
+	killed: number,
+	/**  How many DELETEs failed (connection already gone, controller hiccup…). */
+	failed: number,
+	/**  Why the cleanup ran — or why it did not. */
+	reason: string,
+	/**  Receipt time, as Unix epoch milliseconds. */
+	atMs: number,
 };
 
 /**  Incremental progress push — one event per `BATCH_SIZE` results. */
