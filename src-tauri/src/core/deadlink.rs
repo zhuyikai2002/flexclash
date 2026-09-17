@@ -59,6 +59,7 @@
 // ============================================================================
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -99,18 +100,78 @@ const fn from_secs(s: u64) -> Duration {
     Duration::from_secs(s)
 }
 
-/// Escape hatch: `FLEXCLASH_AUTOKILL=off` (also `0` / `false` / `no`) makes the
-/// autopilot observe and report but never delete anything.
-///
-/// Automatic cleanup is a heuristic built on text matching, so it must be
-/// possible to switch off without a rebuild — a false positive here shows up to
-/// the user as "my connections keep dropping for no reason".
-fn autokill_enabled() -> bool {
+// -- escape hatch -----------------------------------------------------------
+// Automatic cleanup is a heuristic built on text matching, so it must be
+// possible to switch off without a rebuild — a false positive here shows up to
+// the user as "my connections keep dropping for no reason". Two independent
+// switches, in strict priority order:
+//
+//   1. `FLEXCLASH_AUTOKILL=off` (also `0` / `false` / `no`) — the hard one.
+//      Owned by whoever launched the app (a package manager, a locked-down
+//      profile); the UI must never be able to switch it back on, or the
+//      escape hatch would be a decoration.
+//   2. The runtime override — what the Settings toggle writes. Session-scoped
+//      and deliberately not persisted: a persisted "off" is the kind of
+//      setting a user forgets they set and then reports as a bug.
+
+/// Tri-state, because "never touched" has to be distinguishable from
+/// "explicitly on": otherwise the first `get_autokill_state` could not tell a
+/// default from a deliberate user choice.
+const AUTOKILL_UNSET: u8 = 0;
+const AUTOKILL_ON: u8 = 1;
+const AUTOKILL_OFF: u8 = 2;
+static AUTOKILL_OVERRIDE: AtomicU8 = AtomicU8::new(AUTOKILL_UNSET);
+
+/// Whether the *environment* permits autokill at all.
+fn autokill_env_allows() -> bool {
     std::env::var("FLEXCLASH_AUTOKILL")
         .ok()
         .map(|v| v.trim().to_ascii_lowercase())
         .map(|v| !matches!(v.as_str(), "0" | "off" | "false" | "no"))
         .unwrap_or(true)
+}
+
+/// The effective switch: the environment vetoes, the runtime override decides
+/// the rest.
+pub fn autokill_enabled() -> bool {
+    if !autokill_env_allows() {
+        return false;
+    }
+    !matches!(AUTOKILL_OVERRIDE.load(Ordering::Relaxed), AUTOKILL_OFF)
+}
+
+/// The autopilot's switch, as the UI needs to see it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AutokillState {
+    /// Whether a cleanup will actually DELETE connections right now.
+    pub enabled: bool,
+    /// True when `FLEXCLASH_AUTOKILL=off` is forcing it off regardless of the
+    /// toggle. The renderer renders its switch disabled when this is set —
+    /// offering a control that cannot change the outcome would be a lie.
+    pub env_locked: bool,
+}
+
+/// Read the current state. Pure apart from one relaxed atomic load.
+pub fn autokill_state() -> AutokillState {
+    let env_locked = !autokill_env_allows();
+    AutokillState {
+        enabled: autokill_enabled(),
+        env_locked,
+    }
+}
+
+/// Set the runtime override; returns the resulting state.
+///
+/// A call made while the environment vetoes is accepted, not rejected — but it
+/// leaves `enabled` false, and `env_locked` in the returned state is how the
+/// caller learns why.
+pub fn set_autokill_runtime(on: bool) -> AutokillState {
+    AUTOKILL_OVERRIDE.store(
+        if on { AUTOKILL_ON } else { AUTOKILL_OFF },
+        Ordering::Relaxed,
+    );
+    autokill_state()
 }
 
 /// The outcome of a dead-link cleanup, published as a typed event.
@@ -524,7 +585,14 @@ async fn cleanup<R: Runtime>(app: &AppHandle<R>, policy: &mut DeadLinkPolicy, no
     policy.note_cleanup(node, now);
 
     if !autokill_enabled() {
-        let reason = "suppressed by FLEXCLASH_AUTOKILL=off";
+        // Both switches land here; the reason has to say which one, or a user
+        // who turned the toggle off would go hunting for an env var they never
+        // set.
+        let reason = if autokill_env_allows() {
+            "suppressed by user setting"
+        } else {
+            "suppressed by FLEXCLASH_AUTOKILL=off"
+        };
         report(app, node, 0, 0, reason);
         banner(app, format!("[deadlink] {node}: cleanup {reason}"));
         return;
@@ -879,5 +947,73 @@ mod tests {
         p.record("HK-01", later);
         p.record("HK-01", earlier);
         p.prune(earlier);
+    }
+
+    // -- escape hatch -------------------------------------------------------
+    //
+    // These tests touch a process-wide `static`, and `cargo test` runs tests in
+    // parallel, so every one of them holds `AUTOKILL_TEST_LOCK` for its whole
+    // body. They are also written to hold *whatever* the environment says:
+    // asserting `enabled == false` unconditionally would break the moment a
+    // developer (or CI) exports `FLEXCLASH_AUTOKILL=off`, so each assertion is
+    // phrased against `env_locked` instead of a hardcoded expectation.
+
+    /// Serializes the tests that mutate `AUTOKILL_OVERRIDE`.
+    static AUTOKILL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn autokill_lock() -> std::sync::MutexGuard<'static, ()> {
+        AUTOKILL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn env_locked_implies_disabled() {
+        // The one invariant that must hold no matter how the process was
+        // launched: if the environment vetoes, nothing is ever enabled.
+        let s = autokill_state();
+        if s.env_locked {
+            assert!(!s.enabled);
+        }
+        assert_eq!(s.enabled, autokill_enabled());
+    }
+
+    #[test]
+    fn runtime_override_can_only_turn_it_off() {
+        let _g = autokill_lock();
+        let off = set_autokill_runtime(false);
+        assert!(!off.enabled, "the runtime switch must be able to veto");
+        assert_eq!(off.env_locked, !autokill_env_allows());
+
+        let on = set_autokill_runtime(true);
+        // Turning it back on only works if the environment allows it — a locked
+        // process stays off, which is the whole point of the hard hatch.
+        assert_eq!(on.enabled, !on.env_locked);
+    }
+
+    #[test]
+    fn runtime_override_round_trips() {
+        let _g = autokill_lock();
+        let before = autokill_state();
+        set_autokill_runtime(false);
+        set_autokill_runtime(true);
+        let after = autokill_state();
+        // Restoring "on" returns to exactly the environment's answer.
+        assert_eq!(after.enabled, !after.env_locked);
+        assert_eq!(after.env_locked, before.env_locked);
+    }
+
+    #[test]
+    fn env_veto_survives_a_runtime_request_to_enable() {
+        let _g = autokill_lock();
+        let s = set_autokill_runtime(true);
+        if !autokill_env_allows() {
+            // The UI asked for "on" and the answer is still "off".
+            assert!(!s.enabled);
+            assert!(s.env_locked);
+        } else {
+            assert!(s.enabled);
+            assert!(!s.env_locked);
+        }
     }
 }

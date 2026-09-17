@@ -90,6 +90,11 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::commands::mihomo::kill_connections_by,
             crate::commands::mihomo::close_all_mihomo_connections,
             crate::commands::mihomo::get_mihomo_rules,
+            // -- dead-link autopilot (v0.6.x Step 5 escape hatch) ----------
+            // The autopilot deletes user traffic unasked, so its kill switch
+            // has to be reachable from the UI — not only from an env var.
+            crate::commands::deadlink::get_autokill_state,
+            crate::commands::deadlink::set_autokill,
             // -- geo databases (v0.4.x silent hot-refresh) -----------------
             crate::commands::geodata::get_geodata_status,
             crate::commands::geodata::refresh_geodata,

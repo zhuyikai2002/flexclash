@@ -1,3 +1,4 @@
+pub mod deadlink;
 pub mod desktop;
 pub mod geodata;
 pub mod history;

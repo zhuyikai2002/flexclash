@@ -137,6 +137,17 @@ export const useAnomaliesStore = defineStore('anomalies', {
       useToastStore().push('error', titleOf(a), detailOf(a))
     },
 
+    /**
+     * Drop every record (the diagnostics panel's "clear" button).
+     *
+     * Only the ring is emptied — the throttle map deliberately survives, so a
+     * user who clears the log during an ongoing burst is not immediately
+     * re-toasted for the same failure they just dismissed.
+     */
+    clear(): void {
+      this.records = []
+    },
+
     /** Tear down the event subscriptions. */
     dispose(): void {
       _unlisten?.()

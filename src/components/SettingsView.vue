@@ -33,8 +33,11 @@ import {
 } from '@/services/tun'
 import { getAppVersion, type UnlistenFn } from '@/utils/tauri-bridge'
 import { resetApplication, onResetCompleted, clearClientState } from '@/services/reset'
+import { useAnomaliesStore } from '@/stores/anomalies'
 import type { ResetReport } from '@/bindings'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import AutokillToggle from '@/components/AutokillToggle.vue'
+import DiagnosticsDialog from '@/components/DiagnosticsDialog.vue'
 
 const { t, locale, setLocale, supportedLocales } = useI18n()
 const kernel = useKernelStore()
@@ -43,6 +46,7 @@ const desktop = useDesktopStore()
 const tun = useTunStore()
 const settings = useSettingsStore()
 const updater = useUpdaterStore()
+const anomalies = useAnomaliesStore()
 
 // ---------------------------------------------------------------------------
 // Local UI state
@@ -258,6 +262,9 @@ function onLogLevelChange(v: LogLevel) {
 // ---------------------------------------------------------------------------
 // Phase 8: "Reset Application" flow
 // ---------------------------------------------------------------------------
+
+/** Diagnostics modal (see `DiagnosticsDialog`). */
+const diagOpen = ref(false)
 
 const resetOpen = ref(false)
 const resetting = ref(false)
@@ -801,6 +808,43 @@ onUnmounted(() => {
       </div>
     </section>
 
+    <!-- ==================== Diagnostics (v0.6.x Step 5) ==================== -->
+    <section
+      class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+    >
+      <div class="flex items-center gap-2 text-zinc-300">
+        <Activity class="w-4 h-4 text-sky-400" />
+        <h2 class="text-sm font-semibold uppercase tracking-wider">
+          {{ t('settings.diagnostics.title') }}
+        </h2>
+      </div>
+
+      <!-- The autopilot's kill switch. Renders itself disabled when the
+           environment vetoes — see AutokillToggle for why that is a
+           dedicated component rather than another ToggleCard. -->
+      <AutokillToggle />
+
+      <!-- Entry point to the raw anomaly ring. -->
+      <div class="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
+        <div class="min-w-0">
+          <div class="text-sm font-medium text-zinc-100">
+            {{ t('settings.diagnostics.log_title') }}
+          </div>
+          <p class="mt-0.5 text-[11px] text-zinc-500">
+            {{ t('settings.diagnostics.log_entry_desc', { n: anomalies.records.length }) }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/5 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/10 text-zinc-100 px-3 py-1.5 text-sm transition-colors"
+          @click="diagOpen = true"
+        >
+          <BookOpen class="w-3.5 h-3.5" />
+          {{ t('settings.diagnostics.log_open') }}
+        </button>
+      </div>
+    </section>
+
     <!-- ==================== Reset & Maintenance (Phase 8) ==================== -->
     <section
       class="rounded-2xl border border-rose-500/15 bg-rose-500/[0.03] backdrop-blur-md p-5 space-y-4"
@@ -839,6 +883,9 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
+    <!-- ==================== Diagnostics modal ==================== -->
+    <DiagnosticsDialog :open="diagOpen" @close="diagOpen = false" />
 
     <!-- ==================== Reset Confirm Modal (type RESET) ==================== -->
     <ConfirmModal

@@ -224,6 +224,13 @@
       "dns": "DNS 解析失败",
       "tls": "TLS 错误",
       "cleanup": "⚡ 已自动清理 {node} 上的 {n} 条死链"
+    },
+    "kind": {
+      "dns_resolve_failed": "DNS 解析失败",
+      "dial_timeout": "连接超时",
+      "connect_refused": "连接被拒",
+      "tls_error": "TLS 错误",
+      "proxy_switch": "节点切换"
     }
   },
   "profiles": {
@@ -349,6 +356,23 @@
       "in_progress_desc": "正在清理状态并恢复默认配置，请勿关闭窗口。",
       "result_title": "重置完成",
       "result_desc": "默认配置已恢复，应用即将重启。"
+    },
+    "diagnostics": {
+      "title": "网络诊断",
+      "autokill_title": "自动清理死链",
+      "autokill_desc": "同一节点在 10 秒内连续失败 3 次时，自动断开该节点上的卡死连接，强制内核重新选路。",
+      "autokill_hint": "仅本次会话生效；重启后恢复默认（开启）。",
+      "autokill_locked_badge": "已锁定",
+      "autokill_env_locked": "受系统环境变量限制：FLEXCLASH_AUTOKILL=off",
+      "log_title": "网络诊断日志",
+      "log_subtitle": "最近 {n} 条异常记录，仅保存在内存中",
+      "log_entry_desc": "已记录 {n} 条异常（DNS / TLS / 超时 / 拒绝 / 切换）",
+      "log_open": "查看日志",
+      "log_empty": "暂无异常记录。",
+      "col_time": "时间",
+      "col_kind": "类型",
+      "col_target": "目标",
+      "col_detail": "详情"
     }
   },
   "errors": {

@@ -46,6 +46,21 @@ export const commands = {
 	killConnectionsBy: (filter: ConnectionFilter) => typedError<KillReport, AppError>(__TAURI_INVOKE("kill_connections_by", { filter })),
 	closeAllMihomoConnections: () => typedError<null, AppError>(__TAURI_INVOKE("close_all_mihomo_connections")),
 	getMihomoRules: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_rules")),
+	/**
+	 *  Read the current state of the autopilot's kill switch.
+	 * 
+	 *  The renderer uses `env_locked` to disable its toggle rather than presenting
+	 *  a control that cannot change the outcome.
+	 */
+	getAutokillState: () => __TAURI_INVOKE<AutokillState>("get_autokill_state"),
+	/**
+	 *  Turn the runtime override on or off; returns the resulting state.
+	 * 
+	 *  Always succeeds from the caller's point of view — even a request that the
+	 *  environment vetoes is answered with the honest resulting state, so the UI
+	 *  can re-render instead of having to reconcile an error with a stale value.
+	 */
+	setAutokill: (enabled: boolean) => __TAURI_INVOKE<AutokillState>("set_autokill", { enabled }),
 	/**  Current state of the refresh pipeline. Cheap: one small JSON read. */
 	getGeodataStatus: () => typedError<GeoDataStatus, AppError>(__TAURI_INVOKE("get_geodata_status")),
 	/**
@@ -315,6 +330,18 @@ export type AppStateSnapshot = {
 	systemProxyActive: boolean,
 	/**  Outbound mode: rule / global / direct. */
 	currentMode: string,
+};
+
+/**  The autopilot's switch, as the UI needs to see it. */
+export type AutokillState = {
+	/**  Whether a cleanup will actually DELETE connections right now. */
+	enabled: boolean,
+	/**
+	 *  True when `FLEXCLASH_AUTOKILL=off` is forcing it off regardless of the
+	 *  toggle. The renderer renders its switch disabled when this is set —
+	 *  offering a control that cannot change the outcome would be a lie.
+	 */
+	envLocked: boolean,
 };
 
 export type AutostartStatus = {

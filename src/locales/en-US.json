@@ -224,6 +224,13 @@
       "dns": "DNS resolution failed",
       "tls": "TLS error",
       "cleanup": "⚡ Auto-cleaned {n} dead link(s) on {node}"
+    },
+    "kind": {
+      "dns_resolve_failed": "DNS resolve failed",
+      "dial_timeout": "Dial timeout",
+      "connect_refused": "Connection refused",
+      "tls_error": "TLS error",
+      "proxy_switch": "Proxy switch"
     }
   },
   "profiles": {
@@ -349,6 +356,23 @@
       "in_progress_desc": "Cleaning state and restoring defaults. Please do not close the window.",
       "result_title": "Reset complete",
       "result_desc": "Default config restored. The application will restart shortly."
+    },
+    "diagnostics": {
+      "title": "Diagnostics",
+      "autokill_title": "Auto-clean dead links",
+      "autokill_desc": "When the same node fails 3 times within 10 seconds, close its stuck connections so the kernel is forced to re-route.",
+      "autokill_hint": "Session only — resets to the default (on) after a restart.",
+      "autokill_locked_badge": "Locked",
+      "autokill_env_locked": "Restricted by environment variable: FLEXCLASH_AUTOKILL=off",
+      "log_title": "Network diagnostics log",
+      "log_subtitle": "Last {n} anomalies, held in memory only",
+      "log_entry_desc": "{n} anomalies recorded (DNS / TLS / timeout / refused / switch)",
+      "log_open": "View log",
+      "log_empty": "No anomalies recorded yet.",
+      "col_time": "Time",
+      "col_kind": "Kind",
+      "col_target": "Target",
+      "col_detail": "Detail"
     }
   },
   "errors": {
