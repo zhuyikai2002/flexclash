@@ -252,59 +252,79 @@ function toggleCollapse(group: string) {
       </div>
     </header>
 
-    <div
-      v-if="proxies.loading && !proxies.lastFetchAt"
-      class="rounded-2xl border border-white/5 bg-white/[0.04] p-6 text-zinc-500 text-sm flex items-center gap-2"
-    >
-      <Loader2 class="w-4 h-4 animate-spin" /> {{ t('common.loading') }}
-    </div>
-
-    <div
-      v-else-if="proxies.selectorGroups.length === 0"
-      class="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center"
-    >
-      <div class="text-zinc-400 text-sm">{{ t('proxies.empty') }}</div>
-      <div class="text-zinc-600 text-xs mt-1 font-mono">
-        Add <code>proxy-groups</code> to your mihomo config.
-      </div>
-    </div>
-
-    <div
-      v-else
-      class="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md"
-    >
+    <Transition name="fade" mode="out-in">
       <div
-        ref="scrollEl"
-        class="overflow-auto overscroll-contain"
-        :style="{ height: PANE_H, minHeight: '280px' }"
+        v-if="proxies.loading && !proxies.lastFetchAt"
+        key="loading"
+        class="rounded-2xl border border-white/5 bg-white/[0.04] p-6 text-zinc-500 text-sm flex items-center gap-2"
       >
-        <div class="relative w-full" :style="{ height: `${totalSize}px` }">
-          <div
-            v-for="row in visibleRows"
-            :key="row.item.key"
-            class="absolute top-0 left-0 w-full"
-            :style="{ transform: `translateY(${row.v.start}px)` }"
-          >
-            <ProxyGroupHeader
-              v-if="row.item.kind === 'header'"
-              :group="row.item.group"
-              :collapsed="collapsed[row.item.group] === true"
-              :first="row.v.index === 0"
-              @toggle="toggleCollapse(row.item.group)"
-              @test="handleSpeedTest(row.item.group)"
-            />
-            <ProxyNodeRow
-              v-else
-              :group="row.item.group"
-              :names="row.item.names"
-              :cols="cols"
-              :selecting="selecting"
-              @select="handleSelect(row.item.group, $event)"
-            />
-          </div>
+        <Loader2 class="w-4 h-4 animate-spin" /> {{ t('common.loading') }}
+      </div>
+
+      <div
+        v-else-if="proxies.selectorGroups.length === 0"
+        key="empty"
+        class="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center"
+      >
+        <div class="text-zinc-400 text-sm">{{ t('proxies.empty') }}</div>
+        <div class="text-zinc-600 text-xs mt-1 font-mono">
+          Add <code>proxy-groups</code> to your mihomo config.
         </div>
       </div>
-    </div>
+
+      <div
+        v-else
+        key="list"
+        class="relative overflow-hidden rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md"
+      >
+        <div
+          ref="scrollEl"
+          class="overflow-auto overscroll-contain"
+          :style="{ height: PANE_H, minHeight: '280px' }"
+        >
+          <div class="relative w-full" :style="{ height: `${totalSize}px` }">
+            <div
+              v-for="row in visibleRows"
+              :key="row.item.key"
+              class="absolute top-0 left-0 w-full"
+              :style="{ transform: `translateY(${row.v.start}px)` }"
+            >
+              <ProxyGroupHeader
+                v-if="row.item.kind === 'header'"
+                :group="row.item.group"
+                :collapsed="collapsed[row.item.group] === true"
+                :first="row.v.index === 0"
+                @toggle="toggleCollapse(row.item.group)"
+                @test="handleSpeedTest(row.item.group)"
+              />
+              <ProxyNodeRow
+                v-else
+                :group="row.item.group"
+                :names="row.item.names"
+                :cols="cols"
+                :selecting="selecting"
+                @select="handleSelect(row.item.group, $event)"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Stale backdrop: frosts the *preserved* old tree when the kernel is
+             down, so the panel reads "data may be stale" instead of going
+             blank. Nested Transition toggles independently of the out-in swap. -->
+        <Transition name="fade">
+          <div
+            v-if="kernel.availability === 'down' && proxies.stale && proxies.selectorGroups.length > 0"
+            class="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/40 backdrop-blur-sm"
+          >
+            <div class="flex flex-col items-center gap-2 text-center px-6">
+              <AlertTriangle class="h-7 w-7 text-amber-400" />
+              <span class="text-sm font-medium text-amber-200">{{ t('kernel.staleOverlay') }}</span>
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </Transition>
 
     <div
       v-if="proxies.stale && !proxies.error"
@@ -322,3 +342,17 @@ function toggleCollapse(group: string) {
     </div>
   </section>
 </template>
+
+<style scoped>
+/* fade — drives the out-in state swap (loading / empty / list) and the stale
+   backdrop mask. A plain opacity crossfade; the geometry of the virtual list
+   never changes, so there is no layout shift to chase. */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

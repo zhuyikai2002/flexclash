@@ -28,6 +28,7 @@ import {
 import { useI18n } from '@/composables/useI18n'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import StatusBadge from './StatusBadge.vue'
+import AvailabilityIndicator from './AvailabilityIndicator.vue'
 import type { KernelUiState } from '@/stores/kernel'
 
 type TabId = 'dashboard' | 'proxies' | 'connections' | 'profiles' | 'stats' | 'settings'
@@ -154,10 +155,13 @@ function pick(id: TabId) {
       ></span>
     </button>
 
-    <!-- Bottom: language + status (light-mode toggle is locked off). -->
+    <!-- Bottom: language + lifecycle status + reachability (light-mode toggle is locked off).
+         StatusBadge = kernel lifecycle (running/starting/crashed); AvailabilityIndicator =
+         data reachability (up/degraded/down) — the two answer different questions. -->
     <div class="mt-3 flex flex-col items-center gap-2.5">
       <LanguageSwitcher compact />
       <StatusBadge :state="kernelState" compact />
+      <AvailabilityIndicator compact />
     </div>
   </div>
 </template>

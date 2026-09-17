@@ -163,6 +163,25 @@
       "view_connections": "View all →"
     }
   },
+  "kernel": {
+    "availability": {
+      "up": "Up",
+      "degraded": "Degraded",
+      "down": "Down"
+    },
+    "probe": {
+      "idle": "Idle",
+      "probing": "Probing",
+      "healthy": "Healthy",
+      "error": "Failed"
+    },
+    "popover": {
+      "probe": "Probe",
+      "latency": "Latency",
+      "lastError": "Last error"
+    },
+    "staleOverlay": "Kernel offline — data may be stale"
+  },
   "proxies": {
     "title": "Proxy Groups",
     "empty": "No proxy groups",

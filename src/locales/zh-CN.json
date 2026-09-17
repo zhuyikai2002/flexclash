@@ -163,6 +163,25 @@
       "view_connections": "查看连接 →"
     }
   },
+  "kernel": {
+    "availability": {
+      "up": "正常",
+      "degraded": "带病运行",
+      "down": "断开"
+    },
+    "probe": {
+      "idle": "未探测",
+      "probing": "探测中",
+      "healthy": "健康",
+      "error": "失败"
+    },
+    "popover": {
+      "probe": "探测状态",
+      "latency": "延迟",
+      "lastError": "最近错误"
+    },
+    "staleOverlay": "内核离线，数据已过期"
+  },
   "proxies": {
     "title": "策略组",
     "empty": "暂无策略组",

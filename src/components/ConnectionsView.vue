@@ -277,55 +277,89 @@ async function runKill(fn: () => Promise<KillReport>) {
     </div>
     </Transition>
 
-    <div ref="scrollEl" class="overflow-auto" style="height: 480px">
-      <div
-        v-if="!kernel.isUp"
-        class="flex items-center justify-center h-full text-zinc-500 text-sm px-6 text-center"
-      >
-        Start the kernel to see live connections.
-      </div>
-      <!-- 已初始化但无连接：标准空状态 -->
-      <div
-        v-else-if="store.initialised && total === 0 && !store.lastError"
-        class="flex flex-col items-center justify-center h-full gap-2 text-zinc-500 text-sm px-6 text-center"
-      >
-        <Plug class="h-6 w-6 text-zinc-600" />
-        <span>{{ t('connections.empty') }}</span>
-      </div>
-      <!-- 首次加载中 -->
-      <div
-        v-else-if="!store.initialised && total === 0 && !store.lastError"
-        class="flex items-center justify-center h-full text-zinc-500 text-sm"
-      >
-        <Loader2 class="h-4 w-4 animate-spin mr-2" />
-        {{ t('common.loading') }}
-      </div>
-      <div
-        v-else-if="total === 0 && store.lastError"
-        class="flex items-center justify-center h-full text-rose-300 text-sm px-6 text-center"
-      >
-        {{ store.lastError }}
-      </div>
-      <div
-        v-else
-        :style="{ height: `${totalSize}px`, position: 'relative', width: '100%' }"
-      >
+    <div ref="scrollEl" class="relative overflow-auto" style="height: 480px">
+      <!-- State branches: skeleton / empty / loading / error / list.
+           `mode="out-in"` makes each swap fade out fully before the next fades
+           in, so the list never overlaps the skeleton or the empty state.
+           The list branch is first and *persists* even when the kernel is down
+           + stale — the mask below frosts it instead of blanking it. -->
+      <Transition name="fade" mode="out-in">
         <div
-          v-for="vrow in virtualRows"
-          :key="vrow.index"
-          :style="{
-            position: 'absolute',
-            top: 0, left: 0, width: '100%',
-            transform: `translateY(${vrow.start}px)`,
-          }"
+          v-if="total > 0"
+          key="list"
+          :style="{ height: `${totalSize}px`, position: 'relative', width: '100%' }"
         >
-          <ConnectionRow
-            :row="filteredRows[vrow.index]"
-            @close="onCloseRow"
-            @contextmenu="onRowContextMenu($event, filteredRows[vrow.index])"
-          />
+          <div
+            v-for="vrow in virtualRows"
+            :key="vrow.index"
+            :style="{
+              position: 'absolute',
+              top: 0, left: 0, width: '100%',
+              transform: `translateY(${vrow.start}px)`,
+            }"
+          >
+            <ConnectionRow
+              :row="filteredRows[vrow.index]"
+              @close="onCloseRow"
+              @contextmenu="onRowContextMenu($event, filteredRows[vrow.index])"
+            />
+          </div>
         </div>
-      </div>
+
+        <!-- Kernel down and nothing to preserve: invite the user to start it. -->
+        <div
+          v-else-if="!kernel.isUp"
+          key="start"
+          class="flex items-center justify-center h-full text-zinc-500 text-sm px-6 text-center"
+        >
+          Start the kernel to see live connections.
+        </div>
+
+        <!-- Initialised, no rows, no error: standard empty state. -->
+        <div
+          v-else-if="store.initialised && !store.lastError"
+          key="empty"
+          class="flex flex-col items-center justify-center h-full gap-2 text-zinc-500 text-sm px-6 text-center"
+        >
+          <Plug class="h-6 w-6 text-zinc-600" />
+          <span>{{ t('connections.empty') }}</span>
+        </div>
+
+        <!-- First load. -->
+        <div
+          v-else-if="!store.initialised && !store.lastError"
+          key="loading"
+          class="flex items-center justify-center h-full text-zinc-500 text-sm"
+        >
+          <Loader2 class="h-4 w-4 animate-spin mr-2" />
+          {{ t('common.loading') }}
+        </div>
+
+        <!-- Error. -->
+        <div
+          v-else
+          key="error"
+          class="flex items-center justify-center h-full text-rose-300 text-sm px-6 text-center"
+        >
+          {{ store.lastError }}
+        </div>
+      </Transition>
+
+      <!-- Stale backdrop: frosts the *preserved* old list when the kernel is
+           down, so the panel reads "data may be stale" instead of going blank.
+           Sibling of the Transition (not inside it) so it stays put while the
+           list branch remains mounted underneath. -->
+      <Transition name="fade">
+        <div
+          v-if="kernel.availability === 'down' && store.stale && total > 0"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/40 backdrop-blur-sm"
+        >
+          <div class="flex flex-col items-center gap-2 text-center px-6">
+            <AlertTriangle class="h-7 w-7 text-amber-400" />
+            <span class="text-sm font-medium text-amber-200">{{ t('kernel.staleOverlay') }}</span>
+          </div>
+        </div>
+      </Transition>
     </div>
 
     <Teleport to="body">
@@ -433,5 +467,15 @@ async function runKill(fn: () => Promise<KillReport>) {
 .zls-leave-from {
   max-height: 64px;
   opacity: 1;
+}
+
+/* fade — used by the out-in state swap and the stale backdrop mask. */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
