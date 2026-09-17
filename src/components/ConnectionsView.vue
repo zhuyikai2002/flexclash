@@ -160,7 +160,7 @@ async function runKill(fn: () => Promise<KillReport>) {
     <header class="flex items-center justify-between px-5 py-3 border-b border-white/5">
       <div class="flex items-center gap-2">
         <h2 class="text-sm font-semibold text-zinc-100">{{ t('connections.title') }}</h2>
-        <span class="rounded-md bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono text-indigo-200">
+        <span class="rounded-md bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-indigo-200">
           {{ store.totalConnections }} total · {{ total }} shown
         </span>
         <span
@@ -172,7 +172,7 @@ async function runKill(fn: () => Promise<KillReport>) {
           {{ store.lastError }}
         </span>
       </div>
-      <div class="flex items-center gap-3 text-[11px] font-mono">
+      <div class="flex items-center gap-3 text-[11px] font-mono tabular-nums">
         <span class="text-emerald-400">↑ {{ totalUpText }}</span>
         <span class="text-indigo-400">↓ {{ totalDownText }}</span>
       </div>
@@ -249,9 +249,10 @@ async function runKill(fn: () => Promise<KillReport>) {
       </button>
     </div>
 
+    <Transition name="zls">
     <div
       v-if="total > 0"
-      class="flex items-center gap-3 px-3 py-1.5 bg-white/[0.02] border-b border-white/5 text-[10px] text-zinc-500 uppercase tracking-wider font-semibold"
+      class="flex items-center gap-3 px-3 py-1.5 bg-white/[0.02] border-b border-white/5 text-[10px] text-zinc-500 uppercase tracking-wider font-semibold overflow-hidden"
     >
       <div class="flex-1 min-w-0">{{ t('connections.columns.host') }}</div>
       <div class="w-28 shrink-0">{{ t('connections.columns.process') }}</div>
@@ -263,15 +264,18 @@ async function runKill(fn: () => Promise<KillReport>) {
       <div class="w-24 shrink-0">{{ t('connections.columns.rule') }}</div>
       <div class="w-8 shrink-0"></div>
     </div>
+    </Transition>
 
+    <Transition name="zls">
     <div
       v-if="store.stale && total > 0"
-      class="flex items-center gap-2 px-3 py-2 border-b border-amber-500/20 bg-amber-500/[0.07] text-[11px] text-amber-300/90"
+      class="flex items-center gap-2 px-3 py-2 border-b border-amber-500/20 bg-amber-500/[0.07] text-[11px] text-amber-300/90 overflow-hidden"
     >
       <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
       <span>{{ t('connections.stale_hint') }}</span>
       <span class="ml-auto font-mono text-[10px] text-amber-300/60">{{ kernel.availability }}</span>
     </div>
+    </Transition>
 
     <div ref="scrollEl" class="overflow-auto" style="height: 480px">
       <div
@@ -408,3 +412,26 @@ async function runKill(fn: () => Promise<KillReport>) {
     </Teleport>
   </section>
 </template>
+
+<style scoped>
+/* ZLS (Zero Layout Shift): the column header and the stale banner used to be
+   hard v-if inserts that shoved the virtual list below them on every toggle.
+   Now they expand/collapse via a smooth max-height + opacity transition, so
+   the scroll box glides instead of jumping. overflow-hidden clips content
+   mid-transition; max-height caps the resting height (both bars are < 64px). */
+.zls-enter-active,
+.zls-leave-active {
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  overflow: hidden;
+}
+.zls-enter-from,
+.zls-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+.zls-enter-to,
+.zls-leave-from {
+  max-height: 64px;
+  opacity: 1;
+}
+</style>

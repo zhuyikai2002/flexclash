@@ -75,7 +75,7 @@ function groupTypeLabel(type: string): string {
             <span class="truncate">{{ now }}</span>
           </span>
         </div>
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-mono">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-mono tabular-nums">
           {{ typeLabel }} · {{ count }} nodes
         </div>
       </div>

@@ -61,9 +61,8 @@ function close() {
 
 <template>
   <div
-    class="flex items-center gap-3 px-3 text-xs text-zinc-200 border-b border-white/5 hover:bg-white/[0.04] transition-colors"
+    class="flex items-center gap-3 px-3 text-xs text-zinc-200 border-b border-white/5 hover:bg-white/[0.04] transition-colors h-10"
     :class="row.closing ? 'opacity-50' : ''"
-    style="height: 40px"
     :data-conn-id="row.id"
     @contextmenu.prevent="emit('contextmenu', $event)"
   >
@@ -96,13 +95,13 @@ function close() {
     </div>
 
     <!-- 6. Speeds -->
-    <div class="w-44 shrink-0 flex flex-col font-mono leading-tight">
+    <div class="w-44 shrink-0 flex flex-col font-mono tabular-nums leading-tight">
       <span :class="['flex items-center gap-1', upClass]">↑ {{ upText }}</span>
       <span :class="['flex items-center gap-1', downClass]">↓ {{ downText }}</span>
     </div>
 
     <!-- 7. Total -->
-    <div class="w-20 shrink-0 text-right font-mono text-zinc-300">
+    <div class="w-20 shrink-0 text-right font-mono tabular-nums text-zinc-300">
       {{ totalText }}
     </div>
 

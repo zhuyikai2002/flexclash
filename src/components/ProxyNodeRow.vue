@@ -154,7 +154,7 @@ async function killNode(node: string) {
         <span
           v-else
           :class="[
-            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium shrink-0',
+            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium shrink-0 tabular-nums justify-center transition-colors duration-300 min-w-[4rem]',
             latencyPillClass(delayOf(node)?.delay ?? null, delayOf(node)?.status ?? 'idle')
           ]"
         >
