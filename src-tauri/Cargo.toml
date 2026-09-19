@@ -1,10 +1,11 @@
 [package]
 name = "flexclash"
-version = "0.6.1"
+version = "0.6.2"
 description = "FlexClash - lightweight Mihomo (Clash Meta) proxy client"
 authors = ["FlexClash Contributors"]
 edition = "2021"
 rust-version = "1.77"
+default-run = "flexclash"
 
 [lib]
 name = "flexclash_lib"
