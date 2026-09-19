@@ -66,6 +66,27 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--silent"]),
         ))
+        // Only one FlexClash may run at a time. Two instances would fight
+        // over the reserved inbound port (7897) and both try to own the
+        // system proxy, which the user experiences as "the kernel keeps
+        // crashing". A second launch now hands its argv to the running
+        // instance and exits.
+        //
+        // The callback runs *inside the already-running process* and receives
+        // the **second** instance's argv. That distinction matters: a
+        // `--silent` launch is the autostart hook, which explicitly did not
+        // ask for a window, so it must not yank one open. A normal launch
+        // means the user clicked something and expects the window back.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|a| a == "--silent") {
+                return;
+            }
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .manage(SidecarHandle::new())
         .manage(ExitFlag::default())
         .manage(CloseBehaviorState::default())

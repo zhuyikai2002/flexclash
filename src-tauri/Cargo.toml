@@ -58,6 +58,9 @@ tauri-plugin-process  = "2"
 tauri-plugin-dialog   = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
+# One instance only: two copies fight over the reserved inbound port (7897)
+# and over ownership of the system proxy.
+tauri-plugin-single-instance = "2"
 window-vibrancy       = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
