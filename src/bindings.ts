@@ -243,6 +243,17 @@ export const commands = {
 	 */
 	sweepResidualRoutes: () => __TAURI_INVOKE<SweepResult>("sweep_residual_routes"),
 	/**
+	 *  Choose what closing the main window does: exit the app, or hide to tray.
+	 * 
+	 *  Returns the value that took effect — always the requested one, since the
+	 *  state is infallible. Echoing it back lets the renderer render from the
+	 *  response rather than from its own assumption.
+	 * 
+	 *  The renderer owns persistence (localStorage) and replays the value at cold
+	 *  start, so this is a session-scoped mirror, not a durable setting.
+	 */
+	setCloseBehavior: (exitOnClose: boolean) => __TAURI_INVOKE<boolean>("set_close_behavior", { exitOnClose }),
+	/**
 	 *  Cheap status read. Frontend polls this on mount + on every
 	 *  `tun://state-changed` event so the toggle always reflects the
 	 *  authoritative backend state.

@@ -131,6 +131,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::commands::desktop::set_silent_autostart::<tauri::Wry>,
             crate::commands::desktop::get_silent_flag::<tauri::Wry>,
             crate::commands::desktop::sweep_residual_routes,
+            crate::commands::desktop::set_close_behavior::<tauri::Wry>,
             // -- TUN -------------------------------------------------------
             crate::commands::tun::get_tun_state::<tauri::Wry>,
             crate::commands::tun::enable_tun::<tauri::Wry>,

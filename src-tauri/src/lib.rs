@@ -21,7 +21,7 @@ pub mod tray;
 pub use commands::geodata::run_refresh;
 
 use crate::commands::updater::PendingUpdate;
-use crate::core::shutdown::ExitFlag;
+use crate::core::shutdown::{CloseBehaviorState, ExitFlag};
 use crate::core::sidecar::SidecarHandle;
 use crate::core::speedtest::SpeedTestRegistry;
 use crate::core::startup::{self, SilentFlag};
@@ -68,6 +68,7 @@ pub fn run() {
         ))
         .manage(SidecarHandle::new())
         .manage(ExitFlag::default())
+        .manage(CloseBehaviorState::default())
         .manage(silent_flag)
         .manage(TunManager::new())
         // `Arc` (not the bare struct) so the spawned probe pool can own a

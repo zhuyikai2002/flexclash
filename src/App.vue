@@ -36,6 +36,7 @@ import { useAppStateStore } from '@/stores/appstate'
 import { useUpdaterStore } from '@/stores/updater'
 import { useAnomaliesStore } from '@/stores/anomalies'
 import { events, type AppStateSnapshot } from '@/bindings'
+import { pushCloseBehavior, readCloseBehavior } from '@/services/desktop'
 
 import Sidebar from '@/components/Sidebar.vue'
 import TrafficCard from '@/components/TrafficCard.vue'
@@ -112,6 +113,11 @@ onMounted(async () => {
   // Cold-start update check: silent, non-blocking. If a newer release is
   // found, the updater store raises `promptOpen` and UpdateDialog takes over.
   void updater.init()
+
+  // Cold-start replay of the close-window preference. The CloseRequested hook
+  // lives in Rust and reads it there, so a value held only in localStorage
+  // would never actually take effect.
+  void pushCloseBehavior(readCloseBehavior())
 })
 
 onUnmounted(() => {

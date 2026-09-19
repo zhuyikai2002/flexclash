@@ -40,6 +40,30 @@ impl ExitFlag {
     }
 }
 
+/// What the user chose under Settings → General → "On window close".
+///
+/// `ExitFlag` alone answers "did *this particular* close come from the tray's
+/// Quit item?" — it is a one-shot. This is the standing preference instead:
+/// when true, *every* window close is a real exit.
+///
+/// Persistence deliberately lives in the renderer (localStorage), and the
+/// renderer pushes the value here on change and again at cold start — the
+/// same shape as the autokill runtime override. The default is `false`, which
+/// matches the frontend default, so a renderer that never reports keeps the
+/// historical hide-to-tray behaviour rather than suddenly exiting.
+#[derive(Default, Clone)]
+pub struct CloseBehaviorState(pub Arc<AtomicBool>);
+
+impl CloseBehaviorState {
+    /// `true` = closing the window exits the app; `false` = hide to tray.
+    pub fn set_exit_on_close(&self, exit: bool) {
+        self.0.store(exit, Ordering::SeqCst);
+    }
+    pub fn exit_on_close(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 /// Install window-close hook. Call once from `setup`.
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
     install_window_close_hook(app);
@@ -52,10 +76,19 @@ fn install_window_close_hook<R: Runtime>(app: &AppHandle<R>) {
     let app_handle = app.clone();
     win.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
+            // Two independent reasons to really exit:
+            //   * `ExitFlag`  — this close was triggered by the tray's Quit
+            //     item (one-shot, set immediately before the close).
+            //   * `CloseBehaviorState` — the user asked for "exit" in
+            //     Settings, so *any* close is final.
             let want_exit = app_handle
                 .try_state::<ExitFlag>()
                 .map(|s| s.should_exit())
-                .unwrap_or(false);
+                .unwrap_or(false)
+                || app_handle
+                    .try_state::<CloseBehaviorState>()
+                    .map(|s| s.exit_on_close())
+                    .unwrap_or(false);
 
             if !want_exit {
                 // User clicked "X" (or system forced close). Stay alive in

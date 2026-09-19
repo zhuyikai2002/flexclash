@@ -33,7 +33,14 @@ import {
 } from '@/services/tun'
 import { getAppVersion, type UnlistenFn } from '@/utils/tauri-bridge'
 import { resetApplication, onResetCompleted, clearClientState } from '@/services/reset'
+import {
+  CLOSE_BEHAVIOR_KEY,
+  pushCloseBehavior,
+  readCloseBehavior,
+  type CloseBehavior,
+} from '@/services/desktop'
 import { useAnomaliesStore } from '@/stores/anomalies'
+import { useNoticesStore } from '@/stores/notices'
 import type { ResetReport } from '@/bindings'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import AutokillToggle from '@/components/AutokillToggle.vue'
@@ -47,6 +54,7 @@ const tun = useTunStore()
 const settings = useSettingsStore()
 const updater = useUpdaterStore()
 const anomalies = useAnomaliesStore()
+const notices = useNoticesStore()
 
 // ---------------------------------------------------------------------------
 // Local UI state
@@ -71,17 +79,20 @@ const tunStacks = [
 ] as const
 const tunStack = ref<'mixed' | 'gvisor'>('mixed')
 
-/** Close-window behavior.  Persisted to localStorage so the choice
- *  survives a restart. */
-const CLOSE_BEHAVIOR_KEY = 'flexclash.closeBehavior'
-type CloseBehavior = 'minimize' | 'exit'
-const closeBehavior = ref<CloseBehavior>(
-  (typeof localStorage !== 'undefined' &&
-    (localStorage.getItem(CLOSE_BEHAVIOR_KEY) as CloseBehavior | null)) || 'minimize',
-)
+/** Close-window behavior. Persisted to localStorage so the choice survives a
+ *  restart, *and* pushed to Rust on every change — the `CloseRequested` hook
+ *  is what actually decides, so a renderer-only value would leave this switch
+ *  looking selected while doing nothing. */
+const closeBehavior = ref<CloseBehavior>(readCloseBehavior())
 function setCloseBehavior(v: CloseBehavior) {
   closeBehavior.value = v
   if (typeof localStorage !== 'undefined') localStorage.setItem(CLOSE_BEHAVIOR_KEY, v)
+  // Reported through the unified notice channel rather than swallowed: a
+  // failure here means the UI and the backend disagree about what closing
+  // the window does, which is exactly the bug this setting is for.
+  void pushCloseBehavior(v).catch((e) => {
+    notices.raiseError('desktop', e)
+  })
 }
 
 // ---------------------------------------------------------------------------

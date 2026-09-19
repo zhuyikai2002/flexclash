@@ -9,6 +9,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt;
 
+use crate::core::shutdown::CloseBehaviorState;
 use crate::core::startup::{self, SilentFlag};
 use crate::core::task_autostart;
 use crate::error::{AppError, Result};
@@ -146,3 +147,25 @@ pub fn get_silent_flag<R: Runtime>(app: AppHandle<R>) -> bool {
 pub fn sweep_residual_routes() -> startup::SweepResult {
     startup::sweep_residual_routes()
 }
+
+// ---------------------------------------------------------------------------
+// Window-close behaviour
+// ---------------------------------------------------------------------------
+
+/// Choose what closing the main window does: exit the app, or hide to tray.
+///
+/// Returns the value that took effect — always the requested one, since the
+/// state is infallible. Echoing it back lets the renderer render from the
+/// response rather than from its own assumption.
+///
+/// The renderer owns persistence (localStorage) and replays the value at cold
+/// start, so this is a session-scoped mirror, not a durable setting.
+#[tauri::command]
+#[specta::specta]
+pub fn set_close_behavior<R: Runtime>(app: AppHandle<R>, exit_on_close: bool) -> bool {
+    if let Some(state) = app.try_state::<CloseBehaviorState>() {
+        state.set_exit_on_close(exit_on_close);
+    }
+    exit_on_close
+}
+
