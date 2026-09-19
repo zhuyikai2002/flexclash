@@ -149,7 +149,7 @@ pub fn sweep_residual_routes() -> startup::SweepResult {
 }
 
 // ---------------------------------------------------------------------------
-// Window-close behaviour
+// Window-close behaviour + tray language
 // ---------------------------------------------------------------------------
 
 /// Choose what closing the main window does: exit the app, or hide to tray.
@@ -169,3 +169,15 @@ pub fn set_close_behavior<R: Runtime>(app: AppHandle<R>, exit_on_close: bool) ->
     exit_on_close
 }
 
+/// Keep the tray menu's language in step with the renderer's locale.
+///
+/// Fails soft on purpose: a tray stuck in the wrong language is cosmetic,
+/// whereas a rejected command would raise an error notice the user cannot
+/// act on. The failure still goes to stderr for diagnosis.
+#[tauri::command]
+#[specta::specta]
+pub fn set_tray_language<R: Runtime>(app: AppHandle<R>, locale: String) {
+    if let Err(e) = crate::tray::set_tray_language(&app, &locale) {
+        eprintln!("[desktop] tray language switch failed: {e}");
+    }
+}

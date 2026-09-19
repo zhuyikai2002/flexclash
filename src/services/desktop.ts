@@ -1,10 +1,12 @@
 // ============================================================================
 // services/desktop.ts — Tauri command surface for desktop window behaviour.
 //
-// A mirror of one piece of state that lives in Rust for the duration of the
-// session: the close-window preference (Settings → General → On window close).
+// Two small mirrors of state that lives in Rust for the duration of the
+// session:
+//   * the close-window preference (Settings → General → On window close)
+//   * the tray menu's language
 //
-// It is not durable on the Rust side on purpose. The renderer owns
+// Neither is durable on the Rust side on purpose. The renderer owns
 // persistence (localStorage) and replays the value at cold start, which keeps
 // one source of truth for "what did the user actually choose".
 // ============================================================================
@@ -44,4 +46,17 @@ export async function pushCloseBehavior(behavior: CloseBehavior): Promise<void> 
   // Declared `-> bool` in Rust, i.e. the infallible shape, so it is awaited
   // directly rather than through `call()` (which only accepts `Result`s).
   await commands.setCloseBehavior(behavior === 'exit')
+}
+
+/**
+ * Keep the tray menu's language in step with the renderer's locale.
+ *
+ * The tray is built by Rust and cannot read the i18n bundle, so the renderer
+ * tells it which locale is active — at cold start and on every switch.
+ */
+export async function setTrayLanguage(locale: string): Promise<void> {
+  if (!inTauri('set_tray_language')) return
+  // Returns `()` in Rust, which specta types as `null`. Awaited and dropped
+  // here so callers get a plain `Promise<void>`.
+  await commands.setTrayLanguage(locale)
 }

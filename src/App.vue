@@ -36,7 +36,12 @@ import { useAppStateStore } from '@/stores/appstate'
 import { useUpdaterStore } from '@/stores/updater'
 import { useAnomaliesStore } from '@/stores/anomalies'
 import { events, type AppStateSnapshot } from '@/bindings'
-import { pushCloseBehavior, readCloseBehavior } from '@/services/desktop'
+import { getLocale } from '@/i18n'
+import {
+  pushCloseBehavior,
+  readCloseBehavior,
+  setTrayLanguage,
+} from '@/services/desktop'
 
 import Sidebar from '@/components/Sidebar.vue'
 import TrafficCard from '@/components/TrafficCard.vue'
@@ -114,10 +119,13 @@ onMounted(async () => {
   // found, the updater store raises `promptOpen` and UpdateDialog takes over.
   void updater.init()
 
-  // Cold-start replay of the close-window preference. The CloseRequested hook
-  // lives in Rust and reads it there, so a value held only in localStorage
-  // would never actually take effect.
+  // Cold-start replay of the two session-scoped mirrors Rust keeps:
+  //   * the close-window preference (the CloseRequested hook reads it, so a
+  //     value only held in localStorage would never take effect), and
+  //   * the tray menu's language — the tray is built by Rust before the
+  //     renderer even exists, so it starts in the i18n default.
   void pushCloseBehavior(readCloseBehavior())
+  void setTrayLanguage(getLocale())
 })
 
 onUnmounted(() => {

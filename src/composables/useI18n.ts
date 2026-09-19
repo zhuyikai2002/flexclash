@@ -14,6 +14,7 @@ import {
   SUPPORTED_LOCALES,
   type Locale,
 } from '../i18n'
+import { setTrayLanguage } from '@/services/desktop'
 
 const localeRef = ref<Locale>(getLocale())
 
@@ -35,6 +36,15 @@ export function useI18n() {
      *  for.  Exposed for UI pickers (e.g. the Settings → Language
      *  button group) so they don't hard-code the locale codes. */
     supportedLocales: SUPPORTED_LOCALES,
-    setLocale: (next: Locale) => setLocale(next),
+    setLocale: (next: Locale) => {
+      setLocale(next)
+      // The tray menu is built by Rust and cannot read the i18n bundle, so
+      // the backend is told which locale is now active. Routed through this
+      // composable because it is the only mutation entry point — every switch
+      // (settings, sidebar picker) lands here, so none can forget to sync.
+      // Fire-and-forget on purpose: a tray left in the previous language is
+      // cosmetic, and it must never block the UI switch itself.
+      void setTrayLanguage(next)
+    },
   }
 }

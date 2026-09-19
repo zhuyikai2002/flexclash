@@ -46,6 +46,40 @@ const ID_SHOW: &str = "tray_show";
 const ID_TOGGLE: &str = "tray_toggle_proxy";
 const ID_QUIT: &str = "tray_quit";
 
+// --- Menu copy -----------------------------------------------------------
+// The tray menu is built by Rust, so it cannot read the renderer's i18n
+// bundle — but it must not contradict the UI's language either. Both locales
+// live here and the renderer tells us which one is active (see
+// `set_tray_language`), which mutates the existing items instead of
+// rebuilding the menu.
+//
+// Anything not `en*` falls back to Chinese, matching the i18n default.
+struct TrayStrings {
+    show: &'static str,
+    proxy: &'static str,
+    quit: &'static str,
+}
+
+const STRINGS_ZH: TrayStrings = TrayStrings {
+    show: "显示 / 隐藏面板",
+    proxy: "系统代理",
+    quit: "退出 FlexClash",
+};
+
+const STRINGS_EN: TrayStrings = TrayStrings {
+    show: "Show / hide panel",
+    proxy: "System proxy",
+    quit: "Quit FlexClash",
+};
+
+fn strings_for(lang: &str) -> &'static TrayStrings {
+    if lang.eq_ignore_ascii_case("en-US") || lang.eq_ignore_ascii_case("en") {
+        &STRINGS_EN
+    } else {
+        &STRINGS_ZH
+    }
+}
+
 // --- Icons (embedded at compile time so the bundle doesn't depend on
 //     the working directory of the launcher).  tray-active.png 888 B,
 //     tray-idle.png 590 B — negligible.  Generated from
@@ -64,6 +98,9 @@ const TOOLTIP_IDLE: &str = "FlexClash - 直连模式";
 pub struct TrayHandles {
     pub toggle_item: Arc<Mutex<Option<CheckMenuItem<Wry>>>>,
     pub show_item: Arc<Mutex<Option<MenuItem<Wry>>>>,
+    /// Kept alongside the others so `set_tray_language` can re-label every
+    /// item when the renderer switches locale.
+    pub quit_item: Arc<Mutex<Option<MenuItem<Wry>>>>,
     /// The TrayIcon itself, so we can call `set_icon` / `set_tooltip`
     /// at runtime. Built once in `install()` and stashed here.
     pub tray_icon: Arc<Mutex<Option<TrayIcon<Wry>>>>,
@@ -146,6 +183,63 @@ fn update_tray_icon_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError>
     Ok(())
 }
 
+/// Re-label the tray menu for `lang`.
+///
+/// Called when the renderer switches locale (and once at cold start). The
+/// items are mutated in place rather than rebuilt, so the menu keeps its
+/// identity — and, more importantly, its check state — across a switch.
+///
+/// A no-op off Windows, where the tray is never installed, so commands can
+/// call it unconditionally.
+pub fn set_tray_language<R: Runtime>(app: &AppHandle<R>, lang: &str) -> Result<(), AppError> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, lang);
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        set_tray_language_impl(app, lang)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_tray_language_impl<R: Runtime>(app: &AppHandle<R>, lang: &str) -> Result<(), AppError> {
+    let s = strings_for(lang);
+    let handles = app
+        .try_state::<TrayHandles>()
+        .ok_or_else(|| AppError::Tray("TrayHandles not managed".into()))?;
+
+    if let Some(item) = handles
+        .show_item
+        .lock()
+        .expect("tray handles poisoned")
+        .as_ref()
+    {
+        item.set_text(s.show)
+            .map_err(|e| AppError::Tray(format!("set show label: {e}")))?;
+    }
+    if let Some(item) = handles
+        .toggle_item
+        .lock()
+        .expect("tray handles poisoned")
+        .as_ref()
+    {
+        item.set_text(s.proxy)
+            .map_err(|e| AppError::Tray(format!("set proxy label: {e}")))?;
+    }
+    if let Some(item) = handles
+        .quit_item
+        .lock()
+        .expect("tray handles poisoned")
+        .as_ref()
+    {
+        item.set_text(s.quit)
+            .map_err(|e| AppError::Tray(format!("set quit label: {e}")))?;
+    }
+    Ok(())
+}
+
 /// Build and install the tray icon + context menu. Phase 1 desktop-only.
 #[cfg(target_os = "windows")]
 pub fn install(app: &AppHandle<Wry>) -> Result<(), AppError> {
@@ -158,25 +252,23 @@ pub fn install<R: tauri::Runtime>(_app: &AppHandle<R>) -> Result<(), AppError> {
 }
 
 fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
-    // Build the menu.
-    let show_item = MenuItem::with_id(app, ID_SHOW, "Show panel", true, None::<&str>)
+    // Build the menu. The tray exists before the renderer has told us its
+    // locale, so it starts in the i18n default (zh-CN); the renderer then
+    // calls `set_tray_language` at cold start and on every switch.
+    let s = strings_for("zh-CN");
+
+    let show_item = MenuItem::with_id(app, ID_SHOW, s.show, true, None::<&str>)
         .map_err(|e| AppError::Tray(format!("build show item: {e}")))?;
 
     // Initial proxy state from registry.
     let initial_checked = proxy::query_system_proxy_status()
         .map(|s| s.enabled)
         .unwrap_or(false);
-    let toggle_item = CheckMenuItem::with_id(
-        app,
-        ID_TOGGLE,
-        "System proxy",
-        true,
-        initial_checked,
-        None::<&str>,
-    )
-    .map_err(|e| AppError::Tray(format!("build toggle item: {e}")))?;
+    let toggle_item =
+        CheckMenuItem::with_id(app, ID_TOGGLE, s.proxy, true, initial_checked, None::<&str>)
+            .map_err(|e| AppError::Tray(format!("build toggle item: {e}")))?;
 
-    let quit_item = MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)
+    let quit_item = MenuItem::with_id(app, ID_QUIT, s.quit, true, None::<&str>)
         .map_err(|e| AppError::Tray(format!("build quit item: {e}")))?;
 
     let sep = PredefinedMenuItem::separator(app)
@@ -194,6 +286,10 @@ fn install_impl(app: &AppHandle<Wry>) -> Result<(), AppError> {
     {
         let mut g = handles.show_item.lock().expect("tray handles poisoned");
         *g = Some(show_item.clone());
+    }
+    {
+        let mut g = handles.quit_item.lock().expect("tray handles poisoned");
+        *g = Some(quit_item.clone());
     }
     app.manage(handles);
 

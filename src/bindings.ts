@@ -254,6 +254,14 @@ export const commands = {
 	 */
 	setCloseBehavior: (exitOnClose: boolean) => __TAURI_INVOKE<boolean>("set_close_behavior", { exitOnClose }),
 	/**
+	 *  Keep the tray menu's language in step with the renderer's locale.
+	 * 
+	 *  Fails soft on purpose: a tray stuck in the wrong language is cosmetic,
+	 *  whereas a rejected command would raise an error notice the user cannot
+	 *  act on. The failure still goes to stderr for diagnosis.
+	 */
+	setTrayLanguage: (locale: string) => __TAURI_INVOKE<void>("set_tray_language", { locale }),
+	/**
 	 *  Cheap status read. Frontend polls this on mount + on every
 	 *  `tun://state-changed` event so the toggle always reflects the
 	 *  authoritative backend state.
