@@ -76,7 +76,7 @@ function labelFor(opt: Locale): string {
     >
       <div
         v-if="open"
-        class="absolute z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-white/10 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur-xl"
+        class="glass-popover absolute z-30 mt-1.5 w-36 overflow-hidden rounded-xl p-1"
         :class="props.compact ? 'left-full ml-2 top-0' : 'right-0'"
       >
         <button

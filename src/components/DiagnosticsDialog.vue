@@ -86,10 +86,10 @@ function isFatal(a: LogAnomaly): boolean {
         v-if="props.open"
         class="fixed inset-0 z-[100] flex items-center justify-center p-4"
       >
-        <div class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm" @click="emit('close')" />
+        <div class="glass-scrim absolute inset-0" @click="emit('close')" />
 
         <div
-          class="relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-2xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-2xl shadow-black/50"
+          class="glass-popover relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-2xl"
         >
           <!-- Header -->
           <div class="flex items-center gap-3 border-b border-white/5 px-5 py-4">

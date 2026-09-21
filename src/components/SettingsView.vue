@@ -361,7 +361,7 @@ onUnmounted(() => {
 
     <!-- ==================== Core & Network ==================== -->
     <section
-      class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+      class="glass-card rounded-2xl p-5 space-y-4"
     >
       <div class="flex items-center gap-2 text-zinc-300">
         <Cpu class="w-4 h-4 text-sky-400" />
@@ -483,7 +483,7 @@ onUnmounted(() => {
 
     <!-- ==================== TUN Advanced ==================== -->
     <section
-      class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+      class="glass-card rounded-2xl p-5 space-y-4"
     >
       <div class="flex items-center gap-2 text-zinc-300">
         <Layers class="w-4 h-4 text-indigo-400" />
@@ -600,7 +600,7 @@ onUnmounted(() => {
 
     <!-- ==================== General ==================== -->
     <section
-      class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+      class="glass-card rounded-2xl p-5 space-y-4"
     >
       <div class="flex items-center gap-2 text-zinc-300">
         <Cog class="w-4 h-4 text-emerald-400" />
@@ -708,7 +708,7 @@ onUnmounted(() => {
 
     <!-- ==================== About ==================== -->
     <section
-      class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+      class="glass-card rounded-2xl p-5 space-y-4"
     >
       <div class="flex items-center gap-2 text-zinc-300">
         <BookOpen class="w-4 h-4 text-amber-400" />
@@ -821,7 +821,7 @@ onUnmounted(() => {
 
     <!-- ==================== Diagnostics (v0.6.x Step 5) ==================== -->
     <section
-      class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+      class="glass-card rounded-2xl p-5 space-y-4"
     >
       <div class="flex items-center gap-2 text-zinc-300">
         <Activity class="w-4 h-4 text-sky-400" />
@@ -925,8 +925,8 @@ onUnmounted(() => {
           v-if="showResultModal"
           class="fixed inset-0 z-[100] flex items-center justify-center p-4"
         >
-          <div class="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm" />
-          <div class="relative w-full max-w-sm rounded-2xl border border-emerald-400/20 bg-zinc-900/95 backdrop-blur-xl shadow-2xl shadow-black/50 p-6 text-center space-y-3">
+          <div class="glass-scrim absolute inset-0" />
+          <div class="glass-popover border-emerald-400/20 relative w-full max-w-sm rounded-2xl p-6 text-center space-y-3">
             <div class="mx-auto w-12 h-12 rounded-full bg-emerald-500/15 ring-1 ring-emerald-400/30 flex items-center justify-center">
               <CheckCircle2 class="w-6 h-6 text-emerald-300" />
             </div>

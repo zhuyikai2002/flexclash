@@ -3,6 +3,77 @@
 @tailwind utilities;
 
 /* ============================================================================
+ * GLASSMORPHISM DESIGN TOKENS
+ * ============================================================================
+ *  Single source of truth for every translucent surface in the app. The
+ *  previous shell used very low alphas (0.55 / 0.78) with light blur, so the
+ *  desktop wallpaper bled straight through the panels and text lost contrast.
+ *  These tokens deliberately pair a *fairly opaque* base with a strong
+ *  backdrop blur + saturation, which is what makes a glass surface readable
+ *  without looking like a solid slab.
+ *
+ *  Dark is the shipped theme (`stores/theme.ts` hard-locks it). The
+ *  `.theme-light` block is the ready-to-use counterpart for the day the
+ *  component tree gains `light:` variants; it is inert today.
+ * ============================================================================ */
+:root {
+  /* Shell (the two big background regions). */
+  --glass-shell-bg: rgba(18, 18, 24, 0.82);
+  --glass-shell-bg-strong: rgba(12, 12, 17, 0.86);
+
+  /* Raised cards (dashboard tiles, proxy group cards). */
+  --glass-card-bg: rgba(30, 32, 40, 0.65);
+  --glass-card-bg-hover: rgba(42, 45, 56, 0.72);
+
+  /* Nested panels / subtler surfaces (stat sub-tiles, segmented controls). */
+  --glass-panel-bg: rgba(22, 24, 31, 0.6);
+
+  /* Floating layer (modals, popovers, toasts) — most opaque + strongest blur. */
+  --glass-popover-bg: rgba(22, 23, 30, 0.88);
+
+  /* List rows that sit *on top of* an already-blurred card: no own blur (a
+     few hundred backdrop-filters would tank the compositor). */
+  --glass-row-bg: rgba(14, 16, 21, 0.5);
+  --glass-row-bg-hover: rgba(255, 255, 255, 0.06);
+
+  /* Edges + depth. */
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-strong: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  --glass-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45);
+
+  /* Blur recipes. */
+  --glass-blur: blur(12px) saturate(150%);
+  --glass-blur-lg: blur(20px) saturate(160%);
+
+  /* Text ramp. Brighter than Tailwind's zinc-400/500 so copy stays crisp on
+     a blurred, semi-transparent surface over an arbitrary wallpaper. */
+  --text-primary: #f4f4f5;
+  --text-secondary: #c8c8d0;
+  --text-muted: #a1a1aa;
+}
+
+/* Opt-in light glass (currently unreachable — see stores/theme.ts). */
+:root.theme-light,
+body.theme-light {
+  --glass-shell-bg: rgba(255, 255, 255, 0.85);
+  --glass-shell-bg-strong: rgba(255, 255, 255, 0.9);
+  --glass-card-bg: rgba(255, 255, 255, 0.65);
+  --glass-card-bg-hover: rgba(255, 255, 255, 0.78);
+  --glass-panel-bg: rgba(255, 255, 255, 0.55);
+  --glass-popover-bg: rgba(255, 255, 255, 0.9);
+  --glass-row-bg: rgba(255, 255, 255, 0.55);
+  --glass-row-bg-hover: rgba(0, 0, 0, 0.05);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-border-strong: rgba(0, 0, 0, 0.12);
+  --glass-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  --glass-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.18);
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-muted: #52525b;
+}
+
+/* ============================================================================
  * GLOBAL APP SHELL
  * ============================================================================
  *  - Tauri 2 wraps the WebView in `<body><div id="app">…</div></body>`.
@@ -16,7 +87,7 @@ body,
   height: 100%;
   margin: 0;
   background: transparent;
-  color: #e5e7eb;
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
 }
@@ -83,12 +154,12 @@ body,
      the active-tab indicator never get clipped or overlapped. */
   position: relative;
   z-index: 30;
-  /* Mica-friendly: the deeper base lets the breathing logo's
-     gradient pop.  Win10 fallback (no Mica) stays legible. */
-  background: rgba(9, 9, 11, 0.78);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  /* Glass rail: a touch more opaque than the main pane so the icon
+     column reads as a distinct surface, with the same 20px blur. */
+  background: var(--glass-shell-bg-strong);
+  border-right: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
 }
 
 .app-main {
@@ -98,18 +169,105 @@ body,
   overflow-y: auto;
   position: relative;
   z-index: 10;
-  background: rgba(9, 9, 11, 0.55);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  color: var(--text-primary);
+  background: var(--glass-shell-bg);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
 }
 
 /* Backwards-compat alias — anything that still carries the old
-   `app-sidebar` class continues to receive the same dark tint. */
+   `app-sidebar` class continues to receive the same glass tint. */
 aside.app-sidebar {
-  background: rgba(9, 9, 11, 0.78);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--glass-shell-bg-strong);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+  border-right: 1px solid var(--glass-border);
+}
+
+/* ============================================================================
+ * GLASS SURFACES
+ * ============================================================================
+ *  Reusable component classes. Element-specific Tailwind utilities still win
+ *  over these (utilities layer > components layer), which is exactly what we
+ *  want for hover/active/selected overrides — but a converted element must
+ *  NOT keep a base `bg-*`/`border-white/*`/`backdrop-blur-*` utility, or it
+ *  would re-open the transparency we are closing.
+ * ============================================================================ */
+@layer components {
+  /* Raised card: dashboard tiles, proxy group cards. */
+  .glass-card {
+    background-color: var(--glass-card-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+  }
+  /* Same surface, but with a readable hover lift. */
+  .glass-card-interactive {
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      transform 0.2s ease;
+  }
+  .glass-card-interactive:hover {
+    background-color: var(--glass-card-bg-hover);
+    border-color: var(--glass-border-strong);
+  }
+
+  /* Nested surface (stat sub-tiles, segmented controls). */
+  .glass-panel {
+    background-color: var(--glass-panel-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+  }
+
+  /* Floating layer: modals, popovers, toasts. */
+  .glass-popover {
+    background-color: var(--glass-popover-bg);
+    border: 1px solid var(--glass-border-strong);
+    box-shadow: var(--glass-shadow-lg);
+    backdrop-filter: var(--glass-blur-lg);
+    -webkit-backdrop-filter: var(--glass-blur-lg);
+  }
+
+  /* List row sitting on an already-blurred card (no own backdrop-filter). */
+  .glass-row {
+    background-color: var(--glass-row-bg);
+    border: 1px solid var(--glass-border);
+  }
+  .glass-row:hover {
+    background-color: var(--glass-row-bg-hover);
+    border-color: var(--glass-border-strong);
+  }
+
+  /* Modal scrim: dark enough that the glass panel above it stays legible. */
+  .glass-scrim {
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+}
+
+/* ============================================================================
+ * TEXT CONTRAST
+ * ============================================================================
+ *  The dimmest zinc steps were tuned for a *solid* near-black page. On a
+ *  blurred glass surface they read as grey mush. Nudge the two dimmest steps
+ *  up one notch so labels, units and captions stay crisp; brighter steps are
+ *  untouched, so the visual hierarchy is preserved.
+ * ============================================================================ */
+@layer utilities {
+  .text-zinc-500 {
+    color: var(--text-muted);
+  }
+  .text-zinc-600 {
+    color: #8b8b94;
+  }
+  :root.theme-light .text-zinc-500 {
+    color: var(--text-muted);
+  }
 }
 
 /* ============================================================================

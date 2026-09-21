@@ -162,10 +162,10 @@ const tabs = [
   <Teleport to="body">
     <div
       v-if="props.open"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      class="glass-scrim fixed inset-0 z-40 flex items-center justify-center p-4"
       @click.self="close"
     >
-      <div class="w-full max-w-xl rounded-2xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-5 shadow-2xl">
+      <div class="glass-popover w-full max-w-xl rounded-2xl p-5">
         <header class="mb-4 flex items-center justify-between">
           <h2 class="text-base font-semibold tracking-tight text-zinc-100">
             {{ t('common.import') }} profile
@@ -178,7 +178,7 @@ const tabs = [
           </button>
         </header>
 
-        <nav class="mb-4 inline-flex items-center gap-0.5 rounded-xl border border-white/5 bg-white/[0.04] p-1 text-xs w-full">
+        <nav class="glass-panel mb-4 inline-flex items-center gap-0.5 rounded-xl p-1 text-xs w-full">
           <button
             v-for="t in tabs"
             :key="t.id"

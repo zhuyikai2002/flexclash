@@ -108,7 +108,7 @@ async function pick(m: Mode) {
 
 <template>
   <section
-    class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-3"
+    class="glass-card rounded-2xl p-5 space-y-3"
   >
     <header class="flex items-center justify-between">
       <h2 class="text-sm font-semibold text-zinc-100">
@@ -121,7 +121,7 @@ async function pick(m: Mode) {
          ease-out` from the buttons themselves — that is the spring
          you see as the pill glides. -->
     <div
-      class="relative grid grid-cols-3 gap-1 rounded-xl bg-white/[0.03] border border-white/5 p-1"
+      class="glass-panel relative grid grid-cols-3 gap-1 rounded-xl p-1"
     >
       <button
         v-for="(m, i) in modes"

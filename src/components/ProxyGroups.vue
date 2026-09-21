@@ -256,7 +256,7 @@ function toggleCollapse(group: string) {
       <div
         v-if="proxies.loading && !proxies.lastFetchAt"
         key="loading"
-        class="rounded-2xl border border-white/5 bg-white/[0.04] p-6 text-zinc-500 text-sm flex items-center gap-2"
+        class="glass-card rounded-2xl p-6 text-zinc-500 text-sm flex items-center gap-2"
       >
         <Loader2 class="w-4 h-4 animate-spin" /> {{ t('common.loading') }}
       </div>
@@ -275,7 +275,7 @@ function toggleCollapse(group: string) {
       <div
         v-else
         key="list"
-        class="relative overflow-hidden rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md"
+        class="glass-card relative overflow-hidden rounded-2xl"
       >
         <div
           ref="scrollEl"

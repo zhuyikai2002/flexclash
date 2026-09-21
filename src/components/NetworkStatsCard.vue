@@ -31,7 +31,7 @@ const emit = defineEmits<{ openConnections: [] }>()
 
 <template>
   <section
-    class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-4"
+    class="glass-card rounded-2xl p-5 space-y-4"
   >
     <header class="flex items-center justify-between">
       <h2 class="text-sm font-semibold text-zinc-100">
@@ -49,7 +49,7 @@ const emit = defineEmits<{ openConnections: [] }>()
 
     <div class="grid grid-cols-3 gap-3">
       <!-- Active connections -->
-      <div class="rounded-xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-1.5">
+      <div class="glass-panel rounded-xl p-4 flex flex-col gap-1.5">
         <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
           <Plug class="w-3 h-3 text-sky-400" />
           {{ t('dashboard.network_stats.active_connections') }}
@@ -64,7 +64,7 @@ const emit = defineEmits<{ openConnections: [] }>()
       </div>
 
       <!-- Total upload -->
-      <div class="rounded-xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-1.5">
+      <div class="glass-panel rounded-xl p-4 flex flex-col gap-1.5">
         <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
           <ArrowUp class="w-3 h-3 text-indigo-400" />
           {{ t('dashboard.network_stats.total_upload') }}
@@ -76,7 +76,7 @@ const emit = defineEmits<{ openConnections: [] }>()
       </div>
 
       <!-- Total download -->
-      <div class="rounded-xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-1.5">
+      <div class="glass-panel rounded-xl p-4 flex flex-col gap-1.5">
         <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
           <ArrowDown class="w-3 h-3 text-emerald-400" />
           {{ t('dashboard.network_stats.total_download') }}

@@ -95,7 +95,7 @@ onBeforeUnmount(() => {
       >
         <!-- Backdrop -->
         <div
-          class="absolute inset-0 bg-zinc-950/70 backdrop-blur-sm"
+          class="glass-scrim absolute inset-0"
           aria-hidden="true"
           @click="close"
         />
@@ -105,7 +105,7 @@ onBeforeUnmount(() => {
           role="dialog"
           aria-modal="true"
           aria-label="update available"
-          class="relative w-full max-w-lg rounded-2xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl shadow-2xl shadow-black/50 p-5 space-y-4"
+          class="glass-popover relative w-full max-w-lg rounded-2xl p-5 space-y-4"
           @click.stop
         >
           <!-- Header -->

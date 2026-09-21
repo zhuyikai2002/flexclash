@@ -80,12 +80,12 @@ const palette = computed(() => {
     :aria-checked="enabled"
     :disabled="busy"
     :class="[
-      'group relative w-full overflow-hidden rounded-2xl border p-4 text-left transition-all duration-200',
+      'group glass-card glass-card-interactive relative w-full overflow-hidden rounded-2xl p-4 text-left transition-all duration-200',
       'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950',
       'active:scale-[0.99]',
       enabled
-        ? 'border-white/15 bg-white/[0.05] focus-visible:ring-sky-400/50 shadow-lg shadow-sky-500/5'
-        : 'border-white/5 bg-white/[0.04] hover:border-white/10 hover:bg-white/[0.06] focus-visible:ring-indigo-400/50',
+        ? 'border-sky-400/30 shadow-lg shadow-sky-500/10 focus-visible:ring-sky-400/50'
+        : 'focus-visible:ring-indigo-400/50',
       busy && 'cursor-wait',
     ]"
     @click="emit('toggle')"

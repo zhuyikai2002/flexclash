@@ -132,7 +132,7 @@ async function killNode(node: string) {
           (testing || selecting[`${group}::${node}`] === true) ? 'opacity-50' : '',
           meta?.now === node
             ? 'border-sky-400/50 bg-sky-500/10 ring-1 ring-sky-400/30 text-zinc-50 shadow-md shadow-sky-500/10'
-            : 'border-white/5 bg-zinc-950/30 text-zinc-200 hover:border-white/15 hover:bg-white/[0.05]'
+            : 'glass-row text-zinc-200'
         ]"
       >
         <CheckCircle2

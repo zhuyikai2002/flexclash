@@ -409,7 +409,7 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
       <li
         v-for="p in store.profiles"
         :key="p.id"
-        class="rounded-2xl border border-white/5 bg-white/[0.04] hover:border-white/10 hover:bg-white/[0.06] transition-all px-3 py-2.5"
+        class="glass-card glass-card-interactive rounded-2xl transition-all px-3 py-2.5"
       >
         <div class="flex items-center gap-3">
           <div class="min-w-0 flex-1">
@@ -501,7 +501,7 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
               <div
                 v-if="menuOpenId === p.id"
                 role="menu"
-                class="absolute right-0 top-9 z-50 w-48 overflow-hidden rounded-xl border border-white/10 bg-zinc-900/95 shadow-2xl shadow-black/50 backdrop-blur-md"
+                class="glass-popover absolute right-0 top-9 z-50 w-48 overflow-hidden rounded-xl"
               >
                 <button
                   class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-100 hover:bg-white/[0.06]"
@@ -560,7 +560,7 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', onWindowClick))
         @keydown.enter="submitRename"
       >
         <div
-          class="w-[min(420px,90vw)] rounded-2xl border border-white/10 bg-zinc-900/95 p-5 shadow-2xl shadow-black/60"
+          class="glass-popover w-[min(420px,90vw)] rounded-2xl p-5"
           role="dialog"
           aria-modal="true"
         >

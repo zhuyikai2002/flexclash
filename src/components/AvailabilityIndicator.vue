@@ -124,7 +124,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <!-- Click-away catcher; sits below the card so the card stays usable. -->
         <div class="fixed inset-0 z-[95]" @click="close"></div>
         <div
-          class="fixed z-[96] w-60 rounded-xl border border-white/10 bg-zinc-900/95 p-3 text-xs shadow-2xl backdrop-blur-xl"
+          class="glass-popover fixed z-[96] w-60 rounded-xl p-3 text-xs"
           :style="{ top: `${pos.top}px`, left: `${pos.left}px` }"
           @click.stop
         >

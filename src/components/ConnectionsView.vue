@@ -253,7 +253,7 @@ watch(menuItems, (items) => {
 </script>
 
 <template>
-  <section class="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md">
+  <section class="glass-card overflow-hidden rounded-2xl">
     <header class="flex items-center justify-between px-5 py-3 border-b border-white/5">
       <div class="flex items-center gap-2">
         <h2 class="text-sm font-semibold text-zinc-100">{{ t('connections.title') }}</h2>
@@ -465,7 +465,7 @@ watch(menuItems, (items) => {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
         @click.self="confirmOpen = false"
       >
-        <div class="rounded-2xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-5 max-w-sm w-full mx-4 shadow-2xl">
+        <div class="glass-popover rounded-2xl p-5 max-w-sm w-full mx-4">
           <h3 class="text-base font-semibold text-zinc-100">
             {{ t('connections.disconnect_confirm_title') }}
           </h3>
@@ -509,7 +509,7 @@ watch(menuItems, (items) => {
       <Transition name="menu">
         <div
           v-if="rowMenu"
-          class="absolute z-[91] flex min-w-[200px] flex-col rounded-xl border border-white/10 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur-xl"
+          class="glass-popover absolute z-[91] flex min-w-[200px] flex-col rounded-xl p-1"
           :style="{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }"
           @click.stop
         >

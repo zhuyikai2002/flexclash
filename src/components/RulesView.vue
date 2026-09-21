@@ -58,7 +58,7 @@ function typeBadgeColor(type: string): string {
           </button>
           <div
             v-if="showTypeMenu"
-            class="absolute right-0 mt-1 z-20 w-56 max-h-72 overflow-auto rounded-xl border border-white/10 bg-zinc-900/95 shadow-2xl backdrop-blur-xl p-1"
+            class="glass-popover absolute right-0 mt-1 z-20 w-56 max-h-72 overflow-auto rounded-xl p-1"
           >
             <button
               @click="rules.setTypeFilter('all'); showTypeMenu = false"
@@ -123,7 +123,7 @@ function typeBadgeColor(type: string): string {
 
     <div
       v-else-if="rules.loading && !rules.rules.length"
-      class="rounded-2xl border border-white/5 bg-white/[0.04] p-6 text-zinc-500 text-sm flex items-center gap-2"
+      class="glass-card rounded-2xl p-6 text-zinc-500 text-sm flex items-center gap-2"
     >
       <Loader2 class="w-4 h-4 animate-spin" /> {{ t('common.loading') }}
     </div>
@@ -138,7 +138,7 @@ function typeBadgeColor(type: string): string {
 
     <div
       v-else
-      class="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md"
+      class="glass-card overflow-hidden rounded-2xl"
     >
       <table class="w-full text-sm">
         <thead class="bg-white/[0.02] text-[10px] uppercase tracking-wider text-zinc-500">

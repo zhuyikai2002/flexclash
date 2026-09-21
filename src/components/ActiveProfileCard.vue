@@ -89,7 +89,7 @@ async function quickUpdate() {
 
 <template>
   <section
-    class="rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-md p-5 space-y-3"
+    class="glass-card rounded-2xl p-5 space-y-3"
   >
     <header class="flex items-center justify-between">
       <h2 class="text-sm font-semibold text-zinc-100">

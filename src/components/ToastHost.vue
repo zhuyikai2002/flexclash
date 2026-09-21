@@ -67,7 +67,7 @@ function toneClass(kind: ToastKind): string {
     case 'error':
       return 'border-rose-500/30 bg-rose-950/90 text-rose-100'
     default:
-      return 'border-white/10 bg-zinc-900/95 text-zinc-100'
+      return 'text-zinc-100'
   }
 }
 
@@ -92,7 +92,7 @@ function iconClass(kind: ToastKind): string {
         <div
           v-for="item in toast.items"
           :key="item.id"
-          class="pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
+          class="glass-popover pointer-events-auto flex items-start gap-2.5 rounded-xl px-3.5 py-3"
           :class="toneClass(item.kind)"
         >
           <component :is="iconFor(item.kind)" class="h-4 w-4 shrink-0 mt-0.5" :class="iconClass(item.kind)" />

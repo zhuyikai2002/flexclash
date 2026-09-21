@@ -83,7 +83,7 @@ const sinceText = computed(() => {
 
 <template>
   <section
-    class="rounded-2xl border border-white/5 bg-white/[0.04] p-5 backdrop-blur-md"
+    class="glass-card rounded-2xl p-5"
   >
     <header class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-2">
@@ -106,7 +106,7 @@ const sinceText = computed(() => {
     <div class="grid grid-cols-2 gap-3">
       <!-- Download -->
       <div
-        class="group relative overflow-hidden rounded-xl border border-white/5 bg-gradient-to-br from-emerald-500/[0.04] via-transparent to-transparent p-5"
+        class="glass-panel group relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500/[0.06] via-transparent to-transparent p-5"
       >
         <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/60 to-transparent" />
         <div class="absolute top-3 right-3 text-emerald-400/60">
@@ -134,7 +134,7 @@ const sinceText = computed(() => {
 
       <!-- Upload -->
       <div
-        class="group relative overflow-hidden rounded-xl border border-white/5 bg-gradient-to-br from-indigo-500/[0.04] via-transparent to-transparent p-5"
+        class="glass-panel group relative overflow-hidden rounded-xl bg-gradient-to-br from-indigo-500/[0.06] via-transparent to-transparent p-5"
       >
         <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/60 to-transparent" />
         <div class="absolute top-3 right-3 text-indigo-400/60">

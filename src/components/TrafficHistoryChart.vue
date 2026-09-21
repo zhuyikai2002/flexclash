@@ -172,7 +172,7 @@ const rangeOptions = [
 </script>
 
 <template>
-  <section class="rounded-2xl border border-white/5 bg-white/[0.04] p-4 backdrop-blur-md">
+  <section class="glass-card rounded-2xl p-4">
     <header class="mb-3 flex items-center justify-between">
       <div class="flex items-center gap-3 text-xs">
         <span class="inline-flex items-center gap-1.5">
@@ -208,7 +208,7 @@ const rangeOptions = [
       <div
         v-if="hover && buckets[hover.idx]"
         class="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full px-2 py-1
-               rounded-lg border border-white/10 bg-zinc-900/95 backdrop-blur-md text-[10px] font-mono whitespace-nowrap shadow-2xl"
+               glass-popover rounded-lg text-[10px] font-mono whitespace-nowrap"
         :style="{ left: hover.x - (wrap?.getBoundingClientRect().left ?? 0) + 'px', top: '4px' }"
       >
         <div class="text-zinc-400">{{ fmtTime(buckets[hover.idx].ts, history.range) }}</div>
