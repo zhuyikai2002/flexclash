@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=FlexClash
+GenericName=Proxy Client
+Comment=Lightweight Mihomo (Clash Meta) proxy client with TUN support
+Exec=flexclash
+Icon=flexclash
+Terminal=false
+Categories=Network;Utility;
+Keywords=proxy;clash;mihomo;tun;vpn;
+StartupNotify=true

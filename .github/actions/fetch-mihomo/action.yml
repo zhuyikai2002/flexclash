@@ -1,12 +1,13 @@
 # ============================================================================
-# fetch-mihomo — download and verify the mihomo sidecar.
+# fetch-mihomo — download and verify the mihomo sidecar for a target platform.
 #
 # WHY THIS IS REQUIRED BY *EVERY* JOB, NOT JUST THE RELEASE ONE
 # ------------------------------------------------------------
 # `tauri.conf.json` declares `bundle.externalBin: ["binaries/mihomo"]`, and
-# tauri-build's build script resolves that to a literal file name,
-# `src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe`, during `cargo build`.
-# It is not a glob, so a missing file is an *error*, not an empty match:
+# tauri-build's build script resolves that to a literal file name during
+# `cargo build` (`src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe` on
+# Windows, `...-unknown-linux-gnu` on Linux). It is not a glob, so a missing
+# file is an *error*, not an empty match:
 #
 #     tauri_utils::resources::resource_from_path -> ResourcePathNotFound
 #
@@ -20,35 +21,56 @@
 # Version *and* digest are pinned in this one file deliberately. Duplicating a
 # third-party binary's hash across two workflows is precisely how a CI job and a
 # released build end up exercising different kernels. Bump them together.
+#
+# PLATFORMS
+# ---------
+# `platform` defaults to `windows` so the existing `ci.yml` call site keeps
+# working untouched; `release.yml` passes `linux` for the Ubuntu matrix row.
 # ============================================================================
 
 name: Fetch the mihomo sidecar
 description: >-
-  Download the pinned mihomo release asset, place it at the target-triple path
-  that `bundle.externalBin` resolves to, and fail if the digest does not match.
+  Download the pinned mihomo release asset for the requested platform, place it
+  at the target-triple path that `bundle.externalBin` resolves to, and fail if
+  the digest does not match.
 
 inputs:
+  platform:
+    description: '"windows" (default, used by ci.yml) or "linux".'
+    required: false
+    default: windows
   version:
     description: mihomo release tag.
     required: false
-    default: v1.19.30
+    default: v1.19.31
+  # --- Windows ---------------------------------------------------------------
   asset:
     description: >-
-      Release asset base name; the `.zip` is implied. The `-compatible` build is
-      GOAMD64=v1 and is the one whose exe matches `sha256`. The plain
-      `mihomo-windows-amd64-<version>` asset is a DIFFERENT binary
-      (50,078,720 B vs 50,132,992 B) -- do not swap it in.
+      Windows release asset base name; the `.zip` is implied. The `-compatible`
+      build is GOAMD64=v1 and is the one whose exe matches `sha256`. The plain
+      `mihomo-windows-amd64-<version>` asset is a DIFFERENT binary -- do not
+      swap it in.
     required: false
     default: mihomo-windows-amd64-compatible
   sha256:
-    description: Expected sha256 of the exe inside the archive.
+    description: Expected sha256 of the exe inside the Windows archive.
     required: false
-    default: 6ac25fcb26afe8e1bea24b6e6e80805bf884a33232d12e2d78dfa0b6c529ac14
+    default: 1fa8055e03596fc35167f70e9ecd1890517d38d960a39177445746a1b0defc2b
+  # --- Linux -----------------------------------------------------------------
+  asset_linux:
+    description: Linux release asset base name; the `.gz` is implied.
+    required: false
+    default: mihomo-linux-amd64
+  sha256_linux:
+    description: Expected sha256 of the *decompressed* Linux binary.
+    required: false
+    default: 08787faafea19c1ab0f83fa5a1b22363b7d03ea78da18091a4c883aecaaa5979
 
 runs:
   using: composite
   steps:
-    - name: Download and verify
+    - name: Download and verify (Windows)
+      if: inputs.platform == 'windows'
       shell: pwsh
       env:
         MIHOMO_VERSION: ${{ inputs.version }}
@@ -56,7 +78,7 @@ runs:
         MIHOMO_SHA256: ${{ inputs.sha256 }}
       run: |
         $ErrorActionPreference = 'Stop'
-        # The progress bar on a ~18MB download costs more than the download
+        # The progress bar on a ~22MB download costs more than the download
         # itself and floods the log with carriage-return redraws.
         $ProgressPreference = 'SilentlyContinue'
 
@@ -93,3 +115,41 @@ runs:
           throw "mihomo digest mismatch: expected $env:MIHOMO_SHA256, got $hash"
         }
         Write-Host 'sidecar digest verified'
+
+    - name: Download and verify (Linux)
+      if: inputs.platform == 'linux'
+      shell: bash
+      env:
+        MIHOMO_VERSION: ${{ inputs.version }}
+        MIHOMO_ASSET: ${{ inputs.asset_linux }}
+        MIHOMO_SHA256: ${{ inputs.sha256_linux }}
+      run: |
+        set -euo pipefail
+
+        gz="${MIHOMO_ASSET}-${MIHOMO_VERSION}.gz"
+        url="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/${gz}"
+        dest="src-tauri/binaries/mihomo-x86_64-unknown-linux-gnu"
+
+        mkdir -p src-tauri/binaries
+
+        echo "downloading $url"
+        # --retry covers the transient 5xx / connection resets that a cold CDN
+        # edge occasionally returns. The asset is ~22MB.
+        curl -fL --retry 3 --retry-delay 2 -o mihomo.gz "$url"
+
+        # The release ships a gzipped bare binary (no archive wrapper).
+        gunzip -c mihomo.gz > "$dest"
+        chmod +x "$dest"
+
+        size=$(stat -c%s "$dest")
+        hash=$(sha256sum "$dest" | awk '{print $1}')
+        echo "sidecar: $dest ($size bytes)"
+        echo "sha256 : $hash"
+
+        # Verify the *decompressed* bytes: gzip mtime/OS header bytes are not
+        # stable, so the tarball's own digest would be a poor pin.
+        if [ "$hash" != "$MIHOMO_SHA256" ]; then
+          echo "::error::mihomo digest mismatch: expected $MIHOMO_SHA256, got $hash"
+          exit 1
+        fi
+        echo "sidecar digest verified"

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# flexclash.install — pacman install/upgrade/remove hooks.
+#
+# The heavy lifting is post_install / post_upgrade: the bundled mihomo kernel
+# must be granted cap_net_admin + cap_net_bind_service so the unprivileged app
+# can create the `flexclash-tun` device (and bind the proxy port) without
+# running as root. A package tarball cannot carry file capabilities, so they
+# are granted at install time. Failure is non-fatal on purpose — e.g. a
+# filesystem mounted without the `security` xattr support (FAT/exFAT) cannot
+# hold caps, and the app degrades to "TUN unavailable" rather than a broken
+# package.
+
+post_install() {
+  _grant_kernel_caps
+}
+
+post_upgrade() {
+  _grant_kernel_caps
+}
+
+post_remove() {
+  # Remove system-level residual state only. Per-user app data
+  # ($XDG_DATA_HOME/com.flexclash.app) is intentionally preserved — deleting
+  # it would destroy the user's profiles, subscriptions and traffic history.
+  rm -rf -- /var/lib/flexclash 2>/dev/null || true
+  true
+}
+
+_grant_kernel_caps() {
+  local bin
+  # Tauri installs the sidecar next to the main binary (`/usr/bin/mihomo`);
+  # the other candidates cover layouts a future bundler change might produce.
+  for bin in /usr/bin/mihomo /usr/lib/flexclash/mihomo /opt/flexclash/mihomo; do
+    if [[ -f "$bin" ]]; then
+      setcap cap_net_admin,cap_net_bind_service=+ep "$bin" 2>/dev/null || true
+    fi
+  done
+  # Also sweep the target-triple name should the bundle keep it.
+  for bin in /usr/bin/mihomo-*; do
+    if [[ -f "$bin" ]]; then
+      setcap cap_net_admin,cap_net_bind_service=+ep "$bin" 2>/dev/null || true
+    fi
+  done
+  true
+}

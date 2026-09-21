@@ -1,0 +1,85 @@
+# Maintainer: FlexClash Contributors <https://github.com/zhuyikai2002/flexclash>
+#
+# flexclash-bin — prebuilt binary package for Arch / EndeavourOS.
+#
+# The GitHub Release (built by .github/workflows/release.yml on a `v*` tag)
+# publishes a Tauri Linux `.deb`. This package extracts that `.deb`'s data
+# payload so the layout matches what Tauri produced (main binary in
+# `/usr/bin/flexclash`, sidecar kernel in `/usr/bin/mihomo`, plus desktop entry
+# and icons), then flexclash.install grants the sidecar the capabilities it
+# needs to create the TUN device.
+#
+# Usage:
+#   cd packaging/arch
+#   makepkg -si          # build + install (prompts for sudo)
+#   makepkg -f           # rebuild only
+#
+# Requirements: the release for pkgver must exist on GitHub (the workflow
+# uploads FlexClash_<version>_amd64.deb).
+
+pkgname=flexclash-bin
+pkgver=0.6.2
+pkgrel=1
+pkgdesc="Lightweight Mihomo (Clash Meta) proxy client with TUN mode support"
+arch=('x86_64')
+url="https://github.com/zhuyikai2002/flexclash"
+license=('MIT')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libappindicator-gtk3'
+  'librsvg'
+  'openssl'
+  'hicolor-icon-theme'
+)
+# `libarchive` supplies `bsdtar`, used to peel the data payload out of the .deb.
+makedepends=('libarchive')
+provides=('flexclash')
+conflicts=('flexclash')
+# Never strip: the Go-built mihomo sidecar and the prebuilt app binary must be
+# shipped byte-for-byte as released (also avoids `strip` failures on Go).
+options=('!strip')
+# Hook file named explicitly so the task's `flexclash.install` name is used
+# even though the package is `flexclash-bin`.
+install=flexclash.install
+
+source_x86_64=(
+  "FlexClash_${pkgver}_amd64.deb::https://github.com/zhuyikai2002/flexclash/releases/download/v${pkgver}/FlexClash_${pkgver}_amd64.deb"
+  "flexclash.desktop"
+  "flexclash.png"
+)
+# The release binary hash is not known until it is built, so checksums are
+# deliberately SKIP. Supply real hashes after the first published release to
+# harden the package.
+sha256sums_x86_64=('SKIP' 'SKIP' 'SKIP')
+
+package() {
+  cd "${srcdir}"
+
+  # Extract the data payload of the vendored .deb. `data.tar.*` is a glob
+  # pattern for bsdtar; it expands to the concrete member after extraction.
+  bsdtar -xf "FlexClash_${pkgver}_amd64.deb" -C "${srcdir}" 'data.tar.*'
+  bsdtar -xf "${srcdir}"/data.tar.* -C "${pkgdir}"
+
+  # Sanity: the Tauri .deb must have laid down the binary and the sidecar.
+  if [[ ! -x "${pkgdir}/usr/bin/flexclash" ]]; then
+    echo "error: main binary /usr/bin/flexclash missing from the .deb" >&2
+    exit 1
+  fi
+  if [[ ! -x "${pkgdir}/usr/bin/mihomo" ]]; then
+    echo "error: sidecar /usr/bin/mihomo missing from the .deb" >&2
+    exit 1
+  fi
+
+  # Desktop entry + icon: prefer the ones Tauri generated inside the .deb
+  # (they carry the correct WM_CLASS / icon theme names), fall back to ours
+  # only when the .deb omitted them.
+  if [[ ! -f "${pkgdir}/usr/share/applications/flexclash.desktop" ]]; then
+    install -Dm644 "${srcdir}/flexclash.desktop" \
+      "${pkgdir}/usr/share/applications/flexclash.desktop"
+  fi
+  if [[ ! -f "${pkgdir}/usr/share/icons/hicolor/128x128/apps/flexclash.png" ]]; then
+    install -Dm644 "${srcdir}/flexclash.png" \
+      "${pkgdir}/usr/share/icons/hicolor/128x128/apps/flexclash.png"
+  fi
+}

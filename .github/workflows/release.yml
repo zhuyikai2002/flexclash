@@ -1,26 +1,28 @@
 # ============================================================================
-# release.yml — tag-driven Windows build + GitHub Release.
+# release.yml — tag-driven multi-platform build + GitHub Release.
 #
-# Trigger: pushing a tag matching `v*` (e.g. `v0.3.0`). Nothing else starts
-# this workflow -- no branch pushes, no pull requests, no manual dispatch.
+# Trigger: pushing a tag matching `v*` (e.g. `v0.6.3`). Nothing else starts this
+# workflow -- no branch pushes, no pull requests.
 #
-# What it produces, in one release attached to the pushed tag:
+# Matrix:
+#   ubuntu-22.04   → x86_64-unknown-linux-gnu   .deb / .rpm / .AppImage
+#   windows-latest → x86_64-pc-windows-msvc      NSIS installer / MSI
 #
-#   FlexClash_<version>_x64-setup.exe      the NSIS installer
-#   FlexClash_<version>_x64-setup.exe.sig  its minisign signature (audit copy)
-#   latest.json                            the manifest the in-app updater polls
+# `tauri-apps/tauri-action@v0` runs the build, creates the Release for the tag,
+# and uploads every bundle it produced (plus the updater manifest). The Release
+# is a real (non-draft, non-prerelease) release: the in-app updater polls
+# `releases/latest/download/latest.json`, and GitHub's `/latest/` excludes both
+# drafts and prereleases.
 #
-# IMPORTANT: the tag and `tauri.conf.json > version` must agree. The updater
-# endpoint is `releases/latest/download/latest.json`, and `latest.json` points
-# at `releases/download/v<version>/...`, where `<version>` is read from
-# tauri.conf.json -- not from the tag. Tag `v0.3.0` while the config still says
-# `0.2.5` and the manifest publishes a URL that 404s. Bump the version (both
+# IMPORTANT: the tag and `tauri.conf.json > version` must agree. `latest.json`
+# points at `releases/download/v<version>/...`, where `<version>` is read from
+# tauri.conf.json -- not from the tag. Tag `v0.6.3` while the config still says
+# `0.6.2` and the manifest publishes a URL that 404s. Bump the version (both
 # `tauri.conf.json` and `package.json`) before tagging.
 #
-# The release is gated on `scripts/verify-updater-sig.py` before anything is
-# published: that script replays what the Tauri updater does at runtime, so a
-# signing key that does not match `plugins.updater.pubkey` fails the run instead
-# of shipping an update every existing install rejects.
+# The mihomo sidecar is `.gitignore`d and resolved by tauri-build's build script,
+# so it MUST be fetched on every run. The pinned version + digest live in
+# `.github/actions/fetch-mihomo/`, shared with `ci.yml`.
 # ============================================================================
 
 name: Release
@@ -30,28 +32,52 @@ on:
     tags:
       - 'v*'
 
-# The release step creates a Release and uploads assets with the automatic
-# token. Everything else here only reads, so this is the whole permission set.
+# The tauri-action step creates a Release and uploads assets with the automatic
+# token. Everything else only reads, so this is the whole permission set.
 permissions:
   contents: write
 
-# The mihomo sidecar's pinned version and digest live in
-# `.github/actions/fetch-mihomo/action.yml`, which this workflow and `ci.yml`
-# both call. One pin, one place to audit.
-
 jobs:
-  release:
-    name: Build and publish Windows installer
-    runs-on: windows-latest
-    # `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is set to an empty string below
-    # precisely so tauri never falls back to an interactive prompt. Should that
-    # ever regress, the run hangs *forever* rather than failing -- this cap is
-    # the backstop (a previous 300-minute zombie build caused by exactly that).
-    timeout-minutes: 60
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    # `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is set to an empty string below so
+    # tauri never falls back to an interactive prompt; should that regress, the
+    # run hangs rather than fails. This cap is the backstop.
+    timeout-minutes: 90
+
+    strategy:
+      # One platform failing must not cancel the other: a Linux-only packaging
+      # regression should still let the Windows installer publish, and vice
+      # versa.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            sidecar: linux
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            sidecar: windows
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Tauri's Linux build needs the WebKitGTK/AppIndicator/RSVG dev headers,
+      # `patchelf` (AppImage bundling) and OpenSSL. `libappindicator3-dev` is the
+      # Ubuntu 22.04 name; Arch's runtime counterpart is `libappindicator-gtk3`
+      # (see packaging/arch/PKGBUILD).
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -62,65 +88,44 @@ jobs:
           # cache -- it installs nothing. See the step below.
           cache: npm
 
-      # `cache: npm` above is not an install. Nothing has created
-      # `node_modules/` at this point, and `tauri` is a devDependency
-      # resolved from `node_modules/.bin/tauri`, so without this step the build
-      # dies with "'tauri' is not recognized as an internal or external
-      # command" -- after the sidecar has already been downloaded. The
-      # frontend compile runs inside `tauri build` via `beforeBuildCommand`
-      # (`vue-tsc --noEmit && vite build`), which needs these same deps.
+      # `package-lock.json` is the committed source of truth, so `npm ci` (not
+      # `npm install`) is the reproducible install. `tauri` itself is a
+      # devDependency resolved from `node_modules/.bin/tauri`, and the frontend
+      # compile runs inside `tauri build` via `beforeBuildCommand`
+      # (`vue-tsc --noEmit && vite build`), so these deps are load-bearing.
       - name: Install frontend dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          # `gen-latest-json.py` is stdlib-only, but `verify-updater-sig.py`
-          # needs `cryptography` for Ed25519. Pinned so the manifest and
-          # verification steps do not depend on whatever interpreter the runner
-          # image happens to ship.
-          python-version: '3.12'
-
-      - name: Install release-script dependencies
-        run: python -m pip install --disable-pip-version-check --quiet cryptography
+        run: npm ci --no-audit --no-fund
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # The runner's host triple already *is* x86_64-pc-windows-msvc, so
-          # this changes nothing today. It is pinned so the requirement is
-          # stated rather than merely implied by `runs-on`.
-          targets: x86_64-pc-windows-msvc
+          # Stated explicitly per matrix row; on each runner the host triple
+          # already matches, so this is a no-op that documents intent.
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           # The crate is NOT at the repository root. Left at its default (`.`)
           # the action finds no Cargo.toml and silently caches nothing, which
-          # is the difference between a ~4 min and a ~20 min release build.
+          # is the difference between a fast and a very slow release build.
           workspaces: src-tauri
           # Keep the cache even when the build fails, so a fixed re-run is fast.
           cache-on-failure: true
 
       # `cargo` (and therefore `tauri build`) fails with ResourcePathNotFound
-      # when `externalBin` resolves to a file that is not there, and the sidecar
-      # is gitignored, so it MUST be fetched on every run. Shared with `ci.yml`
-      # via this composite action so the pinned version + digest live in exactly
-      # one auditable place.
+      # when `externalBin` resolves to a file that is not there. Shared with
+      # `ci.yml` via this composite action so the pinned version + digest live
+      # in exactly one auditable place. `platform` selects the asset.
       - name: Fetch the mihomo sidecar
         uses: ./.github/actions/fetch-mihomo
+        with:
+          platform: ${{ matrix.sidecar }}
 
-      # Drop any bundle output a restored cache may have brought back. Without
-      # this, `bundle/nsis/` can hold the previous release's installer, and the
-      # upload glob below would publish BOTH that and this run's build into the
-      # new release. Cheap (the directory is a post-build output, not an input
-      # to compilation) and it also forces latest.json to be regenerated.
-      - name: Clean stale bundle output
-        shell: pwsh
-        run: Remove-Item -Recurse -Force 'src-tauri/target/release/bundle' -ErrorAction SilentlyContinue
-
-      - name: Build the installer (signed)
+      - name: Build, bundle and publish
+        uses: tauri-apps/tauri-action@v0
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Tauri accepts either a path or the key *contents*; on CI it must be
           # the contents, which is what the secret holds. It must be the private
           # half of the keypair whose public half is `plugins.updater.pubkey`
@@ -131,49 +136,23 @@ jobs:
           # password; if this variable is unset, tauri prompts on the terminal
           # and the job hangs until it is killed.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        # `--bundles nsis` because NSIS is the only target this workflow
-        # publishes: the updater downloads `*_x64-setup.exe`, and
-        # gen-latest-json.py reads that installer's .sig. Building the MSI too
-        # (`targets: "all"` in tauri.conf.json) would only add a WiX download
-        # that can fail the release and roughly double bundling time. Add
-        # `--bundles nsis,msi` here if an MSI should be published as well.
-        run: npm run tauri build -- --bundles nsis
-
-      - name: Generate the updater manifest
-        run: python scripts/gen-latest-json.py
-
-      # The gate. `tauri build` does NOT fail when the signing key and
-      # `plugins.updater.pubkey` disagree -- it emits a single warning deep in a
-      # very long log, and the release then looks fine while every existing
-      # install rejects the update it downloads. This script replays the real
-      # runtime check (minisign "ED" = BLAKE2b-512 prehash, then Ed25519 over the
-      # actual installer bytes) and exits non-zero with "BROKEN - do not
-      # publish", which stops the run before the publish step.
-      - name: Verify the updater signature chain
-        run: python scripts/verify-updater-sig.py
-
-      - name: Publish the release
-        uses: softprops/action-gh-release@v2
         with:
-          # The tag that triggered this run, so the release is attached to it.
-          tag_name: ${{ github.ref_name }}
-          name: FlexClash ${{ github.ref_name }}
+          # Attach the release to the tag that triggered the run.
+          tagName: ${{ github.ref_name }}
+          releaseName: "FlexClash ${{ github.ref_name }}"
+          releaseBody: |
+            Multi-platform build of FlexClash ${{ github.ref_name }}.
+
+            - **Linux**: `.deb`, `.rpm` and `.AppImage` (x86_64)
+            - **Windows**: NSIS `.exe` installer and `.msi` (x64)
+
+            See the assets below. On Arch/EndeavourOS, `packaging/arch/PKGBUILD`
+            builds a `flexclash-bin` package from the Linux `.deb`.
           # NOT a draft and NOT a prerelease, deliberately: the updater polls
-          # `releases/latest/download/latest.json`, and GitHub's `/latest/`
-          # excludes both drafts and prereleases. A draft release is invisible
-          # to every existing install.
-          draft: false
+          # `releases/latest/download/latest.json`, and `/latest/` excludes both.
+          releaseDraft: false
           prerelease: false
-          # Hand-written, curated release body. This workflow used to
-          # auto-generate it from commits (`generate_release_notes: true`);
-          # it now publishes the checked-in `release_notes.md` instead, so a
-          # release leads with the narrative that matters rather than a raw
-          # commit list. TRADE-OFF, stated plainly: this file MUST be updated
-          # before every tag -- a stale file fails *silently* and ships the
-          # previous release's notes. (To revert: drop this key and restore
-          # the line `generate_release_notes: true`.)
-          body_path: release_notes.md
-          files: |
-            src-tauri/target/release/bundle/nsis/FlexClash_*_x64-setup.exe
-            src-tauri/target/release/bundle/nsis/FlexClash_*_x64-setup.exe.sig
-            src-tauri/target/release/bundle/latest.json
+          # Regenerate `latest.json` from the signed bundles so the in-app
+          # updater keeps working. Each matrix row contributes its platform's
+          # entry; tauri-action merges them into the same release manifest.
+          includeUpdaterJson: true
