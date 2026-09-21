@@ -69,7 +69,7 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use crate::config::profile::RESERVED_CONTROLLER;
 use crate::core::kernel_events::{KernelLogLevel, LogBatch, LogPayload, TrafficPayload};
-use crate::core::sidecar::{KernelState, SidecarHandle};
+use crate::core::sidecar::{self, KernelState, SidecarHandle};
 use crate::events;
 
 /// The concrete socket this module speaks. With no TLS feature enabled
@@ -104,9 +104,12 @@ pub fn spawn<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandle) {
 
     tauri::async_runtime::spawn(async move {
         loop {
-            // Idle until the kernel is up — there is nothing to connect to
-            // before the controller port is bound.
-            if sidecar.state() != KernelState::Running {
+            // Idle until the kernel is up — either the regular sidecar is
+            // `Running`, or the elevated TUN kernel owns the controller
+            // (`TunState::On`). The latter has no sidecar child, so checking
+            // `sidecar.state()` alone would leave /traffic and /logs dark for
+            // the whole TUN session.
+            if sidecar::effective_state(&app, &sidecar) != KernelState::Running {
                 tokio::time::sleep(KERNEL_POLL).await;
                 continue;
             }
@@ -136,7 +139,7 @@ async fn run_session<R: Runtime>(app: &AppHandle<R>, sidecar: &SidecarHandle) {
         logs_session::<R>,
     ));
 
-    while sidecar.state() == KernelState::Running {
+    while sidecar::effective_state(app, sidecar) == KernelState::Running {
         tokio::time::sleep(KERNEL_POLL).await;
     }
 

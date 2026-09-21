@@ -230,7 +230,7 @@ pub async fn update_subscription<R: Runtime>(
         let reactivated = profile_ops::activate_profile(&storage, &id)?;
         meta = reactivated;
         let sidecar = app.state::<SidecarHandle>();
-        if sidecar.state() == sidecar::KernelState::Running {
+        if sidecar::effective_state(&app, sidecar.inner()) == sidecar::KernelState::Running {
             let rel = reload_via_controller(&meta.file_path).await;
             match rel {
                 Ok(()) => {
@@ -299,7 +299,8 @@ pub async fn set_active_profile<R: Runtime>(
 
     // 2) If the kernel is running, ask mihomo to reload from disk.
     let sidecar = app.state::<SidecarHandle>();
-    let is_running = sidecar.state() == sidecar::KernelState::Running;
+    let is_running =
+        sidecar::effective_state(&app, sidecar.inner()) == sidecar::KernelState::Running;
     if !is_running {
         let _ = app.emit(
             crate::events::KERNEL_LOG,

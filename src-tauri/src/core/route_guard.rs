@@ -115,6 +115,12 @@ pub fn cleanup_tun_device() {
             .stderr(std::process::Stdio::null())
             .status();
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // No-op on Windows/macOS: the TUN adapter is owned by the kernel
+        // process (WinTun / utun) and is torn down by `taskkill` / process
+        // exit; there is no `ip link delete` equivalent to call.
+    }
 }
 
 // ---------------------------------------------------------------------------

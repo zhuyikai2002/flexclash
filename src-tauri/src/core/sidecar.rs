@@ -288,6 +288,24 @@ impl SidecarHandle {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+/// The kernel state the UI and data plane should treat as authoritative.
+///
+/// While the elevated TUN kernel owns the controller (`TunState::On`) it *is*
+/// the running kernel — there is no regular sidecar child, but 9091/7897 are
+/// fully served. Reporting `Stopped` here would wrongly disable proxy
+/// switching, node speed tests and traffic ingest.
+///
+/// Distinct from [`crate::core::tun::owns_ports`] (which also covers the
+/// `Enabling` window): this only flips to `Running` once the elevated kernel is
+/// actually healthy.
+pub fn effective_state<R: Runtime>(app: &AppHandle<R>, handle: &SidecarHandle) -> KernelState {
+    if crate::core::tun::is_on(app) {
+        KernelState::Running
+    } else {
+        handle.state()
+    }
+}
+
 /// Start the Mihomo sidecar. Refuses if already running.
 pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Result<()> {
     // Single choke point: while TUN owns the controller/mixed ports, starting

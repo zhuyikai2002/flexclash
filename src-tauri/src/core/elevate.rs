@@ -201,7 +201,9 @@ mod platform {
         )))
     }
 
-    /// Spawn mihomo with `runas` via ShellExecuteExW. Returns the new PID.
+    /// Spawn mihomo with `runas` via ShellExecuteExW. Returns the new PID and
+    /// `None` (a shell launch has no `std::process::Child` handle; cleanup
+    /// goes through `taskkill`).
     /// `wait` is false (the elevate path does not block on the child —
     /// UAC consent is the only blocking step).
     pub(super) fn runas_spawn(

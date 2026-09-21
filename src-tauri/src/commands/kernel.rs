@@ -23,7 +23,9 @@ pub async fn start_kernel<R: Runtime>(
         let msg = "[kernel] start_kernel ignored — TUN owns the kernel (9091/7897)";
         eprintln!("{msg}");
         let _ = app.emit(crate::events::KERNEL_LOG, msg);
-        return Ok(KernelState::Stopped);
+        // TUN is the running kernel: report `Running` so the UI keeps proxy
+        // switching / speed tests / traffic enabled, but do NOT spawn anything.
+        return Ok(KernelState::Running);
     }
     sidecar::start(&app, handle.inner().clone()).await?;
     Ok(handle.state())
@@ -48,7 +50,7 @@ pub async fn restart_kernel<R: Runtime>(
         let msg = "[kernel] restart_kernel ignored — TUN owns the kernel (9091/7897)";
         eprintln!("{msg}");
         let _ = app.emit(crate::events::KERNEL_LOG, msg);
-        return Ok(KernelState::Stopped);
+        return Ok(KernelState::Running);
     }
     sidecar::restart(&app, handle.inner().clone()).await?;
     Ok(handle.state())
@@ -56,6 +58,16 @@ pub async fn restart_kernel<R: Runtime>(
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_kernel_state(handle: State<'_, SidecarHandle>) -> KernelState {
+pub fn get_kernel_state<R: Runtime>(
+    app: AppHandle<R>,
+    handle: State<'_, SidecarHandle>,
+) -> KernelState {
+    // While TUN owns the controller the elevated kernel serves 9091/7897, so
+    // the authoritative state is `Running` even though the regular sidecar
+    // handle is `Stopped`. This is what keeps the renderer's policy-group
+    // selector, node speed tests and traffic graph enabled.
+    if tun::owns_ports(&app) {
+        return KernelState::Running;
+    }
     handle.state()
 }

@@ -103,6 +103,18 @@ pub fn owns_ports<R: Runtime>(app: &AppHandle<R>) -> bool {
     }
 }
 
+/// True only once the elevated TUN kernel is healthy and serving 9091/7897
+/// (`TunState::On`).
+///
+/// Distinct from [`owns_ports`], which also covers the `Enabling` window where
+/// the elevated child is still binding and the controller may not answer yet.
+/// This is the predicate the UI/data-plane uses to decide "the kernel is up".
+pub fn is_on<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<TunManager>()
+        .map(|mgr| mgr.status().state == TunState::On)
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TunStatus {
     pub state: TunState,
@@ -396,17 +408,41 @@ impl Default for TunManager {
 // `tauri::Manager` import is in one place).
 // ============================================================================
 pub mod tun_events {
-    use super::TunStatus;
+    use super::{TunState, TunStatus};
     use crate::events::TUN_STATE_CHANGED;
-    use tauri::{AppHandle, Emitter};
+    use tauri::{AppHandle, Emitter, Manager};
 
     /// Broadcast the current TUN status to every window. Best-effort:
     /// if the AppHandle cannot be located (e.g. very early boot), the
     /// state is still recorded in `TunManager.inner` and the next
     /// `get_tun_state` poll will pick it up.
+    ///
+    /// Also mirrors the **effective kernel state** onto `kernel://state`: while
+    /// TUN is `On`, the elevated kernel serves 9091/7897, so the renderer's
+    /// kernel store must see `Running` or it disables proxy switching, speed
+    /// tests and the live traffic graph.
     pub fn broadcast_state(snap: &TunStatus) {
         if let Some(app) = try_app_handle() {
             let _ = app.emit(TUN_STATE_CHANGED, snap.clone());
+
+            // Mirror the effective kernel state only on *terminal* TUN states.
+            // `Enabling`/`Disabling` are transient: the regular sidecar's own
+            // `kernel://state` events already cover that window, and emitting
+            // here too would flicker Running → Stopped → Running.
+            let effective = match snap.state {
+                TunState::On => Some(crate::core::sidecar::KernelState::Running),
+                TunState::Off | TunState::Failed => {
+                    Some(
+                        app.try_state::<crate::core::sidecar::SidecarHandle>()
+                            .map(|h| h.state())
+                            .unwrap_or(crate::core::sidecar::KernelState::Stopped),
+                    )
+                }
+                TunState::Enabling | TunState::Disabling => None,
+            };
+            if let Some(state) = effective {
+                let _ = app.emit(crate::events::KERNEL_STATE, state);
+            }
         }
     }
 
