@@ -32,7 +32,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_specta::Event;
 
 use crate::core::sidecar::{self, ExitEvent, KernelState, SidecarHandle};
@@ -204,6 +204,25 @@ pub fn spawn<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandle) {
     });
 }
 
+/// Snapshot the TUN state, if the manager is registered. Split from
+/// `tun_owns_kernel` so the exact value can be logged when the guard fires.
+fn current_tun_state<R: Runtime>(app: &AppHandle<R>) -> Option<crate::core::tun::TunState> {
+    app.try_state::<crate::core::tun::TunManager>()
+        .map(|mgr| mgr.status().state)
+}
+
+/// True while TUN owns the kernel: `Enabling` (elevated child launching) or
+/// `On` (elevated child serving). In that window the regular sidecar is
+/// *expected* to be absent — the elevated TUN kernel holds the controller
+/// (9091) and mixed (7897) ports — so a crash-driven restart must be
+/// suppressed or the two kernels would fight for the same sockets.
+fn tun_owns_kernel<R: Runtime>(app: &AppHandle<R>) -> bool {
+    matches!(
+        current_tun_state(app),
+        Some(crate::core::tun::TunState::Enabling | crate::core::tun::TunState::On)
+    )
+}
+
 /// Process one crash through the full recovery lifecycle: record it, apply
 /// the breaker, back off, relaunch, and watch for stability. Re-enters itself
 /// when the kernel crashes again during the stability window or when a
@@ -217,6 +236,42 @@ async fn handle_crash<R: Runtime>(
     mut signal: Option<i32>,
 ) {
     loop {
+        // Unconditional diagnostic: every crash must print the TUN state it
+        // observed, so a guard that fails to fire is immediately explainable.
+        eprintln!(
+            "[supervisor] handle_crash: tun_state={:?} sidecar_state={:?} code={code:?} signal={signal:?}",
+            current_tun_state(app),
+            sidecar.state(),
+        );
+
+        // TUN takeover guard (see `tun_owns_kernel`): the sidecar may have
+        // been reaped by the elevated child's `pkill -9`, or a previous
+        // supervised restart may have raced TUN startup. Never resurrect the
+        // regular sidecar while TUN is enabling/on. The exact state is
+        // logged so a guard that fails to fire is diagnosable.
+        if let Some(state) = current_tun_state(app) {
+            if matches!(
+                state,
+                crate::core::tun::TunState::Enabling | crate::core::tun::TunState::On
+            ) {
+                sidecar.set_state(KernelState::Stopped);
+                policy.reset();
+                eprintln!(
+                    "[supervisor] TUN guard fired (state={}); backtrace:\n{}",
+                    state.as_str(),
+                    std::backtrace::Backtrace::force_capture()
+                );
+                log(
+                    app,
+                    format!(
+                        "[supervisor] sidecar exited while TUN={} — standing down (no restart)",
+                        state.as_str()
+                    ),
+                );
+                return;
+            }
+        }
+
         let decision = policy.on_crash(Instant::now());
 
         let (delay, attempt, consecutive) = match decision {
@@ -275,6 +330,21 @@ async fn handle_crash<R: Runtime>(
                 return;
             }
             KernelState::Recovering | KernelState::Crashed => {}
+        }
+
+        // Re-check TUN ownership *after* the backoff: the user may have
+        // enabled TUN while we were sleeping, in which case restarting the
+        // sidecar would fight the elevated kernel for 9091/7897. The
+        // manual-takeover check above does not cover this because `enable`
+        // can be mid-flight (state still `Recovering`/`Crashed`).
+        if tun_owns_kernel(app) {
+            sidecar.set_state(KernelState::Stopped);
+            policy.reset();
+            log(
+                app,
+                "[supervisor] TUN took over during backoff — standing down (no restart)",
+            );
+            return;
         }
 
         match sidecar::start(app, sidecar.clone()).await {

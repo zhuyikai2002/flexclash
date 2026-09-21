@@ -127,7 +127,8 @@
       },
       "tun": {
         "title": "TUN 透明代理",
-        "description": "通过 Wintun 内核驱动接管全部流量"
+        "description": "通过 Wintun 内核驱动接管全部流量",
+        "description_linux": "通过 Linux TUN 虚拟网卡接管全部流量"
       }
     },
     "outbound_mode": {

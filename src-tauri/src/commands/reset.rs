@@ -142,7 +142,7 @@ pub async fn reset_application<R: Runtime>(
 
     // ----- 2. Stop TUN (best effort, rolls back config + sweeps routes) --
     if report.tun_was_on {
-        if let Err(e) = tun.disable(&app, &storage) {
+        if let Err(e) = tun.disable(&app, &storage, false) {
             eprintln!("[reset] tun.disable failed: {e}");
         } else {
             report.swept_routes = true;

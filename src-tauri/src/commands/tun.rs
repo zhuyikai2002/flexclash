@@ -64,7 +64,12 @@ pub fn get_tun_state<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
 /// arguments to camelCase, and pinning the convention here is what keeps the
 /// Rust parameter names and the `invoke` payload in `src/services/tun.ts`
 /// from silently drifting apart.
-#[tauri::command]
+///
+/// `#[tauri::command(async)]` is load-bearing: `mgr.enable` blocks for up to
+/// 15 s waiting for the elevated kernel's `/version` probe. Without it the
+/// command runs on the main thread and freezes the whole UI (and every other
+/// IPC call) for the length of the bring-up.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn enable_tun<R: Runtime>(
     app: AppHandle<R>,
@@ -125,14 +130,17 @@ pub async fn apply_tun_advanced<R: Runtime>(
 
 /// Disable TUN. Symmetric to `enable_tun`; rolls forward even on
 /// partial failure (best-effort cleanup) and returns the final state.
-#[tauri::command]
+///
+/// `#[tauri::command(async)]` keeps the synchronous stop/reap/restart work
+/// off the main thread, same rationale as `enable_tun`.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
     let mgr = app
         .try_state::<TunManager>()
         .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
     let storage = storage_for(&app)?;
-    let res = mgr.disable(&app, &storage);
+    let res = mgr.disable(&app, &storage, true);
     let _ = tray::update_tray_icon(&app);
     res
 }

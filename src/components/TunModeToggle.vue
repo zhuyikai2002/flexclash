@@ -16,6 +16,7 @@ import {
 } from 'lucide-vue-next'
 import { useTunStore } from '@/stores/tun'
 import { useI18n } from '@/composables/useI18n'
+import { isLinux } from '@/utils/platform'
 
 const store = useTunStore()
 const { t } = useI18n()
@@ -31,6 +32,13 @@ const busy = computed(() => store.busy || store.isTransitioning)
 const errMsg = computed(() => store.lastError)
 const stateLabel = computed(() => store.stateLabel)
 const state = computed(() => store.state)
+const linux = isLinux()
+const tunDescription = computed(() =>
+  linux
+    ? t('dashboard.toggles.tun.description_linux')
+    : t('dashboard.toggles.tun.description'),
+)
+const tunAdapterLabel = computed(() => (linux ? 'Linux TUN' : 'Wintun'))
 
 async function flip() {
   try { await store.toggle() } catch (e) { console.error('[tun] toggle failed', e) }
@@ -125,14 +133,14 @@ const accent = computed<'emerald' | 'amber' | 'sky'>(() => {
           </span>
         </div>
         <p class="mt-0.5 text-xs leading-relaxed text-zinc-400 line-clamp-2">
-          {{ t('dashboard.toggles.tun.description') }}
+          {{ tunDescription }}
         </p>
         <p
           v-if="isOn"
           class="mt-1 text-[11px] text-zinc-300"
         >
           <Shield class="inline h-3 w-3 mr-1 align-text-bottom text-emerald-400" />
-          Wintun <code class="font-mono text-zinc-400">{{ store.device }}</code> active
+          {{ tunAdapterLabel }} <code class="font-mono text-zinc-400">{{ store.device }}</code> active
         </p>
         <p
           v-else

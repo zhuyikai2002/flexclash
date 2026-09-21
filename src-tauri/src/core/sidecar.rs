@@ -290,6 +290,22 @@ impl SidecarHandle {
 
 /// Start the Mihomo sidecar. Refuses if already running.
 pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Result<()> {
+    // Single choke point: while TUN owns the controller/mixed ports, starting
+    // the regular sidecar is always wrong. It would fight the elevated TUN
+    // kernel for 9091/7897, and the resulting forced exit would be handed to
+    // the supervisor as a crash. Every caller (kernel commands, profile
+    // reload fallbacks, supervisor, ...) funnels through here.
+    if crate::core::tun::owns_ports(app) {
+        let msg = "[sidecar] start refused — TUN owns the kernel (9091/7897)";
+        eprintln!("{msg}");
+        let _ = app.emit(crate::events::KERNEL_LOG, msg);
+        // Normalise a stale `Running`/`Recovering` so the UI does not claim
+        // the regular kernel is alive while the elevated TUN kernel is the
+        // one serving 9091/7897.
+        handle.set_state(KernelState::Stopped);
+        return Ok(());
+    }
+
     // Guard against double-start.
     {
         let cur = handle.state();
@@ -354,6 +370,23 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
     }
 
     // 2) Spawn sidecar.
+    //
+    // HARD REFUSAL, immediately before the OS spawn. The top-of-function
+    // guard already covers this, but checking again here means no future
+    // refactor (or a TUN enable racing on another thread during config
+    // materialisation) can ever reach `cmd.spawn()` while the elevated TUN
+    // kernel owns 9091/7897. This is the last line of defence.
+    if crate::core::tun::owns_ports(app) {
+        eprintln!(
+            "[sidecar-core] HARD REFUSAL: blocking mihomo spawn because TUN owns kernel!"
+        );
+        let _ = app.emit(
+            crate::events::KERNEL_LOG,
+            "[sidecar-core] HARD REFUSAL: spawn blocked — TUN owns kernel (9091/7897)",
+        );
+        handle.set_state(KernelState::Stopped);
+        return Ok(());
+    }
     let shell = app.shell();
     let cmd = shell.sidecar(SIDECAR_NAME)?.args([
         "-d",

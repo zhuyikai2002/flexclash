@@ -127,7 +127,8 @@
       },
       "tun": {
         "title": "TUN Mode",
-        "description": "Capture all traffic via the Wintun kernel driver"
+        "description": "Capture all traffic via the Wintun kernel driver",
+        "description_linux": "Capture all traffic via the Linux TUN virtual adapter"
       }
     },
     "outbound_mode": {

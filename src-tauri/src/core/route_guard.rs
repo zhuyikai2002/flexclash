@@ -96,6 +96,27 @@ pub fn sweep_residual_routes() -> SweepResultFull {
     result
 }
 
+/// Best-effort removal of the TUN link itself.
+///
+/// Split out from [`sweep_residual_routes`] so the TUN *disable* path can
+/// delete the device the elevated kernel owned *after* that kernel is gone,
+/// without the generic "fix it now" sweep ever tearing down a live TUN.
+///
+/// On Linux a mihomo-created TUN device is non-persistent and the kernel
+/// reaps it when the owning process exits, so this is belt-and-suspenders for
+/// the SIGKILL/crash case. Unprivileged callers get a non-zero `ip` exit,
+/// which is a silent no-op — never an error.
+pub fn cleanup_tun_device() {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("ip")
+            .args(["link", "delete", TUN_DEVICE_NAME])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Windows: routes
 // ---------------------------------------------------------------------------

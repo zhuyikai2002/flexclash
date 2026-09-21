@@ -6,6 +6,7 @@ import { onMounted, computed } from 'vue'
 import { Power } from 'lucide-vue-next'
 import { useDesktopStore } from '@/stores/desktop'
 import { useI18n } from '@/composables/useI18n'
+import { isLinux } from '@/utils/platform'
 import ToggleCard from './ToggleCard.vue'
 
 const store = useDesktopStore()
@@ -29,6 +30,12 @@ const detail = computed(() => {
   return ''
 })
 
+const hint = computed(() =>
+  isLinux()
+    ? '~/.config/autostart/flexclash.desktop'
+    : 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\FlexClash',
+)
+
 async function flip() {
   try {
     await store.toggle()
@@ -47,7 +54,7 @@ async function flip() {
     :description="t('dashboard.toggles.autostart.description')"
     :detail="detail"
     :error="errMsg"
-    :hint="`HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\FlexClash`"
+    :hint="hint"
     accent="indigo"
     @toggle="flip"
   />

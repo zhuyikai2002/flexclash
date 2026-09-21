@@ -403,6 +403,9 @@ async fn run_pool(app: AppHandle, registry: std::sync::Arc<SpeedTestRegistry>, s
     let total = nodes.len() as u32;
 
     let client = match reqwest::Client::builder()
+        // Probes hit the local controller (`/proxies/{name}/delay`); never
+        // route them through a system / environment proxy.
+        .no_proxy()
         .timeout(Duration::from_millis(
             u64::from(timeout_ms) + CLIENT_TIMEOUT_GRACE_MS,
         ))

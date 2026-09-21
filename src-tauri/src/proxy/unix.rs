@@ -16,35 +16,45 @@ use super::ProxyStatus;
 
 const HOST: &str = "127.0.0.1";
 
-/// Run a gsettings command and map failures to a readable string.
-fn gset(schema_key: &str, value: &str) -> Result<(), String> {
-    // gsettings expects the value *already shell-quoted* for strings
-    // (e.g. "'manual'") but plain integers pass through unquoted.
+/// Run a `gsettings set` command and map failures to a readable string.
+///
+/// `gsettings set` takes the schema and key as **separate** argv elements:
+///
+/// ```text
+/// gsettings set org.gnome.system.proxy mode manual
+/// ```
+///
+/// Previously the schema and key were joined into one argument
+/// (`org.gnome.system.proxy.mode`), which gsettings rejected with its
+/// "usage" error. String values (`manual`, `none`, `127.0.0.1`) must also
+/// be passed as bare strings — no outer single/double quotes — because
+/// `Command` performs no shell interpretation.
+fn gset(schema: &str, key: &str, value: &str) -> Result<(), String> {
     let out = std::process::Command::new("gsettings")
         .arg("set")
-        .arg(schema_key)
+        .arg(schema)
+        .arg(key)
         .arg(value)
         .output()
         .map_err(|e| format!("gsettings not found / spawn failed: {e}"))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        return Err(format!("gsettings set {schema_key} {value} -> {stderr}"));
+        return Err(format!("gsettings set {schema} {key} {value} -> {stderr}"));
     }
     Ok(())
 }
 
-/// Enable a manual proxy for one gsettings "family" (http / https / ftp).
+/// Enable a manual proxy for one gsettings "family" (http / https / socks).
 fn set_family(family: &str, port: u16) -> Result<(), String> {
-    // A family may not exist in the schema on every desktop (e.g. some
-    // stripped GNOME builds omit ftp). Missing schemas would fail loudly,
-    // so we only touch the families that are universally present.
-    if matches!(family, "http" | "https" | "ftp") {
+    // A family may not exist in the schema on every desktop, but http,
+    // https and socks are the universally present GNOME proxy families.
+    // mihomo's `mixed-port` serves HTTP and SOCKS on the same port, so
+    // all three families share the single inbound port.
+    if matches!(family, "http" | "https" | "socks") {
+        gset(&format!("org.gnome.system.proxy.{family}"), "host", HOST)?;
         gset(
-            &format!("org.gnome.system.proxy.{family}.host"),
-            &format!("'{HOST}'"),
-        )?;
-        gset(
-            &format!("org.gnome.system.proxy.{family}.port"),
+            &format!("org.gnome.system.proxy.{family}"),
+            "port",
             &port.to_string(),
         )?;
     }
@@ -54,8 +64,8 @@ fn set_family(family: &str, port: u16) -> Result<(), String> {
 pub fn set_system_proxy(port: u16) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        gset("org.gnome.system.proxy.mode", "'manual'")?;
-        for family in ["http", "https", "ftp"] {
+        gset("org.gnome.system.proxy", "mode", "manual")?;
+        for family in ["http", "https", "socks"] {
             set_family(family, port)?;
         }
         Ok(())
@@ -70,7 +80,7 @@ pub fn set_system_proxy(port: u16) -> Result<(), String> {
 pub fn disable_system_proxy() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        gset("org.gnome.system.proxy.mode", "'none'")
+        gset("org.gnome.system.proxy", "mode", "none")
     }
     #[cfg(target_os = "macos")]
     {
@@ -83,7 +93,8 @@ pub fn query_system_proxy_status() -> Option<ProxyStatus> {
     {
         let out = std::process::Command::new("gsettings")
             .arg("get")
-            .arg("org.gnome.system.proxy.mode")
+            .arg("org.gnome.system.proxy")
+            .arg("mode")
             .output()
             .ok()?;
         if !out.status.success() {
@@ -103,7 +114,8 @@ pub fn query_system_proxy_status() -> Option<ProxyStatus> {
         // Read the http port so the server string is complete.
         let port = std::process::Command::new("gsettings")
             .arg("get")
-            .arg("org.gnome.system.proxy.http.port")
+            .arg("org.gnome.system.proxy.http")
+            .arg("port")
             .output()
             .ok()
             .and_then(|o| {

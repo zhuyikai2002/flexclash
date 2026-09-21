@@ -660,6 +660,17 @@ pub fn toggle_tun_block(
         insert_str_map(&mut tun, "device", TUN_DEVICE);
         insert_bool_map(&mut tun, "auto-route", true);
         insert_bool_map(&mut tun, "auto-detect-interface", TUN_AUTO_DETECT_INTERFACE);
+
+        // Linux: `auto-route` alone can fail to feed locally-generated TCP
+        // into mihomo's TUN stack when another nftables/iptables manager
+        // (Docker, firewalld, ...) owns or clobbers mihomo's divert chain —
+        // the classic "interface is UP but curl times out" black hole.
+        // `auto-redirect` installs a nat REDIRECT as a second path and is
+        // what actually carries host traffic on those systems. There is no
+        // WinTun equivalent, hence the cfg.
+        #[cfg(target_os = "linux")]
+        insert_bool_map(&mut tun, "auto-redirect", true);
+
         // Documented explicitly in both directions rather than omitted when
         // off: a profile may ship its own `strict-route: true`, and "the
         // switch is off" has to mean false, not "leave whatever was there".
@@ -744,26 +755,62 @@ fn locked_dns_block() -> serde_yaml::Mapping {
 /// Add (enable) or remove (disable) the locked-in DNS block.
 ///
 /// Asymmetric on purpose:
-/// * `enable` **only fills a hole** — a profile that brings its own `dns:`
-///   is never rewritten, because its `nameserver-policy` / rule-set split
-///   resolution is better than anything we could invent.
+/// * `enable` **fills a missing block wholesale** but, when the profile ships
+///   its own `dns:`, only *forces the three keys TUN cannot work without*:
+///   `enable: true`, `enhanced-mode: fake-ip`, and a non-empty `nameserver`.
+///   `dns-hijack` makes mihomo the resolver for the whole host, so a profile
+///   block with `enable: false` or no nameserver turns every query into a
+///   black hole. Every other key (`respect-rules`, `nameserver-policy`, …) is
+///   left intact because the subscription's split resolution is better
+///   informed than ours.
 /// * `disable` **only removes our own block** — if the on-disk mapping is
 ///   not byte-for-byte what `locked_dns_block()` produces, the user (or a
 ///   re-activated subscription) owns it and we leave it alone.
 fn inject_tun_dns(m: &mut serde_yaml::Mapping, enable: bool) {
+    let dns_key = serde_yaml::Value::String("dns".into());
+
     if enable {
-        if m.get("dns").is_none() {
-            m.insert(
-                serde_yaml::Value::String("dns".into()),
-                serde_yaml::Value::Mapping(locked_dns_block()),
-            );
+        // No usable `dns:` mapping → stamp our locked block wholesale.
+        if !matches!(m.get(&dns_key), Some(serde_yaml::Value::Mapping(_))) {
+            m.insert(dns_key, serde_yaml::Value::Mapping(locked_dns_block()));
+            return;
+        }
+
+        // Profile-owned block: force only the keys the TUN DNS path needs.
+        if let Some(serde_yaml::Value::Mapping(dns)) = m.get_mut(&dns_key) {
+            insert_bool_map(dns, "enable", true);
+            insert_str_map(dns, "enhanced-mode", TUN_DNS_ENHANCED_MODE);
+
+            let has_nameserver = dns
+                .get(serde_yaml::Value::String("nameserver".into()))
+                .and_then(|v| v.as_sequence())
+                .is_some_and(|seq| !seq.is_empty());
+            if !has_nameserver {
+                let ns: serde_yaml::Sequence = TUN_DNS_NAMESERVERS
+                    .iter()
+                    .map(|s| serde_yaml::Value::String((*s).into()))
+                    .collect();
+                dns.insert(
+                    serde_yaml::Value::String("nameserver".into()),
+                    serde_yaml::Value::Sequence(ns),
+                );
+            }
+
+            // fake-ip mode needs a range; fill the default when absent.
+            if dns
+                .get(serde_yaml::Value::String("fake-ip-range".into()))
+                .is_none()
+            {
+                insert_str_map(dns, "fake-ip-range", TUN_DNS_FAKE_IP_RANGE);
+            }
         }
         return;
     }
+
     let ours = serde_yaml::Value::Mapping(locked_dns_block());
-    let is_ours = m.get("dns").map(|v| *v == ours).unwrap_or(false);
+    let is_ours = m.get(&dns_key).map(|v| *v == ours).unwrap_or(false);
     if is_ours {
-        m.remove("dns");
+        m.remove(&dns_key);
     }
 }
 
@@ -789,6 +836,31 @@ mod tun_yaml_tests {
         assert!(out.contains("enable: true"));
         // Reserved fields untouched.
         assert!(out.contains("external-controller: 127.0.0.1:9091"));
+    }
+
+    /// Linux needs `auto-redirect` on top of `auto-route`: without it,
+    /// host-generated TCP can bypass mihomo's TUN stack (black hole) when
+    /// another nftables/iptables manager owns the divert chain. Windows has
+    /// no WinTun equivalent, so the key must be Linux-only.
+    #[test]
+    fn inject_tun_enables_auto_redirect_on_linux_only() {
+        let out = toggle_tun_block("mixed-port: 7897\n", true, TunAdvanced::default()).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let tun = doc
+            .as_mapping()
+            .unwrap()
+            .get("tun")
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let redirect = tun
+            .get(serde_yaml::Value::String("auto-redirect".into()))
+            .and_then(|v| v.as_bool());
+        if cfg!(target_os = "linux") {
+            assert_eq!(redirect, Some(true), "linux needs auto-redirect:\n{out}");
+        } else {
+            assert_eq!(redirect, None, "auto-redirect must stay linux-only:\n{out}");
+        }
     }
 
     /// The two switches must actually reach the yaml, in both directions.
@@ -904,6 +976,35 @@ mod tun_yaml_tests {
         assert_eq!(ns[0].as_str(), Some("223.5.5.5"));
         // Reserved fields still untouched.
         assert!(out.contains("external-controller: 127.0.0.1:9091"));
+    }
+
+    #[test]
+    fn inject_tun_forces_dns_essentials_on_a_profile_block() {
+        // A subscription block that would black-hole every hijacked query:
+        // DNS disabled, no fake-ip mode, no nameserver.
+        let yaml = "mixed-port: 7897\n\
+                    dns:\n  enable: false\n  respect-rules: true\n";
+        let out = toggle_tun_block(yaml, true, TunAdvanced::default()).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let dns = doc
+            .as_mapping()
+            .unwrap()
+            .get("dns")
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .clone();
+        let get = |k: &str| dns.get(serde_yaml::Value::String(k.into())).cloned();
+        assert_eq!(get("enable").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            get("enhanced-mode").and_then(|v| v.as_str().map(String::from)),
+            Some("fake-ip".into())
+        );
+        assert!(get("nameserver")
+            .and_then(|v| v.as_sequence().map(|s| s.len()))
+            .is_some_and(|n| n > 0));
+        // The profile's own keys must survive.
+        assert_eq!(get("respect-rules").and_then(|v| v.as_bool()), Some(true));
     }
 
     #[test]

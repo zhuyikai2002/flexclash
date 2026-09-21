@@ -52,9 +52,14 @@ static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 /// with the spawn result.
 static ELEVATED_PID: OnceLock<Mutex<Option<ElevatedChild>>> = OnceLock::new();
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct ElevatedChild {
     pid: u32,
+    /// The OS child handle when the platform spawned the kernel through
+    /// `std::process::Command` (Linux). Kept so `graceful_stop` can `wait()`
+    /// on it and reap it, preventing a `<defunct>` zombie. Windows launches
+    /// via `ShellExecuteExW` and has no such handle (`None`).
+    child: Option<std::process::Child>,
 }
 
 pub fn install(app: AppHandle) {
@@ -203,7 +208,7 @@ mod platform {
         binary: &Path,
         work_dir: &std::path::Path,
         config_path: &std::path::Path,
-    ) -> Result<u32> {
+    ) -> Result<(u32, Option<std::process::Child>)> {
         // Build a single command line: `mihomo.exe -d <work> -f <config>`.
         let params = format!(
             "\"-d\" \"{}\" \"-f\" \"{}\"",
@@ -260,7 +265,9 @@ mod platform {
         // continue (we still have `stop_elevated_mihomo` as the
         // belt-and-suspenders cleanup).
         let pid = resolve_pid_via_tasklist(binary).unwrap_or(0);
-        Ok(pid as u32)
+        // Windows has no `std::process::Child` handle for a ShellExecuteExW
+        // launch; cleanup goes through `taskkill`.
+        Ok((pid as u32, None))
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -374,7 +381,7 @@ mod platform {
 
     /// Send Ctrl+Break to the elevated child. Mihomo catches it and
     /// shuts down cleanly. If that fails, we fall back to `taskkill`.
-    pub(super) fn graceful_stop(pid: u32) -> Result<()> {
+    pub(super) fn graceful_stop(pid: u32, _child: Option<std::process::Child>) -> Result<()> {
         if pid == 0 {
             return stop_via_taskkill();
         }
@@ -410,22 +417,163 @@ mod platform {
     use std::path::{Path, PathBuf};
     use tauri::{AppHandle, Runtime};
 
+    /// Linux has no Wintun/UAC elevation step: mihomo only needs the
+    /// `cap_net_admin` (+ `cap_net_bind_service`) capabilities, so we spawn
+    /// the sidecar directly instead of failing with a Windows-only error.
+    #[cfg(target_os = "linux")]
+    pub(super) fn resolve_mihomo_binary<R: Runtime>(
+        app: &AppHandle<R>,
+        work_dir: &Path,
+    ) -> Result<PathBuf> {
+        use tauri::path::BaseDirectory;
+        use tauri::Manager;
+
+        const SIDECAR_BIN: &str = "mihomo-x86_64-unknown-linux-gnu";
+        const SIDECAR_BIN_FALLBACK: &str = "mihomo";
+        const SOURCE_BINARIES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/binaries");
+
+        let mut candidates: Vec<PathBuf> = Vec::new();
+
+        // (1) Tauri 2 native resolution (dev points at the source
+        //     `binaries/` dir; production points at the bundle resource).
+        if let Ok(p) = app.path().resolve(SIDECAR_BIN, BaseDirectory::Resource) {
+            if p.exists() {
+                candidates.push(p);
+            }
+        }
+
+        // (2) Compile-time source-of-truth for `tauri:dev`.
+        candidates.push(PathBuf::from(SOURCE_BINARIES_DIR).join(SIDECAR_BIN));
+
+        // (3) & (4) Production installs: sidecar copied next to the
+        //     running exe, optionally under `resources/`.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join(SIDECAR_BIN));
+                candidates.push(dir.join("resources").join(SIDECAR_BIN));
+            }
+        }
+
+        // (5) AppData work dir (legacy / user-overridden) + bare fallback.
+        candidates.push(work_dir.join(SIDECAR_BIN));
+        candidates.push(work_dir.join(SIDECAR_BIN_FALLBACK));
+
+        // (6) Bare `mihomo` next to the running exe.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join(SIDECAR_BIN_FALLBACK));
+            }
+        }
+
+        for cand in &candidates {
+            if cand.exists() {
+                let abs = cand.canonicalize().unwrap_or_else(|_| cand.clone());
+                eprintln!("[elevate] resolved mihomo binary: {}", abs.display());
+                return Ok(abs);
+            }
+        }
+
+        Err(AppError::Tun(format!(
+            "mihomo binary not found in any of the {} search paths; first candidate was {}",
+            candidates.len(),
+            candidates
+                .first()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+        )))
+    }
+
+    #[cfg(target_os = "macos")]
     pub(super) fn resolve_mihomo_binary<R: Runtime>(
         _app: &AppHandle<R>,
         _work_dir: &Path,
     ) -> Result<PathBuf> {
         Err(AppError::Tun("elevation is Windows-only in Phase 1".into()))
     }
+
+    #[cfg(target_os = "linux")]
     pub(super) fn runas_spawn(
-        _binary: &PathBuf,
+        binary: &Path,
+        work_dir: &Path,
+        config_path: &Path,
+    ) -> Result<(u32, Option<std::process::Child>)> {
+        // A previous mihomo (the regular sidecar or a stale TUN child) may
+        // still be holding the controller (9091) / mixed (7897) ports. If we
+        // spawn a second kernel while those are bound, the new process fails
+        // to bind and exits immediately, showing up as `<defunct>` and
+        // leaving the app with no working kernel. Reap every mihomo instance
+        // first, then give the OS a moment to release the sockets.
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "-f", "mihomo"])
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let child = std::process::Command::new(binary)
+            .args([
+                "-d",
+                work_dir.to_string_lossy().as_ref(),
+                "-f",
+                config_path.to_string_lossy().as_ref(),
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| AppError::Tun(format!("failed to launch mihomo: {e}")))?;
+        Ok((child.id(), Some(child)))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn runas_spawn(
+        _binary: &Path,
         _work_dir: &Path,
         _config_path: &Path,
-    ) -> Result<u32> {
+    ) -> Result<(u32, Option<std::process::Child>)> {
         Err(AppError::Tun("elevation is Windows-only in Phase 1".into()))
     }
-    pub(super) fn graceful_stop(_pid: u32) -> Result<()> {
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn graceful_stop(pid: u32, mut child: Option<std::process::Child>) -> Result<()> {
+        // Last-resort sweep by process name. Used when we have no PID
+        // (pid == 0) or when the targeted kill did not succeed, so a stale
+        // elevated child can never keep the ports bound.
+        let pkill_all = || {
+            let _ = std::process::Command::new("pkill")
+                .args(["-9", "-f", "mihomo"])
+                .status();
+        };
+
+        if pid == 0 {
+            pkill_all();
+        } else {
+            let term = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+            if !matches!(term, Ok(s) if s.success()) {
+                // Targeted SIGKILL, then the name-based sweep as a final
+                // fallback.
+                let _ = std::process::Command::new("kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status();
+                pkill_all();
+            }
+        }
+
+        // Reap the child we spawned so it can never linger as `<defunct>`.
+        // Every kill path above is fatal, so `wait()` returns promptly; a
+        // child that already exited is reaped immediately.
+        if let Some(child) = child.as_mut() {
+            let _ = child.wait();
+        }
         Ok(())
     }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn graceful_stop(_pid: u32, _child: Option<std::process::Child>) -> Result<()> {
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(super) fn runas_exec_wait(_binary: &Path, _args: &str) -> Result<i32> {
         Err(AppError::Elevation(
             "privilege elevation is Windows-only".into(),
@@ -456,19 +604,43 @@ pub fn spawn_elevated_mihomo<R: Runtime>(app: &AppHandle<R>) -> Result<u32> {
     let config_path = work_dir.join("config.yaml");
     let binary = platform::resolve_mihomo_binary(app, &work_dir)?;
 
-    let pid = platform::runas_spawn(&binary, &work_dir, &config_path)?;
-    *registry().lock().expect("elevated registry poisoned") = Some(ElevatedChild { pid });
+    let (pid, child) = platform::runas_spawn(&binary, &work_dir, &config_path)?;
+    *registry().lock().expect("elevated registry poisoned") = Some(ElevatedChild { pid, child });
     Ok(pid)
 }
 
 pub fn stop_elevated_mihomo() -> Result<()> {
-    let pid = registry()
+    let elevated = registry()
         .lock()
         .expect("elevated registry poisoned")
-        .take()
-        .map(|c| c.pid)
-        .unwrap_or(0);
-    platform::graceful_stop(pid)
+        .take();
+    let pid = elevated.as_ref().map(|c| c.pid).unwrap_or(0);
+    let child = elevated.and_then(|c| c.child);
+    platform::graceful_stop(pid, child)
+}
+
+/// Friendly hint appended to TUN startup failures on Linux.
+///
+/// Unlike Windows, there is no UAC/elevation gate: mihomo only needs the
+/// `cap_net_admin` and `cap_net_bind_service` capabilities on the kernel
+/// binary. When a launch or health-check fails, the user can fix it by
+/// granting those capabilities once instead of being shown a generic
+/// Windows-only error.
+#[cfg(target_os = "linux")]
+pub fn tun_startup_hint<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let path = crate::core::sidecar::work_dir_for(app)
+        .ok()
+        .and_then(|work_dir| platform::resolve_mihomo_binary(app, &work_dir).ok())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<内核路径>".to_string());
+    Some(format!(
+        "Linux 环境下开启 TUN 请执行：sudo setcap cap_net_admin,cap_net_bind_service=+ep {path}"
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn tun_startup_hint<R: Runtime>(_app: &AppHandle<R>) -> Option<String> {
+    None
 }
 
 /// Run a short-lived helper elevated and block until it finishes.
@@ -501,22 +673,26 @@ pub fn wait_until_healthy(budget: Duration) -> Result<()> {
 /// running in a dev session, which made the old test flap.
 pub fn wait_until_healthy_at(addr: SocketAddr, budget: Duration) -> Result<()> {
     let deadline = Instant::now() + budget;
+    let mut last_err: Option<std::io::Error> = None;
     while Instant::now() < deadline {
-        if probe_version(addr).is_ok() {
-            return Ok(());
+        match probe_version(addr) {
+            Ok(()) => return Ok(()),
+            // A refused connect on the first ticks is the *expected* bring-up
+            // state, not an error. Keep the loop silent and remember the
+            // cause; it is surfaced exactly once if the budget is exhausted.
+            Err(e) => last_err = Some(e),
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    Err(AppError::Tun(format!(
-        "controller not healthy after {:?}",
-        budget
-    )))
+    let msg = format!("controller not healthy after {budget:?}: {last_err:?}");
+    eprintln!("[probe] {addr} {msg}");
+    Err(AppError::Tun(msg))
 }
 
 /// Minimal in-process HTTP/1.1 `GET /version` probe.
 ///
 /// Deliberately does **not** shell out to `curl.exe`. This function is
-/// polled every 200 ms for up to 8 s while TUN is coming up, so one
+/// polled every 200 ms for up to 15 s while TUN is coming up, so one
 /// subprocess per tick meant ~40 console-subprocess spawns per TUN
 /// toggle — each a potential black-box flash (and a hard dependency on
 /// `curl.exe` being present). A raw `GET` over `TcpStream` is

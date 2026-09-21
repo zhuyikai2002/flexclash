@@ -246,17 +246,24 @@ pub async fn update_subscription<R: Runtime>(
                     });
                 }
                 Err(e) => {
-                    let msg =
-                        format!("[subscription] reload after update failed ({e}); restarting");
-                    let _ = app.emit(crate::events::KERNEL_LOG, &msg);
-                    let handle = (*sidecar).clone();
-                    if sidecar::restart(&app, handle).await.is_ok() {
-                        let _ = app.emit(crate::events::PROFILE_RELOADED, &meta);
-                        let _ = app.emit(crate::events::PROFILE_LIST_CHANGED, &updated);
-                        return Ok(ReloadResult {
-                            status: ReloadStatus::Reloaded,
-                            detail: "updated + restart fallback".into(),
-                        });
+                    if crate::core::tun::owns_ports(&app) {
+                        let msg = format!(
+                            "[subscription] reload after update failed ({e}); TUN owns the kernel — restart suppressed"
+                        );
+                        let _ = app.emit(crate::events::KERNEL_LOG, &msg);
+                    } else {
+                        let msg =
+                            format!("[subscription] reload after update failed ({e}); restarting");
+                        let _ = app.emit(crate::events::KERNEL_LOG, &msg);
+                        let handle = (*sidecar).clone();
+                        if sidecar::restart(&app, handle).await.is_ok() {
+                            let _ = app.emit(crate::events::PROFILE_RELOADED, &meta);
+                            let _ = app.emit(crate::events::PROFILE_LIST_CHANGED, &updated);
+                            return Ok(ReloadResult {
+                                status: ReloadStatus::Reloaded,
+                                detail: "updated + restart fallback".into(),
+                            });
+                        }
                     }
                 }
             }
@@ -322,7 +329,18 @@ pub async fn set_active_profile<R: Runtime>(
             })
         }
         Err(e) => {
-            // 4) Fallback: restart the kernel.
+            // 4) Fallback: restart the kernel — but never while TUN owns the
+            //    ports, or the restart would fight the elevated kernel.
+            if crate::core::tun::owns_ports(&app) {
+                let msg = format!(
+                    "[profile] reload via API failed ({e}); TUN owns the kernel — restart suppressed"
+                );
+                let _ = app.emit(crate::events::KERNEL_LOG, &msg);
+                return Ok(ReloadResult {
+                    status: ReloadStatus::Failed,
+                    detail: format!("reload: {e}; restart suppressed (TUN active)"),
+                });
+            }
             let msg = format!("[profile] reload via API failed ({e}); restarting kernel");
             let _ = app.emit(crate::events::KERNEL_LOG, &msg);
             // Deref `tauri::State<SidecarHandle>` to the inner handle and clone.
@@ -416,6 +434,8 @@ pub(crate) async fn reload_via_controller(file_path: &str) -> Result<(), String>
     );
     let body = serde_json::json!({ "path": file_path }).to_string();
     let client = reqwest::Client::builder()
+        // Local controller call: bypass any system / environment proxy.
+        .no_proxy()
         .timeout(Duration::from_secs(8))
         .build()
         .map_err(|e| format!("build http client: {e}"))?;

@@ -268,12 +268,22 @@ fn base_url() -> String {
         .map(|a| a.trim().to_string())
         .filter(|a| !a.is_empty())
         .unwrap_or_else(|| RESERVED_CONTROLLER.to_string());
+    // Never hand `localhost` to reqwest for the loopback controller: an
+    // IPv6-first resolver can pick `::1` while mihomo listens on IPv4 only.
+    let addr = match addr.strip_prefix("localhost:") {
+        Some(rest) => format!("127.0.0.1:{rest}"),
+        None => addr,
+    };
     format!("http://{addr}")
 }
 
 /// Fire one request and return the raw body bytes (empty on 204).
 async fn request(method: reqwest::Method, path: &str, timeout_ms: u64) -> Result<Vec<u8>> {
     let client = reqwest::Client::builder()
+        // Local controller calls must never be routed through a system /
+        // environment proxy, or loopback requests get forwarded to the
+        // proxy port and fail with a connect error.
+        .no_proxy()
         .timeout(Duration::from_millis(timeout_ms))
         .build()
         .map_err(|e| AppError::Mihomo(format!("build http client: {e}")))?;

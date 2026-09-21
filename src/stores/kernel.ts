@@ -36,6 +36,7 @@ import {
 } from '@/utils/tauri-bridge'
 
 import { getVersion, MIHOMO_BASE_URL, pollUntil, isAlive } from '@/services/clash'
+import { getTunState } from '@/services/tun'
 
 /**
  * The renderer's single answer to "can we talk to the kernel right now?"
@@ -202,6 +203,18 @@ export const useKernelStore = defineStore('kernel', {
      * single entry point the App.vue mount flow uses.
      */
     async ensureRunning(): Promise<void> {
+      // Never start the regular kernel while TUN owns the controller/mixed
+      // ports — the elevated TUN kernel IS the kernel in that mode. This runs
+      // on every webview mount (including dev HMR), which is exactly when the
+      // app would otherwise resurrect `target/debug/mihomo` behind TUN's back.
+      // The Rust side (`start_kernel` + `sidecar::start`) guards too; this is
+      // the cheap first line of defence.
+      try {
+        const t = await getTunState()
+        if (t.state === 'enabling' || t.state === 'on') return
+      } catch {
+        // fall through — the Rust guard is authoritative
+      }
       try {
         if (inTauri('get_kernel_state')) {
           const s = await commands.getKernelState()

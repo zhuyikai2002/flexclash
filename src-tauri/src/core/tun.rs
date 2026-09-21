@@ -35,7 +35,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::config::profile::{self, ProfileStorage, TunAdvanced, TunPatchOutcome};
 use crate::core::route_guard;
@@ -72,6 +72,33 @@ impl TunState {
             TunState::On => "on",
             TunState::Disabling => "disabling",
             TunState::Failed => "failed",
+        }
+    }
+}
+
+/// True while TUN owns the controller (9091) and mixed (7897) ports —
+/// `Enabling` (elevated child launching) or `On` (elevated child serving).
+///
+/// This is the single predicate every "must not start the regular sidecar"
+/// guard uses. While it is true, spawning `target/debug/mihomo` would fight
+/// the elevated TUN kernel for the same sockets, and the forced exit would be
+/// misclassified as a crash by the supervisor.
+///
+/// Returns `false` if the manager is not registered (very early boot / tests),
+/// so the normal non-TUN path is never blocked.
+pub fn owns_ports<R: Runtime>(app: &AppHandle<R>) -> bool {
+    match app.try_state::<TunManager>() {
+        Some(mgr) => {
+            let state = mgr.status().state;
+            let active = matches!(state, TunState::Enabling | TunState::On);
+            if active {
+                eprintln!("[tun-guard] owns_ports = true (state: {:?})", state);
+            }
+            active
+        }
+        None => {
+            eprintln!("[tun-guard] WARN: app.try_state::<TunManager>() returned None (TunManager not managed?)");
+            false
         }
     }
 }
@@ -212,17 +239,32 @@ impl TunManager {
             return Err(e);
         }
 
-        // 3. Ask the elevate layer to launch mihomo with TUN. On UAC
+        // 3. Explicitly stop the regular sidecar before the elevated TUN
+        //    kernel starts. `spawn_elevated_mihomo` reaps mihomo with
+        //    `pkill -9`; a SIGKILL the drain task did not expect would be
+        //    classified as a crash and handed to the supervisor, which would
+        //    then relaunch a second kernel on the same 9091/7897 ports. Going
+        //    through `sidecar::stop` arms `stop_requested`, so the exit is
+        //    reported as intentional (`Clean`) and the supervisor stands
+        //    down. The brief pause lets the OS release the sockets.
+        if let Some(handle) = app.try_state::<crate::core::sidecar::SidecarHandle>() {
+            if let Err(e) = crate::core::sidecar::stop(handle.inner().clone()) {
+                eprintln!("[tun] pre-TUN sidecar stop reported: {e}");
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // 4. Ask the elevate layer to launch mihomo with TUN. On UAC
         //    cancel it returns Err(ElevateCancelled); we map that to
         //    the "failed" state and roll back the config patch.
         match crate::core::elevate::spawn_elevated_mihomo::<R>(app) {
             Ok(_pid) => {
-                // 4. Block (up to a budget) until the elevated mihomo
+                // 5. Block (up to a budget) until the elevated mihomo
                 //    is healthy. Health = /version returns 200 on the
                 //    controller port. We do NOT poll /traffic here —
                 //    the existing kernel manager owns that lifecycle.
                 let wait =
-                    crate::core::elevate::wait_until_healthy(std::time::Duration::from_secs(8));
+                    crate::core::elevate::wait_until_healthy(std::time::Duration::from_secs(15));
                 match wait {
                     Ok(()) => {
                         self.set_state(TunState::On, None);
@@ -238,7 +280,10 @@ impl TunManager {
                         let _ = profile::inject_tun_config(storage, false, advanced);
                         let post = route_guard::sweep_residual_routes();
                         self.record_sweep(post);
-                        let msg = format!("elevated mihomo not healthy: {e}");
+                        let mut msg = format!("elevated mihomo not healthy: {e}");
+                        if let Some(hint) = crate::core::elevate::tun_startup_hint(app) {
+                            msg = format!("{msg}. {hint}");
+                        }
                         self.set_state(TunState::Failed, Some(msg.clone()));
                         Err(AppError::Tun(msg))
                     }
@@ -249,7 +294,10 @@ impl TunManager {
                 let _ = profile::inject_tun_config(storage, false, advanced);
                 let post = route_guard::sweep_residual_routes();
                 self.record_sweep(post);
-                let msg = format!("elevation failed: {e}");
+                let mut msg = format!("elevation failed: {e}");
+                if let Some(hint) = crate::core::elevate::tun_startup_hint(app) {
+                    msg = format!("{msg}. {hint}");
+                }
                 self.set_state(TunState::Failed, Some(msg.clone()));
                 Err(AppError::Tun(msg))
             }
@@ -257,10 +305,16 @@ impl TunManager {
     }
 
     /// Drive a full disable transition.
+    ///
+    /// `restart_sidecar` controls what happens after the elevated TUN kernel
+    /// is gone: on the normal toggle-off path the regular (non-TUN) kernel is
+    /// brought back up, while `Reset Application` passes `false` because it is
+    /// about to tear the whole app down and wipe the work dir.
     pub fn disable<R: Runtime>(
         &self,
         app: &AppHandle<R>,
         storage: &ProfileStorage,
+        restart_sidecar: bool,
     ) -> Result<TunStatus> {
         let _gate = self.gate.lock().expect("tun gate poisoned");
         if matches!(self.snapshot().state, TunState::Off | TunState::Disabling) {
@@ -274,12 +328,12 @@ impl TunManager {
             // Non-fatal: still try to strip the config + sweep.
             eprintln!("[tun] elevated stop reported: {e}");
         }
+        // Belt-and-suspenders: the kernel normally reaps its own device on
+        // exit, but a SIGKILLed/crashed one can leave `flexclash-tun` behind.
+        route_guard::cleanup_tun_device();
 
-        // 2. Strip the tun block. The active kernel (if any) will
-        //    reload on next request; for the TUN disable path we
-        //    don't auto-restart the kernel — the user can decide
-        //    whether to keep the regular kernel running. `advanced`
-        //    is irrelevant here: disabling removes the whole block.
+        // 2. Strip the tun block. `advanced` is irrelevant here:
+        //    disabling removes the whole block.
         if let Err(e) = profile::inject_tun_config(storage, false, TunAdvanced::default()) {
             self.set_state(TunState::Failed, Some(format!("config strip: {e}")));
             return Err(e);
@@ -288,6 +342,42 @@ impl TunManager {
         // 3. Sweep residual routes / adapter.
         let post = route_guard::sweep_residual_routes();
         self.record_sweep(post);
+
+        // 4. On Linux the elevated TUN kernel replaced the regular sidecar
+        //    (which `stop_elevated_mihomo` reaped together with every other
+        //    mihomo), so bring the standard kernel back up. Spawned rather
+        //    than awaited because `disable` is synchronous and may run on the
+        //    async runtime; the brief pause lets the OS release port 9091.
+        if restart_sidecar {
+            if let Some(handle) = app.try_state::<crate::core::sidecar::SidecarHandle>() {
+                let sidecar = handle.inner().clone();
+                let app_for_restart = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::core::sidecar::stop(sidecar.clone());
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    // If the user re-enabled TUN during the pause, the
+                    // elevated kernel owns 9091/7897 now — do not resurrect
+                    // the sidecar and start the port fight all over again.
+                    if let Some(mgr) =
+                        app_for_restart.try_state::<crate::core::tun::TunManager>()
+                    {
+                        if matches!(
+                            mgr.status().state,
+                            TunState::Enabling | TunState::On
+                        ) {
+                            return;
+                        }
+                    }
+                    if let Err(e) =
+                        crate::core::sidecar::start(&app_for_restart, sidecar).await
+                    {
+                        eprintln!(
+                            "[tun] failed to restart regular sidecar after TUN disable: {e}"
+                        );
+                    }
+                });
+            }
+        }
 
         self.set_state(TunState::Off, None);
         let _ = app.emit(TUN_STATE_CHANGED, self.snapshot());

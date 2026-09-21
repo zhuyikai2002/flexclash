@@ -42,6 +42,8 @@ fn http() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
         reqwest::Client::builder()
+            // Local controller call: bypass any system / environment proxy.
+            .no_proxy()
             .timeout(HTTP_TIMEOUT)
             .build()
             .expect("build reqwest client for state watcher")

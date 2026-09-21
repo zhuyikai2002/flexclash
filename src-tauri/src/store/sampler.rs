@@ -100,6 +100,8 @@ pub fn spawn<R: Runtime>(app: &AppHandle<R>, db: HistoryDb) -> Result<SamplerHan
 
 async fn sample_loop<R: Runtime>(handle: SamplerHandle, db: HistoryDb, app: AppHandle<R>) {
     let client = match reqwest::Client::builder()
+        // Local controller call: bypass any system / environment proxy.
+        .no_proxy()
         .timeout(Duration::from_secs(2))
         .build()
     {

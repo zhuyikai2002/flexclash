@@ -37,6 +37,12 @@ fn base_url() -> String {
         .map(|a| a.trim().to_string())
         .filter(|a| !a.is_empty())
         .unwrap_or_else(|| RESERVED_CONTROLLER.to_string());
+    // Never hand `localhost` to reqwest for the loopback controller: an
+    // IPv6-first resolver can pick `::1` while mihomo listens on IPv4 only.
+    let addr = match addr.strip_prefix("localhost:") {
+        Some(rest) => format!("127.0.0.1:{rest}"),
+        None => addr,
+    };
     format!("http://{addr}")
 }
 
@@ -50,24 +56,44 @@ async fn mihomo_request(
     timeout_ms: u64,
 ) -> Result<Value, AppError> {
     let client = reqwest::Client::builder()
+        // Local controller calls must never be routed through a system /
+        // environment proxy, or loopback requests get forwarded to the
+        // proxy port and fail with a connect error.
+        .no_proxy()
         .timeout(std::time::Duration::from_millis(timeout_ms))
         .build()
         .map_err(|e| AppError::Mihomo(format!("build http client: {e}")))?;
 
     let url = format!("{}{}", base_url(), path);
-    let mut req = client.request(method, &url);
-    if let Some(b) = body {
-        req = req
-            .header("Content-Type", "application/json")
-            .body(b.to_string());
-    }
-    let resp = req.send().await.map_err(|e| {
-        if e.is_connect() {
-            AppError::Mihomo("mihomo not reachable — is the kernel running?".into())
-        } else {
-            AppError::Mihomo(format!("request {url}: {e}"))
+
+    // A kernel restart leaves a 200–500 ms window where the controller is
+    // briefly unreachable. Retry a connect failure a few times (with a short
+    // backoff) before surfacing the loud "not reachable" error to the UI.
+    const MAX_CONNECT_RETRIES: u32 = 3;
+    const RETRY_BACKOFF_MS: u64 = 200;
+
+    let mut attempt = 0u32;
+    let resp = loop {
+        let mut req = client.request(method.clone(), &url);
+        if let Some(b) = body.as_ref() {
+            req = req
+                .header("Content-Type", "application/json")
+                .body(b.to_string());
         }
-    })?;
+        match req.send().await {
+            Ok(r) => break r,
+            Err(e) if e.is_connect() => {
+                if attempt >= MAX_CONNECT_RETRIES {
+                    return Err(AppError::Mihomo(
+                        "mihomo not reachable — is the kernel running?".into(),
+                    ));
+                }
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS)).await;
+            }
+            Err(e) => return Err(AppError::Mihomo(format!("request {url}: {e}"))),
+        }
+    };
 
     let status = resp.status();
     let bytes = resp
