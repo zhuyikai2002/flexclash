@@ -395,9 +395,7 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> Res
     // materialisation) can ever reach `cmd.spawn()` while the elevated TUN
     // kernel owns 9091/7897. This is the last line of defence.
     if crate::core::tun::owns_ports(app) {
-        eprintln!(
-            "[sidecar-core] HARD REFUSAL: blocking mihomo spawn because TUN owns kernel!"
-        );
+        eprintln!("[sidecar-core] HARD REFUSAL: blocking mihomo spawn because TUN owns kernel!");
         let _ = app.emit(
             crate::events::KERNEL_LOG,
             "[sidecar-core] HARD REFUSAL: spawn blocked — TUN owns kernel (9091/7897)",

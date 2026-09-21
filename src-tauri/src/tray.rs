@@ -136,7 +136,7 @@ pub fn update_tray_icon<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> 
     #[cfg(not(target_os = "windows"))]
     {
         let _ = app;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
@@ -195,7 +195,7 @@ pub fn set_tray_language<R: Runtime>(app: &AppHandle<R>, lang: &str) -> Result<(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (app, lang);
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {

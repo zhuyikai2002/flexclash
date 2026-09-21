@@ -370,22 +370,13 @@ impl TunManager {
                     // If the user re-enabled TUN during the pause, the
                     // elevated kernel owns 9091/7897 now — do not resurrect
                     // the sidecar and start the port fight all over again.
-                    if let Some(mgr) =
-                        app_for_restart.try_state::<crate::core::tun::TunManager>()
-                    {
-                        if matches!(
-                            mgr.status().state,
-                            TunState::Enabling | TunState::On
-                        ) {
+                    if let Some(mgr) = app_for_restart.try_state::<crate::core::tun::TunManager>() {
+                        if matches!(mgr.status().state, TunState::Enabling | TunState::On) {
                             return;
                         }
                     }
-                    if let Err(e) =
-                        crate::core::sidecar::start(&app_for_restart, sidecar).await
-                    {
-                        eprintln!(
-                            "[tun] failed to restart regular sidecar after TUN disable: {e}"
-                        );
+                    if let Err(e) = crate::core::sidecar::start(&app_for_restart, sidecar).await {
+                        eprintln!("[tun] failed to restart regular sidecar after TUN disable: {e}");
                     }
                 });
             }
@@ -431,13 +422,11 @@ pub mod tun_events {
             // here too would flicker Running → Stopped → Running.
             let effective = match snap.state {
                 TunState::On => Some(crate::core::sidecar::KernelState::Running),
-                TunState::Off | TunState::Failed => {
-                    Some(
-                        app.try_state::<crate::core::sidecar::SidecarHandle>()
-                            .map(|h| h.state())
-                            .unwrap_or(crate::core::sidecar::KernelState::Stopped),
-                    )
-                }
+                TunState::Off | TunState::Failed => Some(
+                    app.try_state::<crate::core::sidecar::SidecarHandle>()
+                        .map(|h| h.state())
+                        .unwrap_or(crate::core::sidecar::KernelState::Stopped),
+                ),
                 TunState::Enabling | TunState::Disabling => None,
             };
             if let Some(state) = effective {

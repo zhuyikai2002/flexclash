@@ -281,6 +281,11 @@ export const commands = {
 	 *  arguments to camelCase, and pinning the convention here is what keeps the
 	 *  Rust parameter names and the `invoke` payload in `src/services/tun.ts`
 	 *  from silently drifting apart.
+	 * 
+	 *  `#[tauri::command(async)]` is load-bearing: `mgr.enable` blocks for up to
+	 *  15 s waiting for the elevated kernel's `/version` probe. Without it the
+	 *  command runs on the main thread and freezes the whole UI (and every other
+	 *  IPC call) for the length of the bring-up.
 	 */
 	enableTun: (strictRoute: boolean | null, dnsHijack: boolean | null) => typedError<TunStatus, AppError>(__TAURI_INVOKE("enable_tun", { strictRoute, dnsHijack })),
 	/**
@@ -300,6 +305,9 @@ export const commands = {
 	/**
 	 *  Disable TUN. Symmetric to `enable_tun`; rolls forward even on
 	 *  partial failure (best-effort cleanup) and returns the final state.
+	 * 
+	 *  `#[tauri::command(async)]` keeps the synchronous stop/reap/restart work
+	 *  off the main thread, same rationale as `enable_tun`.
 	 */
 	disableTun: () => typedError<TunStatus, AppError>(__TAURI_INVOKE("disable_tun")),
 	/**

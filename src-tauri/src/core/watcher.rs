@@ -87,8 +87,8 @@ pub fn spawn_state_watcher<R: Runtime>(app: &AppHandle<R>, sidecar: SidecarHandl
             // `effective_state` folds in TUN ownership: while the elevated
             // TUN kernel serves the controller it counts as online even though
             // the regular sidecar handle is `Stopped`.
-            let online = crate::core::sidecar::effective_state(&app, &sidecar)
-                == KernelState::Running;
+            let online =
+                crate::core::sidecar::effective_state(&app, &sidecar) == KernelState::Running;
             let proxy_active = crate::proxy::query_system_proxy_status()
                 .map(|s| s.enabled)
                 .unwrap_or(false);
