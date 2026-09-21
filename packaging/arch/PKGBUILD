@@ -18,7 +18,7 @@
 # uploads FlexClash_<version>_amd64.deb).
 
 pkgname=flexclash-bin
-pkgver=0.6.2
+pkgver=0.6.3
 pkgrel=1
 pkgdesc="Lightweight Mihomo (Clash Meta) proxy client with TUN mode support"
 arch=('x86_64')
@@ -71,13 +71,16 @@ package() {
     exit 1
   fi
 
-  # Desktop entry + icon: prefer the ones Tauri generated inside the .deb
-  # (they carry the correct WM_CLASS / icon theme names), fall back to ours
-  # only when the .deb omitted them.
-  if [[ ! -f "${pkgdir}/usr/share/applications/flexclash.desktop" ]]; then
-    install -Dm644 "${srcdir}/flexclash.desktop" \
-      "${pkgdir}/usr/share/applications/flexclash.desktop"
-  fi
+  # Desktop entry: the .deb ships an uppercase `FlexClash.desktop`; Arch
+  # convention and the menu launcher we control are lowercase. Keep exactly ONE
+  # entry — drop the deb's copy, then install ours unconditionally so the
+  # lowercase launcher (StartupNotify=false / StartupWMClass=flexclash) always
+  # wins and no duplicate startup item appears.
+  rm -f "${pkgdir}/usr/share/applications/FlexClash.desktop"
+  install -Dm644 "${srcdir}/flexclash.desktop" \
+    "${pkgdir}/usr/share/applications/flexclash.desktop"
+
+  # Icon: the .deb usually provides one; install ours only as a fallback.
   if [[ ! -f "${pkgdir}/usr/share/icons/hicolor/128x128/apps/flexclash.png" ]]; then
     install -Dm644 "${srcdir}/flexclash.png" \
       "${pkgdir}/usr/share/icons/hicolor/128x128/apps/flexclash.png"

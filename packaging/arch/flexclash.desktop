@@ -8,4 +8,5 @@ Icon=flexclash
 Terminal=false
 Categories=Network;Utility;
 Keywords=proxy;clash;mihomo;tun;vpn;
-StartupNotify=true
+StartupNotify=false
+StartupWMClass=flexclash

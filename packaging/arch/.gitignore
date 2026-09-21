@@ -1,0 +1,5 @@
+# makepkg artifacts (never commit build products)
+src/
+pkg/
+*.deb
+*.pkg.tar.*

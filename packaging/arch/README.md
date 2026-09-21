@@ -11,7 +11,7 @@ that consumes the Linux `.deb` published by
 |---|---|
 | `PKGBUILD` | `flexclash-bin` — extracts the Tauri `.deb` data payload, verifies `/usr/bin/flexclash` + `/usr/bin/mihomo` landed, and provides desktop entry / icon fallbacks |
 | `flexclash.install` | `post_install` / `post_upgrade` run `setcap cap_net_admin,cap_net_bind_service=+ep /usr/bin/mihomo` (TUN support); `post_remove` clears system-level residual state (per-user data is preserved) |
-| `flexclash.desktop` | Desktop entry fallback (the `.deb`'s own entry is preferred) |
+| `flexclash.desktop` | Desktop entry (lowercase, `StartupNotify=false` / `StartupWMClass=flexclash`); the deb's uppercase `FlexClash.desktop` is removed to avoid duplicate launchers |
 | `flexclash.png` | Icon fallback (128×128, copied from `src-tauri/icons`) |
 
 ## Build & install
