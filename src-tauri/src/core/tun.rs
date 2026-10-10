@@ -98,7 +98,9 @@ pub fn owns_ports<R: Runtime>(app: &AppHandle<R>) -> bool {
             active
         }
         None => {
-            eprintln!("[tun-guard] WARN: app.try_state::<TunManager>() returned None (TunManager not managed?)");
+            eprintln!(
+                "[tun-guard] owns_ports: TunManager not managed yet (very early boot / tests)"
+            );
             false
         }
     }
@@ -234,9 +236,10 @@ impl TunManager {
     /// is already up, so a flipped switch does not have to wait for the
     /// next enable/disable cycle.
     ///
-    /// Returns `Ok(None)` when TUN is not in the `On` state, or when a
-    /// transition currently owns the slot (the next [`Self::enable`] stamps
-    /// the switch anyway).
+    /// Returns `Ok(None)` when the switch cannot be applied right now: TUN is
+    /// not in the `On` state (then there is no running kernel to reload), or
+    /// a transition currently owns the slot (then the next
+    /// [`Self::enable`] stamps it anyway).
     pub fn repatch_for_advanced(
         &self,
         storage: &ProfileStorage,
@@ -371,13 +374,19 @@ impl TunManager {
         if matches!(self.snapshot().state, TunState::Off | TunState::Disabling) {
             return Ok(self.snapshot());
         }
+
         self.set_state(TunState::Disabling, None);
 
         // 1. Stop the elevated mihomo first; without it the kernel
         //    owned by `SidecarHandle` would briefly claim the port.
+        //
+        //    This must succeed before anything else happens. When it fails
+        //    the elevated kernel is still holding 9091/7897, so restarting
+        //    the regular sidecar would only produce a crash loop — bail out
+        //    with the state intact and the reason surfaced.
         if let Err(e) = crate::core::elevate::stop_elevated_mihomo() {
-            // Non-fatal: still try to strip the config + sweep.
-            eprintln!("[tun] elevated stop reported: {e}");
+            self.set_state(TunState::On, Some(format!("stop failed: {e}")));
+            return Err(e);
         }
         // Belt-and-suspenders: the kernel normally reaps its own device on
         // exit, but a SIGKILLed/crashed one can leave `flexclash-tun` behind.

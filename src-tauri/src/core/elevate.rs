@@ -9,9 +9,10 @@
 //   * returns a `HINSTANCE` whose `hInstApp` is `>32` on success and
 //     <= 32 on failure (one of the historical Win32 quirks). We map
 //     that to a typed error.
-//   * blocks the calling thread on the UAC consent dialog. We push
-//     the heavy work onto `tokio::task::spawn_blocking` so the Tauri
-//     command stays responsive.
+//   * blocks the calling thread on the UAC consent dialog. Callers must
+//     therefore run the spawn off the async runtime (see
+//     `commands::tun::off_runtime`), so the modal blocks a dedicated
+//     thread and nothing else.
 //
 // Lifecycle
 // ---------
@@ -52,14 +53,50 @@ static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 /// with the spawn result.
 static ELEVATED_PID: OnceLock<Mutex<Option<ElevatedChild>>> = OnceLock::new();
 
+/// OS-level handle to a spawned kernel process.
+///
+/// **Windows**: the `hProcess` that `ShellExecuteExW` fills in when
+/// `SEE_MASK_NOCLOSEPROCESS` is requested. This is the whole point of the
+/// type: a process handle works across integrity levels, so a FlexClash
+/// running *asInvoker* can still retire the UAC-elevated TUN kernel with
+/// `TerminateProcess`. `taskkill` cannot — the UIPI integrity check rejects
+/// it with "access denied", which is what used to leave the elevated kernel
+/// holding 9091/7897 forever.
+///
+/// **Linux / macOS**: `()`. Those platforms spawn through
+/// `std::process::Command`, so the `Child` we already keep is both the
+/// handle and the reap; there is nothing extra to carry.
+#[cfg(target_os = "windows")]
+pub type ProcHandle = windows::Win32::Foundation::HANDLE;
+#[cfg(not(target_os = "windows"))]
+pub type ProcHandle = ();
+
+/// A [`ProcHandle`] that may cross a thread boundary.
+///
+/// `HANDLE` is a bare `*mut c_void`, so it is neither `Send` nor `Sync` and
+/// cannot live inside the process-global registry mutex as-is. The handle is
+/// opened by `ShellExecuteExW` in this process and closed by
+/// `graceful_stop` in this process; it only ever *moves* between threads
+/// while the `ELEVATED_PID` mutex is held, so the raw pointer never escapes
+/// an unsynchronised context. Asserting `Send` here states exactly that.
+#[derive(Debug)]
+struct OwnedHandle(ProcHandle);
+
+// SAFETY: created and closed within this process; every access is
+// serialised by the `ELEVATED_PID` registry mutex.
+unsafe impl Send for OwnedHandle {}
+
 #[derive(Debug)]
 struct ElevatedChild {
     pid: u32,
     /// The OS child handle when the platform spawned the kernel through
-    /// `std::process::Command` (Linux). Kept so `graceful_stop` can `wait()`
+    /// `std::process::Command` (Linux). Kept so `graceful_stop` can wait
     /// on it and reap it, preventing a `<defunct>` zombie. Windows launches
     /// via `ShellExecuteExW` and has no such handle (`None`).
     child: Option<std::process::Child>,
+    /// Windows: the `hProcess` from the spawn, used to terminate the
+    /// elevated kernel without needing elevation ourselves.
+    handle: Option<OwnedHandle>,
 }
 
 pub fn install(app: AppHandle) {
@@ -75,6 +112,14 @@ fn registry() -> &'static Mutex<Option<ElevatedChild>> {
     ELEVATED_PID.get_or_init(|| Mutex::new(None))
 }
 
+/// Emit one lifecycle line from the elevate layer.
+///
+/// Kept as a named seam so the kernel-log channel can be introduced later
+/// without touching the eight call sites that already depend on it.
+fn lifecycle(line: &str) {
+    eprintln!("[elevate] {line}");
+}
+
 // ---------------------------------------------------------------------------
 // Windows path
 // ---------------------------------------------------------------------------
@@ -88,13 +133,35 @@ mod platform {
 
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, GetProcessId, TerminateProcess, WaitForSingleObject,
+    };
     use windows::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// Budget for any single `taskkill` invocation. `taskkill` is normally
+    /// instant; it only runs long when the target is wedged, and in that
+    /// case we would rather report a failure than hang the transition.
+    const KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    /// How long to wait for a terminated kernel to actually exit before
+    /// giving up on the reap.
+    const REAP_TIMEOUT_MS: u32 = 5_000;
+
+    /// Image-name glob for the sweep fallback.
+    ///
+    /// The bundled sidecar is `mihomo-x86_64-pc-windows-msvc.exe`, so
+    /// `/IM mihomo.exe` never matched anything. Must stay in sync with
+    /// `core::sidecar::hard_cleanup`, which already uses the glob.
+    const KILL_IMAGE_GLOB: &str = "mihomo*.exe";
+
+    /// `taskkill` exit code for "no running task matches that name" — a
+    /// successful no-op from our point of view, not a failure.
+    const TASKKILL_NO_MATCH: i32 = 128;
 
     /// The sidecar name as Cargo sees it via `externalBin` in
     /// `tauri.conf.json`.  The build script appends the target triple
@@ -201,16 +268,22 @@ mod platform {
         )))
     }
 
-    /// Spawn mihomo with `runas` via ShellExecuteExW. Returns the new PID and
-    /// `None` (a shell launch has no `std::process::Child` handle; cleanup
-    /// goes through `taskkill`).
-    /// `wait` is false (the elevate path does not block on the child —
-    /// UAC consent is the only blocking step).
+    /// Spawn mihomo with `runas` via ShellExecuteExW. Returns the new PID,
+    /// `None` for the `std::process::Child` (a shell launch has none) and the
+    /// `hProcess` handle.
+    ///
+    /// `SEE_MASK_NOCLOSEPROCESS` is load-bearing: it is what fills
+    /// `hProcess`, and holding that handle is the only way a non-elevated
+    /// FlexClash can later terminate the elevated kernel. Without it the
+    /// cleanup path could only reach for `taskkill`, which the UIPI
+    /// integrity check rejects — the elevated kernel then survived "关闭 TUN"
+    /// and kept the controller port bound. `wait` is still false: the
+    /// UAC consent dialog is the only blocking step here.
     pub(super) fn runas_spawn(
         binary: &Path,
         work_dir: &std::path::Path,
         config_path: &std::path::Path,
-    ) -> Result<(u32, Option<std::process::Child>)> {
+    ) -> Result<(u32, Option<std::process::Child>, Option<ProcHandle>)> {
         // Build a single command line: `mihomo.exe -d <work> -f <config>`.
         let params = format!(
             "\"-d\" \"{}\" \"-f\" \"{}\"",
@@ -223,7 +296,7 @@ mod platform {
 
         let mut exec_info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-            fMask: SEE_MASK_NOASYNC,
+            fMask: SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS,
             lpVerb: PCWSTR(verb.as_ptr()),
             lpFile: PCWSTR(file.as_ptr()),
             lpParameters: PCWSTR(parameters.as_ptr()),
@@ -261,15 +334,24 @@ mod platform {
                 "ShellExecuteExW returned hInstApp={h} (<=32 = error)"
             )));
         }
-        // We don't get the child's PID back from ShellExecuteExW
-        // directly; resolve it via the process snapshot. Best-effort:
-        // if the lookup fails, return PID 0 and let the caller
-        // continue (we still have `stop_elevated_mihomo` as the
-        // belt-and-suspenders cleanup).
-        let pid = resolve_pid_via_tasklist(binary).unwrap_or(0);
-        // Windows has no `std::process::Child` handle for a ShellExecuteExW
-        // launch; cleanup goes through `taskkill`.
-        Ok((pid as u32, None))
+        let process = exec_info.hProcess;
+        if process.is_invalid() {
+            return Err(AppError::Tun(
+                "ShellExecuteExW(runas) returned no process handle — cannot manage the \
+                 elevated kernel"
+                    .into(),
+            ));
+        }
+        // The handle we now hold answers the PID exactly — no `tasklist`
+        // scan, no PID-reuse race. Fall back to the scan only if the handle
+        // somehow cannot report it.
+        // SAFETY: `process` is a live handle we own; GetProcessId takes no
+        // out-parameter and cannot affect the process.
+        let pid = match unsafe { GetProcessId(process) } {
+            0 => resolve_pid_via_tasklist(binary).unwrap_or(0),
+            from_handle => from_handle,
+        };
+        Ok((pid, None, Some(process)))
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -381,35 +463,112 @@ mod platform {
         ))
     }
 
-    /// Send Ctrl+Break to the elevated child. Mihomo catches it and
-    /// shuts down cleanly. If that fails, we fall back to `taskkill`.
-    pub(super) fn graceful_stop(pid: u32, _child: Option<std::process::Child>) -> Result<()> {
-        if pid == 0 {
-            return stop_via_taskkill();
+    /// Stop the elevated kernel.
+    ///
+    /// Primary path is the spawn handle: `TerminateProcess` on a handle we
+    /// own works regardless of the integrity level of the target, so an
+    /// asInvoker FlexClash can retire the UAC-elevated mihomo. The
+    /// `taskkill` routes are only reached when we have no handle, and they
+    /// are bounded — an unbounded `taskkill` used to be able to wedge the
+    /// whole TUN transition.
+    ///
+    /// A failure here is **reported**, never swallowed: the old code turned
+    /// every non-zero `taskkill` status into `Ok(())`, so "关闭 TUN" reported
+    /// success while the elevated kernel went on holding 9091/7897.
+    pub(super) fn graceful_stop(
+        pid: u32,
+        _child: Option<std::process::Child>,
+        handle: Option<ProcHandle>,
+    ) -> Result<()> {
+        if let Some(h) = handle {
+            lifecycle(&format!(
+                "Sending termination to elevated kernel (pid={pid}, handle=owned)"
+            ));
+            if terminate_handle(h, 0) {
+                lifecycle(&format!("Elevated kernel terminated (pid={pid})"));
+                return Ok(());
+            }
+            lifecycle(&format!(
+                "TerminateProcess failed for pid={pid}; falling back to taskkill"
+            ));
+        } else {
+            lifecycle(&format!(
+                "No spawn handle for pid={pid}; falling back to taskkill"
+            ));
         }
-        let status = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-        match status {
-            Ok(o) if o.status.success() => Ok(()),
-            _ => stop_via_taskkill(),
+
+        if pid != 0 {
+            match taskkill(&["/PID", &pid.to_string(), "/T", "/F"]) {
+                Ok(true) => {
+                    lifecycle(&format!(
+                        "Elevated kernel terminated via taskkill (pid={pid})"
+                    ));
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(e) => eprintln!("[elevate] taskkill /PID {pid} could not run: {e}"),
+            }
+        }
+
+        // Name sweep. The glob is load-bearing — see KILL_IMAGE_GLOB.
+        match taskkill(&["/IM", KILL_IMAGE_GLOB, "/T", "/F"]) {
+            Ok(true) => {
+                lifecycle("Elevated kernel terminated via image-name sweep");
+                Ok(())
+            }
+            Ok(false) => Err(AppError::Tun(format!(
+                "could not stop the elevated mihomo: taskkill found no killable target \
+                 (image glob {KILL_IMAGE_GLOB}, timeout={KILL_TIMEOUT:?})"
+            ))),
+            Err(e) => Err(AppError::Tun(format!(
+                "could not stop the elevated mihomo: {e}"
+            ))),
         }
     }
 
-    fn stop_via_taskkill() -> Result<()> {
-        let out = Command::new("taskkill")
-            .args(["/IM", "mihomo.exe", "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map_err(|e| AppError::Tun(format!("taskkill: {e}")))?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            // Non-zero status simply means "no process matched", which
-            // is a successful no-op from our perspective.
-            Ok(())
+    /// `taskkill` with a bounded budget. `Ok(true)` means the target is gone,
+    /// `Ok(false)` means taskkill ran but matched nothing killable.
+    fn taskkill(args: &[&str]) -> std::io::Result<bool> {
+        let out = crate::core::proc::run_with_timeout("taskkill", args, KILL_TIMEOUT)?;
+        if out.timed_out {
+            eprintln!("[elevate] taskkill {args:?} timed out after {KILL_TIMEOUT:?}");
+            return Ok(false);
         }
+        if out.success || out.code == Some(TASKKILL_NO_MATCH) {
+            Ok(true)
+        } else {
+            eprintln!(
+                "[elevate] taskkill {args:?} exited {:?}: {}",
+                out.code,
+                out.stderr.trim()
+            );
+            Ok(false)
+        }
+    }
+
+    /// Terminate through the owned handle, then close it.
+    ///
+    /// Returns whether the process was actually terminated. The wait is
+    /// bounded so a kernel wedged in an uninterruptible wait cannot hold the
+    /// transition open forever.
+    fn terminate_handle(handle: ProcHandle, code: u32) -> bool {
+        if handle.is_invalid() {
+            return false;
+        }
+        // SAFETY: `handle` is a live PROCESS_ALL_ACCESS handle we own from
+        // the spawn; TerminateProcess cannot fail for ownership reasons.
+        let killed = unsafe { TerminateProcess(handle, code) }.is_ok();
+        if killed {
+            // SAFETY: bounded wait on the same handle, then we close it
+            // exactly once below.
+            let _ = unsafe { WaitForSingleObject(handle, REAP_TIMEOUT_MS) };
+        }
+        // SAFETY: we created this handle in `runas_spawn`, so we own the
+        // close — and it must happen on every path.
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        killed
     }
 }
 
@@ -498,16 +657,14 @@ mod platform {
         binary: &Path,
         work_dir: &Path,
         config_path: &Path,
-    ) -> Result<(u32, Option<std::process::Child>)> {
+    ) -> Result<(u32, Option<std::process::Child>, Option<ProcHandle>)> {
         // A previous mihomo (the regular sidecar or a stale TUN child) may
         // still be holding the controller (9091) / mixed (7897) ports. If we
         // spawn a second kernel while those are bound, the new process fails
         // to bind and exits immediately, showing up as `<defunct>` and
         // leaving the app with no working kernel. Reap every mihomo instance
         // first, then give the OS a moment to release the sockets.
-        let _ = std::process::Command::new("pkill")
-            .args(["-9", "-f", "mihomo"])
-            .status();
+        pkill_all();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let child = std::process::Command::new(binary)
@@ -522,7 +679,9 @@ mod platform {
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|e| AppError::Tun(format!("failed to launch mihomo: {e}")))?;
-        Ok((child.id(), Some(child)))
+        // Linux carries no extra OS handle: the `Child` we keep is both the
+        // handle and the reap.
+        Ok((child.id(), Some(child), None))
     }
 
     #[cfg(target_os = "macos")]
@@ -530,48 +689,109 @@ mod platform {
         _binary: &Path,
         _work_dir: &Path,
         _config_path: &Path,
-    ) -> Result<(u32, Option<std::process::Child>)> {
+    ) -> Result<(u32, Option<std::process::Child>, Option<ProcHandle>)> {
         Err(AppError::Tun("elevation is Windows-only in Phase 1".into()))
     }
 
-    #[cfg(target_os = "linux")]
-    pub(super) fn graceful_stop(pid: u32, mut child: Option<std::process::Child>) -> Result<()> {
-        // Last-resort sweep by process name. Used when we have no PID
-        // (pid == 0) or when the targeted kill did not succeed, so a stale
-        // elevated child can never keep the ports bound.
-        let pkill_all = || {
-            let _ = std::process::Command::new("pkill")
-                .args(["-9", "-f", "mihomo"])
-                .status();
-        };
+    /// Last-resort sweep by process name. Bounded: a wedged `pkill` must not
+    /// be able to hold the TUN transition open.
+    fn pkill_all() {
+        if let Ok(out) = crate::core::proc::run_with_timeout(
+            "pkill",
+            &["-9", "-f", "mihomo"],
+            std::time::Duration::from_secs(5),
+        ) {
+            if out.timed_out {
+                eprintln!("[elevate] pkill -9 -f mihomo timed out");
+            }
+        }
+    }
 
+    /// Grace period between SIGTERM and the SIGKILL escalation.
+    const TERM_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn graceful_stop(
+        pid: u32,
+        mut child: Option<std::process::Child>,
+        _handle: Option<ProcHandle>,
+    ) -> Result<()> {
         if pid == 0 {
             pkill_all();
         } else {
-            let term = std::process::Command::new("kill")
-                .args(["-TERM", &pid.to_string()])
-                .status();
-            if !matches!(term, Ok(s) if s.success()) {
-                // Targeted SIGKILL, then the name-based sweep as a final
-                // fallback.
-                let _ = std::process::Command::new("kill")
-                    .args(["-KILL", &pid.to_string()])
-                    .status();
-                pkill_all();
+            lifecycle(&format!("Sending SIGTERM to elevated kernel (pid={pid})"));
+            // `kill -TERM` returning 0 only proves the signal was
+            // *delivered*; it says nothing about whether mihomo will ever act
+            // on it. The old code escalated to SIGKILL purely on that exit
+            // status and then called an unbounded `child.wait()`, so a kernel
+            // that hung while tearing down its TUN device / nft chain wedged
+            // the transition forever. Escalate on a clock instead.
+            let delivered = matches!(
+                crate::core::proc::run_with_timeout(
+                    "kill",
+                    &["-TERM", &pid.to_string()],
+                    std::time::Duration::from_secs(5),
+                ),
+                Ok(o) if o.success
+            );
+            if !delivered || !reap_within(child.as_mut(), TERM_GRACE) {
+                lifecycle(&format!(
+                    "SIGTERM grace expired; sending SIGKILL (pid={pid})"
+                ));
+                let _ = crate::core::proc::run_with_timeout(
+                    "kill",
+                    &["-KILL", &pid.to_string()],
+                    std::time::Duration::from_secs(5),
+                );
+                if !reap_within(child.as_mut(), TERM_GRACE) {
+                    pkill_all();
+                }
             }
         }
 
-        // Reap the child we spawned so it can never linger as `<defunct>`.
-        // Every kill path above is fatal, so `wait()` returns promptly; a
-        // child that already exited is reaped immediately.
-        if let Some(child) = child.as_mut() {
-            let _ = child.wait();
+        // Never leave a zombie behind. If the kernel somehow survived both
+        // signals, take it down through the `Child` handle and reap it —
+        // but still on a bounded clock.
+        if let Some(c) = child.as_mut() {
+            if !reap_within(Some(&mut *c), TERM_GRACE) {
+                let _ = c.kill();
+                reap_within(Some(&mut *c), TERM_GRACE);
+            }
         }
+        lifecycle("Elevated kernel reaped");
         Ok(())
     }
 
+    /// Poll `child` for at most `budget`. Returns true once it is gone.
+    ///
+    /// A missing handle counts as "nothing to reap". A `try_wait` error is
+    /// reported as *not* reaped, so the caller escalates rather than
+    /// silently assuming success.
+    fn reap_within(child: Option<&mut std::process::Child>, budget: std::time::Duration) -> bool {
+        let Some(child) = child else { return true };
+        let deadline = Instant::now() + budget;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => return true,
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("[elevate] try_wait failed: {e}");
+                    return false;
+                }
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     #[cfg(target_os = "macos")]
-    pub(super) fn graceful_stop(_pid: u32, _child: Option<std::process::Child>) -> Result<()> {
+    pub(super) fn graceful_stop(
+        _pid: u32,
+        _child: Option<std::process::Child>,
+        _handle: Option<ProcHandle>,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -606,19 +826,29 @@ pub fn spawn_elevated_mihomo<R: Runtime>(app: &AppHandle<R>) -> Result<u32> {
     let config_path = work_dir.join("config.yaml");
     let binary = platform::resolve_mihomo_binary(app, &work_dir)?;
 
-    let (pid, child) = platform::runas_spawn(&binary, &work_dir, &config_path)?;
-    *registry().lock().expect("elevated registry poisoned") = Some(ElevatedChild { pid, child });
+    let (pid, child, handle) = platform::runas_spawn(&binary, &work_dir, &config_path)?;
+    *registry().lock().expect("elevated registry poisoned") = Some(ElevatedChild {
+        pid,
+        child,
+        handle: handle.map(OwnedHandle),
+    });
     Ok(pid)
 }
 
+/// Stop the elevated TUN kernel, reporting honestly whether it worked.
+///
+/// An empty registry still performs the image-name sweep: a stale elevated
+/// kernel from a previous session can outlive our bookkeeping and would
+/// otherwise keep the controller port bound.
 pub fn stop_elevated_mihomo() -> Result<()> {
     let elevated = registry()
         .lock()
         .expect("elevated registry poisoned")
         .take();
-    let pid = elevated.as_ref().map(|c| c.pid).unwrap_or(0);
-    let child = elevated.and_then(|c| c.child);
-    platform::graceful_stop(pid, child)
+    match elevated {
+        Some(child) => platform::graceful_stop(child.pid, child.child, child.handle.map(|h| h.0)),
+        None => platform::graceful_stop(0, None, None),
+    }
 }
 
 /// Friendly hint appended to TUN startup failures on Linux.
