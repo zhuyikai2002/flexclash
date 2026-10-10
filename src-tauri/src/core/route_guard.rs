@@ -22,13 +22,16 @@
 // is "best effort" — the function never aborts.
 // ============================================================================
 
+use std::time::Duration;
+
+/// Budget for every external helper the sweep shells out to.
+///
+/// The sweep runs inside the TUN transition, so an unbounded helper here is
+/// what used to freeze the whole app: `netsh interface delete interface`
+/// blocks indefinitely when the adapter is still owned by a live process.
+/// Five seconds is far beyond any healthy `route`/`netsh` round-trip.
 #[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-#[cfg(target_os = "windows")]
-use std::process::Command;
-/// Hide child consoles when invoking netsh / route (no cmd flash on TUN ops).
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const SWEEP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Result of a full route/adapter sweep — the rich shape, carrying the
 /// per-kind breakdown plus a diagnostic message.
@@ -195,23 +198,33 @@ pub fn parse_auto_route_rows(text: &str) -> Vec<AutoRoute> {
 fn sweep_routes_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     // Look for the two split-default routes mihomo adds when auto-route is
     // on, then issue one `route delete` per matching row.
-    let out = Command::new("route")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args(["print", "-4"])
-        .output()?;
-    if !out.status.success() {
+    let out = crate::core::proc::run_with_timeout("route", &["print", "-4"], SWEEP_TIMEOUT)?;
+    if out.timed_out {
+        result.ok = false;
+        result.message.push_str("route print timed out; ");
+        return Ok(());
+    }
+    if !out.success {
         // Non-fatal: return ok so the rest of the sweep still runs.
         return Ok(());
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    for row in parse_auto_route_rows(&text) {
-        let del = Command::new("route")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(["delete", &row.destination, "mask", &row.netmask])
-            .output();
+    for row in parse_auto_route_rows(&out.stdout) {
+        let del = crate::core::proc::run_with_timeout(
+            "route",
+            &[
+                "delete",
+                row.destination.as_str(),
+                "mask",
+                row.netmask.as_str(),
+            ],
+            SWEEP_TIMEOUT,
+        );
         if let Ok(d) = del {
-            if d.status.success() {
+            if d.success {
                 result.deleted_routes += 1;
+            } else if d.timed_out {
+                result.ok = false;
+                result.message.push_str("route delete timed out; ");
             }
         }
     }
@@ -228,16 +241,21 @@ fn sweep_adapter_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
     // exactly "flexclash-tun". If found and the device is administratively
     // down, we delete it via `netsh interface set interface ... disabled`
     // followed by `netsh interface delete interface ...`.
-    let out = Command::new("netsh")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args(["interface", "show", "interface"])
-        .output()?;
-    if !out.status.success() {
+    let out = crate::core::proc::run_with_timeout(
+        "netsh",
+        &["interface", "show", "interface"],
+        SWEEP_TIMEOUT,
+    )?;
+    if out.timed_out {
+        result.ok = false;
+        result.message.push_str("netsh show interface timed out; ");
         return Ok(());
     }
-    let text = String::from_utf8_lossy(&out.stdout);
+    if !out.success {
+        return Ok(());
+    }
     let mut found = false;
-    for line in text.lines() {
+    for line in out.stdout.lines() {
         // The display table uses a fixed column layout, but the name
         // appears in a known position when the adapter is `Enabled`.
         // We do a simple substring match: if the device name is on the
@@ -251,24 +269,42 @@ fn sweep_adapter_windows(result: &mut SweepResultFull) -> std::io::Result<()> {
         return Ok(());
     }
     // Best-effort: disable first, then delete. Both are silent if the
-    // device is already gone.
-    let _ = Command::new("netsh")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args([
+    // device is already gone. Each one is bounded — `netsh` can block
+    // indefinitely while an adapter is still held open by a live process,
+    // and that is exactly the hang this sweep used to inflict on the TUN
+    // transition.
+    let disable = crate::core::proc::run_with_timeout(
+        "netsh",
+        &[
             "interface",
             "set",
             "interface",
             TUN_DEVICE_NAME,
             "admin=disable",
-        ])
-        .output();
-    let del = Command::new("netsh")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args(["interface", "delete", "interface", TUN_DEVICE_NAME])
-        .output();
-    if let Ok(d) = del {
-        if d.status.success() {
-            result.deleted_adapters += 1;
+        ],
+        SWEEP_TIMEOUT,
+    );
+    if matches!(&disable, Ok(d) if d.timed_out) {
+        result.ok = false;
+        result.message.push_str("netsh disable timed out; ");
+    }
+    let del = crate::core::proc::run_with_timeout(
+        "netsh",
+        &["interface", "delete", "interface", TUN_DEVICE_NAME],
+        SWEEP_TIMEOUT,
+    );
+    match del {
+        Ok(d) if d.timed_out => {
+            result.ok = false;
+            result.message.push_str("netsh delete timed out; ");
+        }
+        Ok(d) if d.success => result.deleted_adapters += 1,
+        Ok(_) => {}
+        Err(e) => {
+            result.ok = false;
+            result
+                .message
+                .push_str(&format!("netsh delete failed: {e}; "));
         }
     }
     Ok(())

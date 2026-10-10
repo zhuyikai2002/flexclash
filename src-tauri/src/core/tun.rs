@@ -32,6 +32,7 @@
 // report its PID/port".
 // ============================================================================
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -140,22 +141,52 @@ impl Default for TunStatus {
     }
 }
 
+/// RAII claim on the single-transition slot.
+///
+/// This replaces the `gate: Mutex<()>` that used to be held for the *entire*
+/// `enable` / `disable` body. Those bodies shell out (`taskkill`, `route`,
+/// `netsh`) and sleep for hundreds of milliseconds at a time, so holding a
+/// mutex across them meant a single wedged helper froze every future TUN
+/// transition *permanently*. Mutual exclusion is unchanged — it is now a
+/// flag we own rather than a lock we sit on — and because the guard releases
+/// on drop, no early return can leak the slot.
+struct TransitionGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> TransitionGuard<'a> {
+    /// Take the slot, or `None` when a transition is already running.
+    fn claim(flag: &'a AtomicBool) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for TransitionGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Shared, behind-a-mutex state. All transitions go through
 /// `transition()`, which is the only method that takes the lock and
 /// mutates. We never hold the lock across `.await` (no async in here).
 pub struct TunManager {
     inner: Mutex<TunStatus>,
-    /// Serialisation token: only one transition at a time across the
-    /// whole process. Held in a `Mutex<()>` separately so the
-    /// critical-section bookkeeping is obvious.
-    gate: Mutex<()>,
+    /// Single-transition token: only one `enable`/`disable` body at a time
+    /// across the whole process.
+    ///
+    /// Deliberately an `AtomicBool` rather than a `Mutex<()>` held for the
+    /// duration of a transition — see [`TransitionGuard`].
+    in_flight: AtomicBool,
 }
 
 impl TunManager {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(TunStatus::default()),
-            gate: Mutex::new(()),
+            in_flight: AtomicBool::new(false),
         }
     }
 
@@ -203,19 +234,17 @@ impl TunManager {
     /// is already up, so a flipped switch does not have to wait for the
     /// next enable/disable cycle.
     ///
-    /// Returns `Ok(None)` when TUN is not in the `On` state: there is then
-    /// no running kernel to reload, and the caller should simply leave the
-    /// persisted switch to be applied by the next [`Self::enable`].
-    ///
-    /// Takes the transition gate so this cannot interleave with an
-    /// in-flight enable/disable — the write is a single small file, so
-    /// holding it briefly is cheaper than reasoning about the race.
+    /// Returns `Ok(None)` when TUN is not in the `On` state, or when a
+    /// transition currently owns the slot (the next [`Self::enable`] stamps
+    /// the switch anyway).
     pub fn repatch_for_advanced(
         &self,
         storage: &ProfileStorage,
         advanced: TunAdvanced,
     ) -> Result<Option<TunPatchOutcome>> {
-        let _gate = self.gate.lock().expect("tun gate poisoned");
+        let Some(_claim) = TransitionGuard::claim(&self.in_flight) else {
+            return Ok(None);
+        };
         if !matches!(self.snapshot().state, TunState::On) {
             return Ok(None);
         }
@@ -223,14 +252,18 @@ impl TunManager {
     }
 
     /// Drive a full enable transition. Must NOT be called re-entrantly
-    /// — the gate mutex ensures that.
+    /// — the transition slot ensures that.
     pub fn enable<R: Runtime>(
         &self,
         app: &AppHandle<R>,
         storage: &ProfileStorage,
         advanced: TunAdvanced,
     ) -> Result<TunStatus> {
-        let _gate = self.gate.lock().expect("tun gate poisoned");
+        let Some(_claim) = TransitionGuard::claim(&self.in_flight) else {
+            return Err(AppError::Tun(
+                "a TUN transition is already in flight".into(),
+            ));
+        };
 
         if matches!(self.snapshot().state, TunState::Enabling | TunState::On) {
             return Err(AppError::Tun(format!(
@@ -328,7 +361,13 @@ impl TunManager {
         storage: &ProfileStorage,
         restart_sidecar: bool,
     ) -> Result<TunStatus> {
-        let _gate = self.gate.lock().expect("tun gate poisoned");
+        // No lock is held from here on: everything below is either a short
+        // state mutation or an external helper with its own timeout.
+        let Some(_claim) = TransitionGuard::claim(&self.in_flight) else {
+            // A transition already owns the state machine; the old gate made
+            // this an idempotent no-op and so do we.
+            return Ok(self.snapshot());
+        };
         if matches!(self.snapshot().state, TunState::Off | TunState::Disabling) {
             return Ok(self.snapshot());
         }

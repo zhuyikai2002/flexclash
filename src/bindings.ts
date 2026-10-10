@@ -282,10 +282,9 @@ export const commands = {
 	 *  Rust parameter names and the `invoke` payload in `src/services/tun.ts`
 	 *  from silently drifting apart.
 	 * 
-	 *  `#[tauri::command(async)]` is load-bearing: `mgr.enable` blocks for up to
-	 *  15 s waiting for the elevated kernel's `/version` probe. Without it the
-	 *  command runs on the main thread and freezes the whole UI (and every other
-	 *  IPC call) for the length of the bring-up.
+	 *  `async` + [`off_runtime`] is load-bearing: `mgr.enable` blocks for up to
+	 *  15 s waiting for the elevated kernel's `/version` probe and for the user's
+	 *  UAC answer. Off the blocking pool that cost is invisible to the runtime.
 	 */
 	enableTun: (strictRoute: boolean | null, dnsHijack: boolean | null) => typedError<TunStatus, AppError>(__TAURI_INVOKE("enable_tun", { strictRoute, dnsHijack })),
 	/**
@@ -306,8 +305,10 @@ export const commands = {
 	 *  Disable TUN. Symmetric to `enable_tun`; rolls forward even on
 	 *  partial failure (best-effort cleanup) and returns the final state.
 	 * 
-	 *  `#[tauri::command(async)]` keeps the synchronous stop/reap/restart work
-	 *  off the main thread, same rationale as `enable_tun`.
+	 *  Stops the elevated kernel *first* and refuses to continue if that failed:
+	 *  a surviving elevated kernel still owns 9091/7897, so stripping the config
+	 *  and restarting the regular sidecar on top of it would only buy a crash
+	 *  loop.
 	 */
 	disableTun: () => typedError<TunStatus, AppError>(__TAURI_INVOKE("disable_tun")),
 	/**

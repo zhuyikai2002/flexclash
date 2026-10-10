@@ -261,6 +261,8 @@ impl SidecarHandle {
         let _ = self.lock().crash_tx.send(event);
     }
 
+    /// Append a line to the kernel log ring buffer and to the persisted
+    /// `runtime.log`.
     fn push_log(&self, line: String) {
         let mut g = self.lock();
         if g.recent_log_tail.len() >= LOG_TAIL_CAP {
@@ -541,26 +543,26 @@ pub async fn restart<R: Runtime>(app: &AppHandle<R>, handle: SidecarHandle) -> R
 
 /// Last-resort cleanup. MUST NOT depend on `AppHandle` (it may be dropping).
 /// Belt-and-suspenders against zombie processes on all desktop OSes.
+///
+/// Bounded on purpose: this runs during teardown, where an unbounded helper
+/// would stall the shutdown path indefinitely.
 pub fn hard_cleanup() {
     eprintln!("[shutdown] running hard_cleanup for Mihomo sidecar");
+    let budget = std::time::Duration::from_secs(5);
     #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
+    let outcome = crate::core::proc::run_with_timeout(
+        "taskkill",
         // /IM wildcard matches mihomo.exe AND mihomo-x86_64-pc-windows-msvc.exe
-        let _ = std::process::Command::new("taskkill")
-            .creation_flags(0x0800_0000)
-            .args(["/F", "/T", "/IM", "mihomo*.exe"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
+        &["/F", "/T", "/IM", "mihomo*.exe"],
+        budget,
+    );
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
-        let _ = std::process::Command::new("pkill")
-            .args(["-9", "-f", "mihomo"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+    let outcome = crate::core::proc::run_with_timeout("pkill", &["-9", "-f", "mihomo"], budget);
+
+    match outcome {
+        Ok(o) if o.timed_out => eprintln!("[shutdown] hard_cleanup helper timed out"),
+        Ok(_) => {}
+        Err(e) => eprintln!("[shutdown] hard_cleanup helper failed to run: {e}"),
     }
 }
 

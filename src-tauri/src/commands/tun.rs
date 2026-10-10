@@ -11,8 +11,28 @@ use tauri::{AppHandle, Manager, Runtime};
 use crate::config::profile::TunAdvanced;
 use crate::core::sidecar;
 use crate::core::tun::{TunManager, TunStatus};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::tray;
+
+/// Run a blocking TUN transition on the blocking pool, then await it.
+///
+/// The `enable` / `disable` bodies sleep for hundreds of milliseconds at a
+/// time and shell out to `taskkill`, `route` and `netsh`. Running them
+/// inline would occupy an async-runtime worker for the whole transition —
+/// and because every Tauri IPC call is dispatched onto that same runtime,
+/// enough wedged transitions starve it and *every* command (and with it the
+/// whole UI) stops answering. That is the difference between "the toggle is
+/// slow" and "the app is frozen".
+async fn off_runtime<T, F>(work: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(work).await {
+        Ok(res) => res,
+        Err(e) => Err(AppError::Tun(format!("TUN transition failed: {e}"))),
+    }
+}
 
 /// The active config location, resolved from the Tauri path API.
 ///
@@ -65,22 +85,26 @@ pub fn get_tun_state<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
 /// Rust parameter names and the `invoke` payload in `src/services/tun.ts`
 /// from silently drifting apart.
 ///
-/// `#[tauri::command(async)]` is load-bearing: `mgr.enable` blocks for up to
-/// 15 s waiting for the elevated kernel's `/version` probe. Without it the
-/// command runs on the main thread and freezes the whole UI (and every other
-/// IPC call) for the length of the bring-up.
-#[tauri::command(async)]
+/// `async` + [`off_runtime`] is load-bearing: `mgr.enable` blocks for up to
+/// 15 s waiting for the elevated kernel's `/version` probe and for the user's
+/// UAC answer. Off the blocking pool that cost is invisible to the runtime.
+#[tauri::command]
 #[specta::specta]
-pub fn enable_tun<R: Runtime>(
+pub async fn enable_tun<R: Runtime>(
     app: AppHandle<R>,
     strict_route: Option<bool>,
     dns_hijack: Option<bool>,
 ) -> Result<TunStatus> {
-    let mgr = app
-        .try_state::<TunManager>()
-        .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
-    let storage = storage_for(&app)?;
-    let res = mgr.enable(&app, &storage, advanced_from(strict_route, dns_hijack));
+    let worker = app.clone();
+    let advanced = advanced_from(strict_route, dns_hijack);
+    let res = off_runtime(move || {
+        let mgr = worker
+            .try_state::<TunManager>()
+            .ok_or_else(|| AppError::Tun("TunManager not registered".into()))?;
+        let storage = storage_for(&worker)?;
+        mgr.enable(&worker, &storage, advanced)
+    })
+    .await;
     // Refresh the tray icon regardless of success — a Failed transition
     // is still a state change worth reflecting.
     let _ = tray::update_tray_icon(&app);
@@ -105,42 +129,52 @@ pub async fn apply_tun_advanced<R: Runtime>(
     strict_route: bool,
     dns_hijack: bool,
 ) -> Result<TunStatus> {
-    let mgr = app
-        .try_state::<TunManager>()
-        .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
-    let storage = storage_for(&app)?;
     let advanced = TunAdvanced {
         strict_route,
         dns_hijack,
     };
+    // The re-stamp itself is a single small file write, but it claims the
+    // transition slot, so it belongs on the blocking pool too. The status is
+    // captured inside the closure because that is where the manager handle
+    // lives.
+    let (outcome, status) = off_runtime(move || {
+        let mgr = app
+            .try_state::<TunManager>()
+            .ok_or_else(|| AppError::Tun("TunManager not registered".into()))?;
+        let storage = storage_for(&app)?;
+        let outcome = mgr.repatch_for_advanced(&storage, advanced)?;
+        Ok((outcome, mgr.status()))
+    })
+    .await?;
 
-    match mgr.repatch_for_advanced(&storage, advanced)? {
+    match outcome {
         // TUN is off (or mid-transition): nothing running to reload.
-        None => Ok(mgr.status()),
+        None => Ok(status),
         Some(outcome) => {
             if let Err(e) =
                 crate::commands::profile::reload_via_controller(&outcome.config_path).await
             {
                 eprintln!("[tun] advanced hot-reload skipped: {e}");
             }
-            Ok(mgr.status())
+            Ok(status)
         }
     }
 }
 
 /// Disable TUN. Symmetric to `enable_tun`; rolls forward even on
 /// partial failure (best-effort cleanup) and returns the final state.
-///
-/// `#[tauri::command(async)]` keeps the synchronous stop/reap/restart work
-/// off the main thread, same rationale as `enable_tun`.
-#[tauri::command(async)]
+#[tauri::command]
 #[specta::specta]
-pub fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
-    let mgr = app
-        .try_state::<TunManager>()
-        .ok_or_else(|| crate::error::AppError::Tun("TunManager not registered".into()))?;
-    let storage = storage_for(&app)?;
-    let res = mgr.disable(&app, &storage, true);
+pub async fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
+    let worker = app.clone();
+    let res = off_runtime(move || {
+        let mgr = worker
+            .try_state::<TunManager>()
+            .ok_or_else(|| AppError::Tun("TunManager not registered".into()))?;
+        let storage = storage_for(&worker)?;
+        mgr.disable(&worker, &storage, true)
+    })
+    .await;
     let _ = tray::update_tray_icon(&app);
     res
 }
