@@ -14,6 +14,19 @@
 # `releases/latest/download/latest.json`, and GitHub's `/latest/` excludes both
 # drafts and prereleases.
 #
+# THE CHANGELOG IS ASSEMBLED FROM release_notes.md IN THREE PLACES, because the
+# action only accepts a plain string and silently ignores unknown inputs:
+#
+#   1. Release page body   -> "Publish notes" step output -> `releaseBody`.
+#   2. In-app dialog       -> `latest.json > notes`, which tauri-action leaves
+#                             EMPTY; the "Patch updater manifest notes" step
+#                             rewrites the uploaded asset with the same file.
+#   3. (local builds)      -> `scripts/gen-latest-json.py`.
+#
+# Any new place that shows a changelog MUST read `release_notes.md`, never a
+# hand-copied constant. v0.6.4 shipped with (1) and (2) both blank because the
+# action was given a `bodyPath` key it does not have.
+#
 # IMPORTANT: the tag and `tauri.conf.json > version` must agree. `latest.json`
 # points at `releases/download/v<version>/...`, where `<version>` is read from
 # tauri.conf.json -- not from the tag. Tag `v0.6.3` while the config still says
@@ -122,6 +135,26 @@ jobs:
         with:
           platform: ${{ matrix.sidecar }}
 
+      # tauri-action takes the release body as a *string* and has no way to read
+      # a file, so the changelog is loaded here and handed over as an output.
+      # Must run before the publish step, which interpolates it.
+      #
+      # The heredoc form of `$GITHUB_OUTPUT` is required: the parser is
+      # line-oriented, so a raw multi-line value would be truncated at the first
+      # blank line. (Do NOT "solve" this by base64-ing the value — that would
+      # render the Release body as base64 gibberish.)
+      - name: Publish notes
+        id: notes
+        shell: bash
+        run: |
+          # The delimiter must not appear on its own line in the file; this one
+          # is deliberately obscure for that reason.
+          {
+            echo 'notes_body<<FLEXCLASH_CHANGELOG_EOF'
+            cat release_notes.md
+            echo 'FLEXCLASH_CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build, bundle and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -141,14 +174,12 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "FlexClash ${{ github.ref_name }}"
           # `release_notes.md` is the SINGLE source of truth for the changelog.
-          # It becomes this Release's body *and* `latest.json > notes` (read by
-          # `scripts/gen-latest-json.py`), so the page and the in-app updater
-          # dialog can never disagree.
           #
-          # This was an inline English template instead, which meant the GitHub
-          # Release page showed none of the actual changelog while the app
-          # dialog showed all of it. `bodyPath` is relative to the workspace.
-          bodyPath: release_notes.md
+          # NOTE: tauri-action has NO `bodyPath` input -- only a `releaseBody`
+          # *string*. Passing an unknown key silently produced an EMPTY release
+          # body (observed on v0.6.4), so the file's contents are read into a
+          # step output by the "Publish notes" step and interpolated here.
+          releaseBody: ${{ steps.notes.outputs.notes_body }}
           # NOT a draft and NOT a prerelease, deliberately: the updater polls
           # `releases/latest/download/latest.json`, and `/latest/` excludes both.
           releaseDraft: false
@@ -157,3 +188,88 @@ jobs:
           # updater keeps working. Each matrix row contributes its platform's
           # entry; tauri-action merges them into the same release manifest.
           includeUpdaterJson: true
+
+      # ------------------------------------------------------------------------
+      # `latest.json > notes` is EMPTY in the manifest tauri-action uploads.
+      #
+      # The action generates the updater manifest itself and has no notes input,
+      # so the in-app update dialog renders a blank changelog even though the
+      # Release page (fixed above) has the full text. v0.6.4 shipped exactly
+      # that way. `scripts/gen-latest-json.py` DOES inject the notes, but it
+      # needs locally built + signed bundles, which a matrix runner does not
+      # have for every platform — so patch the uploaded asset instead.
+      #
+      # Runs on exactly ONE matrix row (`matrix.sidecar == 'windows'`): the
+      # manifest is a single shared asset that every row merges into, so two
+      # concurrent patches would race and one would clobber the other.
+      #
+      # Needs `contents: write`, which this workflow already grants.
+      # ------------------------------------------------------------------------
+      - name: Patch updater manifest notes
+        if: matrix.sidecar == 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # The asset was uploaded by the previous step on this same row, but
+          # the upload is a separate HTTP request and may not be visible to the
+          # API immediately, so poll rather than assume.
+          asset=""
+          for _ in $(seq 1 12); do
+            asset="$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
+              --jq '.assets[] | select(.name=="latest.json") | .id' || true)"
+            if [ -n "$asset" ]; then break; fi
+            sleep 5
+          done
+          if [ -z "$asset" ]; then
+            echo "::error::latest.json asset not found on $TAG after 60s"
+            exit 1
+          fi
+
+          curl -sSL -o manifest.json \
+            "https://github.com/${{ github.repository }}/releases/download/$TAG/latest.json"
+
+          # Python lives in a script, not a heredoc: inside a YAML block scalar
+          # a heredoc terminator has to survive a layer of indentation, and a
+          # stray leading space turns it into ordinary shell text that hangs
+          # the step waiting on stdin.
+          #
+          # The script exits 0 without writing when the notes are already
+          # present, which is what makes a re-run (or a second matrix row
+          # racing this one) harmless.
+          patched="$(python3 scripts/patch-latest-json-notes.py manifest.json release_notes.md)"
+          echo "$patched"
+          case "$patched" in
+            *"already present"*) echo "nothing to do"; exit 0 ;;
+          esac
+
+          # A release asset cannot be overwritten in place: delete, then
+          # re-upload under the same name.
+          gh api --method DELETE \
+            "repos/${{ github.repository }}/releases/assets/$asset"
+          release_id="$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq '.id')"
+
+          # Upload goes to the `uploads.github.com` HOST with curl, not
+          # `gh api repos/.../assets/$asset`: the upload endpoint is a
+          # different API host, and gh refuses to cross hosts, so the "natural"
+          # spelling returns 404 (verified on v0.6.4). curl is not subject to
+          # that restriction.
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@manifest.json" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$release_id/assets?name=latest.json" \
+            -o upload.json
+          # GitHub answers a rejected upload with a 200-shaped JSON error body,
+          # so check the payload instead of trusting curl's exit status. Single
+          # line on purpose: a multi-line `python3 -c "..."` inside a bash double
+          # quote is a quoting accident waiting to happen.
+          python3 -c 'import json,sys; d=json.load(open("upload.json")); sys.exit("::error::re-upload failed: "+json.dumps(d)) if "id" not in d else print(d["name"], "re-uploaded,", d["size"], "bytes")'
+
+          # Read back exactly what a user updating right now would receive.
+          curl -sSL -o verify.json \
+            "https://github.com/${{ github.repository }}/releases/download/$TAG/latest.json"
+          python3 scripts/verify-latest-json-notes.py verify.json
