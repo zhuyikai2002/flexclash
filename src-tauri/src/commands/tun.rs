@@ -1,5 +1,5 @@
-﻿// ============================================================================
-// commands/tun.rs 鈥?Tauri command surface for the M9 TUN manager.
+// ============================================================================
+// commands/tun.rs — Tauri command surface for the M9 TUN manager.
 //
 // Mirrors the shape of `commands::kernel` / `commands::desktop` so the
 // frontend can reach every TUN operation through a single, stable
@@ -18,7 +18,8 @@ use crate::tray;
 ///
 /// The `enable` / `disable` bodies sleep for hundreds of milliseconds at a
 /// time and shell out to `taskkill`, `route` and `netsh`. Running them
-/// inline would occupy an async-runtime worker for the whole transition 鈥?/// and because every Tauri IPC call is dispatched onto that same runtime,
+/// inline would occupy an async-runtime worker for the whole transition —
+/// and because every Tauri IPC call is dispatched onto that same runtime,
 /// enough wedged transitions starve it and *every* command (and with it the
 /// whole UI) stops answering. That is the difference between "the toggle is
 /// slow" and "the app is frozen".
@@ -38,7 +39,8 @@ where
 /// Deliberately does **not** go through `SidecarHandle::work_dir()`. That
 /// method only knows the real answer once the kernel has been started in
 /// this process; before that it has to guess, and a TUN enable that patches
-/// the wrong `config.yaml` 鈥?or hands the elevated mihomo a wrong `-d` 鈥?/// comes up with no profiles, no rules and no DNS: "TUN is on but nothing is
+/// the wrong `config.yaml` — or hands the elevated mihomo a wrong `-d` —
+/// comes up with no profiles, no rules and no DNS: "TUN is on but nothing is
 /// proxied". `work_dir_for` derives the path from `app.path()` instead, so
 /// it is correct from the very first call.
 fn storage_for<R: Runtime>(app: &AppHandle<R>) -> Result<crate::config::profile::ProfileStorage> {
@@ -48,7 +50,7 @@ fn storage_for<R: Runtime>(app: &AppHandle<R>) -> Result<crate::config::profile:
 
 /// Resolve the two "TUN Advanced" switches, falling back to
 /// [`TunAdvanced::default`] for a caller that does not send them (the
-/// frontend always does 鈥?see `src/services/tun.ts`).
+/// frontend always does — see `src/services/tun.ts`).
 fn advanced_from(strict_route: Option<bool>, dns_hijack: Option<bool>) -> TunAdvanced {
     let d = TunAdvanced::default();
     TunAdvanced {
@@ -70,12 +72,12 @@ pub fn get_tun_state<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {
 }
 
 /// Enable TUN. Triggers the full state machine:
-///   * sweep 鈫?patch config 鈫?runas-elevate mihomo 鈫?wait for healthy
+///   * sweep → patch config → runas-elevate mihomo → wait for healthy
 ///   * on any failure, roll back to Off/Failed and surface the error.
 ///
 /// `strict_route` / `dns_hijack` are the two Settings -> "TUN Advanced"
 /// switches. They are stamped onto the `tun:` block during the config patch
-/// (step 2), which is the only moment the yaml is ours to rewrite 鈥?the
+/// (step 2), which is the only moment the yaml is ours to rewrite — the
 /// elevated kernel then boots straight from it.
 ///
 /// `rename_all = "snake_case"` is deliberate: Tauri 2 defaults command
@@ -103,7 +105,7 @@ pub async fn enable_tun<R: Runtime>(
         mgr.enable(&worker, &storage, advanced)
     })
     .await;
-    // Refresh the tray icon regardless of success 鈥?a Failed transition
+    // Refresh the tray icon regardless of success — a Failed transition
     // is still a state change worth reflecting.
     let _ = tray::update_tray_icon(&app);
     res
@@ -112,7 +114,8 @@ pub async fn enable_tun<R: Runtime>(
 /// Push a changed "TUN Advanced" switch into the *running* kernel.
 ///
 /// Without this the two cards would only take effect on the next
-/// disable/enable cycle, so the UI would show "on" while `config.yaml` 鈥?/// and therefore mihomo 鈥?still disagreed.
+/// disable/enable cycle, so the UI would show "on" while `config.yaml` —
+/// and therefore mihomo — still disagreed.
 ///
 /// The yaml is re-stamped first and the hot-reload second, so a failed
 /// reload (controller briefly unreachable, kernel restarting) still leaves a
@@ -139,7 +142,7 @@ pub async fn apply_tun_advanced<R: Runtime>(
             .try_state::<TunManager>()
             .ok_or_else(|| AppError::Tun("TunManager not registered".into()))?;
         let storage = storage_for(&app)?;
-        let outcome = mgr.repatch_for_advanced(&storage, advanced)?;
+        let outcome = mgr.repatch_for_advanced(&app, &storage, advanced)?;
         Ok((outcome, mgr.status()))
     })
     .await?;
@@ -160,6 +163,11 @@ pub async fn apply_tun_advanced<R: Runtime>(
 
 /// Disable TUN. Symmetric to `enable_tun`; rolls forward even on
 /// partial failure (best-effort cleanup) and returns the final state.
+///
+/// Stops the elevated kernel *first* and refuses to continue if that failed:
+/// a surviving elevated kernel still owns 9091/7897, so stripping the config
+/// and restarting the regular sidecar on top of it would only buy a crash
+/// loop.
 #[tauri::command]
 #[specta::specta]
 pub async fn disable_tun<R: Runtime>(app: AppHandle<R>) -> Result<TunStatus> {

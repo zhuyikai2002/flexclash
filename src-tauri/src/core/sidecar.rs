@@ -263,7 +263,12 @@ impl SidecarHandle {
 
     /// Append a line to the kernel log ring buffer and to the persisted
     /// `runtime.log`.
-    fn push_log(&self, line: String) {
+    ///
+    /// Public so other core modules can reuse this one channel instead of
+    /// inventing their own — the TUN lifecycle, for instance, pushes its
+    /// `[TUN_LIFECYCLE]` trace through here so a wedged transition is
+    /// visible in the same place as the kernel's own diagnostics.
+    pub fn push_log(&self, line: String) {
         let mut g = self.lock();
         if g.recent_log_tail.len() >= LOG_TAIL_CAP {
             g.recent_log_tail.remove(0);

@@ -112,12 +112,16 @@ fn registry() -> &'static Mutex<Option<ElevatedChild>> {
     ELEVATED_PID.get_or_init(|| Mutex::new(None))
 }
 
-/// Emit one lifecycle line from the elevate layer.
+/// Emit one `[TUN_LIFECYCLE]` line through the shared kernel-log channel.
 ///
-/// Kept as a named seam so the kernel-log channel can be introduced later
-/// without touching the eight call sites that already depend on it.
+/// Reuses `core::tun::lifecycle_log` so the elevate layer and the state
+/// machine produce one identical, greppable trace. Falls back to stderr
+/// when no app handle is installed yet (unit tests, early boot).
 fn lifecycle(line: &str) {
-    eprintln!("[elevate] {line}");
+    match current_app_handle() {
+        Some(app) => crate::core::tun::lifecycle_log(&app, line),
+        None => eprintln!("[TUN_LIFECYCLE] {line}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

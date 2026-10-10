@@ -143,6 +143,23 @@ impl Default for TunStatus {
     }
 }
 
+/// Push one `[TUN_LIFECYCLE]` line to stderr, to the persisted
+/// `runtime.log`, and to the renderer's kernel-log channel.
+///
+/// The crate deliberately has **no** `log` facade (and this change does not
+/// add one), so the observability budget is spent on the channel that already
+/// exists: `core::sidecar::SidecarHandle::push_log` + the `kernel://log`
+/// event the UI renders. That means a wedged transition is visible in the
+/// app itself, not only in a terminal someone has to attach.
+pub fn lifecycle_log<R: Runtime>(app: &AppHandle<R>, line: &str) {
+    let line = format!("[TUN_LIFECYCLE] {line}");
+    eprintln!("{line}");
+    if let Some(handle) = app.try_state::<crate::core::sidecar::SidecarHandle>() {
+        handle.push_log(line.clone());
+    }
+    let _ = app.emit(crate::events::KERNEL_LOG, line);
+}
+
 /// RAII claim on the single-transition slot.
 ///
 /// This replaces the `gate: Mutex<()>` that used to be held for the *entire*
@@ -150,24 +167,31 @@ impl Default for TunStatus {
 /// `netsh`) and sleep for hundreds of milliseconds at a time, so holding a
 /// mutex across them meant a single wedged helper froze every future TUN
 /// transition *permanently*. Mutual exclusion is unchanged — it is now a
-/// flag we own rather than a lock we sit on — and because the guard releases
-/// on drop, no early return can leak the slot.
-struct TransitionGuard<'a> {
+/// flag we own rather than a lock we sit on — and dropping the guard logs
+/// the release, so "the transition never finished" is distinguishable from
+/// "the transition never started" in the trace.
+struct TransitionGuard<'a, R: Runtime> {
     flag: &'a AtomicBool,
+    app: &'a AppHandle<R>,
+    label: &'static str,
 }
 
-impl<'a> TransitionGuard<'a> {
+impl<'a, R: Runtime> TransitionGuard<'a, R> {
     /// Take the slot, or `None` when a transition is already running.
-    fn claim(flag: &'a AtomicBool) -> Option<Self> {
+    fn claim(flag: &'a AtomicBool, app: &'a AppHandle<R>, label: &'static str) -> Option<Self> {
         flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .ok()
-            .map(|_| Self { flag })
+            .map(|_| Self { flag, app, label })
     }
 }
 
-impl Drop for TransitionGuard<'_> {
+impl<R: Runtime> Drop for TransitionGuard<'_, R> {
     fn drop(&mut self) {
         self.flag.store(false, Ordering::SeqCst);
+        lifecycle_log(
+            self.app,
+            &format!("Released transition slot ({})", self.label),
+        );
     }
 }
 
@@ -240,12 +264,13 @@ impl TunManager {
     /// not in the `On` state (then there is no running kernel to reload), or
     /// a transition currently owns the slot (then the next
     /// [`Self::enable`] stamps it anyway).
-    pub fn repatch_for_advanced(
+    pub fn repatch_for_advanced<R: Runtime>(
         &self,
+        app: &AppHandle<R>,
         storage: &ProfileStorage,
         advanced: TunAdvanced,
     ) -> Result<Option<TunPatchOutcome>> {
-        let Some(_claim) = TransitionGuard::claim(&self.in_flight) else {
+        let Some(_claim) = TransitionGuard::claim(&self.in_flight, app, "repatch-advanced") else {
             return Ok(None);
         };
         if !matches!(self.snapshot().state, TunState::On) {
@@ -262,7 +287,7 @@ impl TunManager {
         storage: &ProfileStorage,
         advanced: TunAdvanced,
     ) -> Result<TunStatus> {
-        let Some(_claim) = TransitionGuard::claim(&self.in_flight) else {
+        let Some(_claim) = TransitionGuard::claim(&self.in_flight, app, "enable") else {
             return Err(AppError::Tun(
                 "a TUN transition is already in flight".into(),
             ));
@@ -275,6 +300,7 @@ impl TunManager {
             )));
         }
 
+        lifecycle_log(app, "Requesting enable…");
         self.set_state(TunState::Enabling, None);
 
         // 1. Sweep first so the elevated mihomo starts from a clean slate.
@@ -296,6 +322,7 @@ impl TunManager {
         //    reported as intentional (`Clean`) and the supervisor stands
         //    down. The brief pause lets the OS release the sockets.
         if let Some(handle) = app.try_state::<crate::core::sidecar::SidecarHandle>() {
+            lifecycle_log(app, "Stopping the regular sidecar before TUN takeover");
             if let Err(e) = crate::core::sidecar::stop(handle.inner().clone()) {
                 eprintln!("[tun] pre-TUN sidecar stop reported: {e}");
             }
@@ -305,6 +332,7 @@ impl TunManager {
         // 4. Ask the elevate layer to launch mihomo with TUN. On UAC
         //    cancel it returns Err(ElevateCancelled); we map that to
         //    the "failed" state and roll back the config patch.
+        lifecycle_log(app, "Launching the elevated TUN kernel…");
         match crate::core::elevate::spawn_elevated_mihomo::<R>(app) {
             Ok(_pid) => {
                 // 5. Block (up to a budget) until the elevated mihomo
@@ -315,6 +343,7 @@ impl TunManager {
                     crate::core::elevate::wait_until_healthy(std::time::Duration::from_secs(15));
                 match wait {
                     Ok(()) => {
+                        lifecycle_log(app, "Elevated kernel healthy — TUN on");
                         self.set_state(TunState::On, None);
                         // The main app already has the controller URL
                         // pinned to 127.0.0.1:9091 so the elevated
@@ -366,7 +395,7 @@ impl TunManager {
     ) -> Result<TunStatus> {
         // No lock is held from here on: everything below is either a short
         // state mutation or an external helper with its own timeout.
-        let Some(_claim) = TransitionGuard::claim(&self.in_flight) else {
+        let Some(_claim) = TransitionGuard::claim(&self.in_flight, app, "disable") else {
             // A transition already owns the state machine; the old gate made
             // this an idempotent no-op and so do we.
             return Ok(self.snapshot());
@@ -375,6 +404,7 @@ impl TunManager {
             return Ok(self.snapshot());
         }
 
+        lifecycle_log(app, "Requesting stop…");
         self.set_state(TunState::Disabling, None);
 
         // 1. Stop the elevated mihomo first; without it the kernel
@@ -385,6 +415,7 @@ impl TunManager {
         //    the regular sidecar would only produce a crash loop — bail out
         //    with the state intact and the reason surfaced.
         if let Err(e) = crate::core::elevate::stop_elevated_mihomo() {
+            lifecycle_log(app, &format!("Stop failed, TUN left untouched: {e}"));
             self.set_state(TunState::On, Some(format!("stop failed: {e}")));
             return Err(e);
         }
@@ -400,6 +431,10 @@ impl TunManager {
         }
 
         // 3. Sweep residual routes / adapter.
+        lifecycle_log(
+            app,
+            "Swept the tun block from config; sweeping residual routes…",
+        );
         let post = route_guard::sweep_residual_routes();
         self.record_sweep(post);
 
@@ -432,6 +467,7 @@ impl TunManager {
 
         self.set_state(TunState::Off, None);
         let _ = app.emit(TUN_STATE_CHANGED, self.snapshot());
+        lifecycle_log(app, "TUN off");
         Ok(self.snapshot())
     }
 }
