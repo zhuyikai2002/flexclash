@@ -12,6 +12,17 @@ export const commands = {
 	stopKernel: () => typedError<KernelState, AppError>(__TAURI_INVOKE("stop_kernel")),
 	restartKernel: () => typedError<KernelState, AppError>(__TAURI_INVOKE("restart_kernel")),
 	getKernelState: () => __TAURI_INVOKE<KernelState>("get_kernel_state"),
+	/**
+	 *  Version of the bundled mihomo binary, e.g. `"v1.19.32"`.
+	 * 
+	 *  Deliberately distinct from `commands::mihomo::get_mihomo_version`, which
+	 *  asks the *running* controller (`GET /version`) and therefore fails whenever
+	 *  no kernel is up. This one reads the binary itself, so the About panel and
+	 *  the subscribe dialog's `User-Agent` hint work before the proxy has ever been
+	 *  started — and it stays correct across a kernel swap, because there is no
+	 *  literal on the frontend to drift.
+	 */
+	getKernelBinaryVersion: () => typedError<string, AppError>(__TAURI_INVOKE("get_kernel_binary_version")),
 	getMihomoVersion: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_version")),
 	getMihomoConfigs: () => typedError<string, AppError>(__TAURI_INVOKE("get_mihomo_configs")),
 	/**  PATCH /configs — outbound mode switch (`{"mode": "rule"}`), etc. */

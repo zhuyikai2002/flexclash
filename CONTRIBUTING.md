@@ -73,9 +73,12 @@ cd flexclash
 npm install
 
 # 3. Provide mihomo sidecar (FlexClash does not redistribute the binary)
-#    Download mihomo v1.19.30 from
-#    https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.30
+#    The pinned version and its sha256 digests live in a single place:
+#    .github/actions/fetch-mihomo/action.yml
+#    Download that release from
+#    https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.32
 #    Place as: src-tauri/binaries/mihomo-x86_64-pc-windows-msvc.exe
+#    (Linux: src-tauri/binaries/mihomo-x86_64-unknown-linux-gnu, chmod +x)
 
 # 4. Run dev mode (Vite HMR + Tauri hot reload)
 npm run tauri:dev

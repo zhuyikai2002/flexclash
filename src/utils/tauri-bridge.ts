@@ -38,7 +38,7 @@
 
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
-import type { AppError } from '@/bindings'
+import { commands, type AppError } from '@/bindings'
 
 /** True iff the renderer is hosted inside a Tauri webview. */
 export function isTauri(): boolean {
@@ -207,6 +207,30 @@ export async function getAppVersion(): Promise<string | null> {
     return await getVersion()
   } catch (e) {
     if (isDev) console.debug('[tauri-bridge] getVersion failed', e)
+    return null
+  }
+}
+
+/**
+ * Read the bundled mihomo kernel's own version, e.g. `"v1.19.32"`.
+ *
+ * As with `getAppVersion`, this exists so no component has to carry a version
+ * literal: the previous `mihomo/1.19.30` in the subscribe dialog was already
+ * stale against the pinned kernel, and nothing failed when it drifted — it
+ * just told users to paste the wrong `User-Agent`. The Rust side spawns
+ * `mihomo -v`, so this answers even with no kernel running (the REST
+ * `/version` endpoint does not).
+ *
+ * Returns `null` outside the Tauri runtime (plain browser preview) or if the
+ * probe fails, so callers render a neutral placeholder rather than inventing a
+ * version.
+ */
+export async function getKernelVersion(): Promise<string | null> {
+  if (!inTauri('get_kernel_binary_version')) return null
+  try {
+    return await call(commands.getKernelBinaryVersion())
+  } catch (e) {
+    if (isDev) console.debug('[tauri-bridge] getKernelVersion failed', e)
     return null
   }
 }

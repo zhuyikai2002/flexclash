@@ -42,7 +42,7 @@ inputs:
   version:
     description: mihomo release tag.
     required: false
-    default: v1.19.31
+    default: v1.19.32
   # --- Windows ---------------------------------------------------------------
   asset:
     description: >-
@@ -55,7 +55,7 @@ inputs:
   sha256:
     description: Expected sha256 of the exe inside the Windows archive.
     required: false
-    default: 1fa8055e03596fc35167f70e9ecd1890517d38d960a39177445746a1b0defc2b
+    default: 04f8d7fc2b314771e1ecbf15951d59f0e1cb7914503c88cfb6972ff6a824e314
   # --- Linux -----------------------------------------------------------------
   asset_linux:
     description: Linux release asset base name; the `.gz` is implied.
@@ -64,7 +64,7 @@ inputs:
   sha256_linux:
     description: Expected sha256 of the *decompressed* Linux binary.
     required: false
-    default: 08787faafea19c1ab0f83fa5a1b22363b7d03ea78da18091a4c883aecaaa5979
+    default: 3122d100e8177501776109f1a6253a694611627cf4d7c7ec82705855cf8626a8
 
 runs:
   using: composite

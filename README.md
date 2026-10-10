@@ -72,12 +72,15 @@ FlexClash 采用现代深色 Fluent 玻璃设计语言，所有面板共享自�
 - **生产级 TUN 虚拟网卡接管**：
   - Linux：基于 Capabilities（`cap_net_admin,cap_net_bind_service=+ep`）细粒度赋权，告别整机 `sudo` 启动风险；自动处理策略路由（`ip rule` + `auto-route`/`auto-redirect`）与 fake-ip DNS
   - Windows：原生集成 Wintun 驱动与 UAC 提权，NSIS 安装器预清理僵尸 sidecar
-- **双内核生命周期调度**：常规 Sidecar 与提权 TUN 内核严格串行——TUN 期间任何 `sidecar::start` 都被统一守卫（`owns_ports`）在命令层 / supervisor / 进程拉起最深处三重拒绝；进程句柄经 `Child::wait()` 回收，杜绝 Linux `<defunct>` 僵尸进程与 9091/7897 端口抢占
+- **双内核生命周期调度**：常规 Sidecar 与提权 TUN 内核严格串行——TUN 期间任何 `sidecar::start` 都被统一守卫（`owns_ports`）在命令层 / supervisor / 进程拉起最深处三重拒绝，杜绝 Linux `<defunct>` 僵尸进程与 9091/7897 端口抢占
+- **提权内核真回收（v0.6.4 修复）**：Windows 侧经 `ShellExecuteExW` + `SEE_MASK_NOCLOSEPROCESS` 取得内核进程句柄，以 `TerminateProcess` 跨完整性级别终结，彻底修复 UAC 提权进程回收死锁——此前 `taskkill` 会被 UIPI 拒绝、镜像名 `mihomo.exe` 又匹配不到 `mihomo-x86_64-pc-windows-msvc.exe`，导致内核占住端口不退、Sidecar 重启后立即崩溃
+- **TUN 切换全链路有界超时（v0.6.4 修复）**：所有阻塞式外部调用（`taskkill` / `pkill` / `route` / `netsh` / `mihomo -v`）统一收口至带超时、且读管道超时不阻塞的进程执行器；状态锁降级为 RAII 令牌、阻塞体移出异步运行时，彻底修复 Linux TUN 无超时挂死与由此引发的界面整体无响应
 - **默认端口独立**：采用混合代理端口 `7897`、REST 控制端口 `9091`，避免与常见客户端默认端口（7890/9090）产生冲突
 
 ### ⚡ 工业级坚固架构
 - **Rust 统一门面（控制面 + 数据面）**：前端零直连——REST 指令与内核 `/traffic`、`/logs` WebSocket 推送流全部收口至 Rust 层
 - **Specta 强类型契约**：Rust 结构体与事件自动生成 `src/bindings.ts`，命令参数与事件载荷双双编译期校验，杜绝运行时未定义与空指针崩溃
+- **内核版本动态读取**：当前 Mihomo 内核为 **v1.19.32**（版本与 sha256 统一 pin 在 `fetch-mihomo` composite action）；界面上的版本号由 `mihomo -v` 实读二进制得出，前端不再持有任何版本字面量，内核升级后无需改前端即不会说谎
 - **单向推模式状态流**：Rust 每秒广播 `AppStateSnapshot`（内核健康 / 系统代理 / 出站模式），实时速率则由内核 `/traffic` 流合并后推送，前端彻底告别 `setInterval` 与自建 WebSocket
 - **内建流式 QoS**：traffic 最新值合并（1s 仅推 1 次）、logs 有界批量打包（500ms / 4096 行上限），订阅永久挂起不丢连接、不涨内存
 
@@ -129,7 +132,7 @@ graph TB
 
 > 注：Rust 独占内核数据面。`/traffic` 与 `/logs` 的 WebSocket 由 `core::ingest` 单一监督任务读取，**节流**（traffic 每 1s 仅保留最新瞬时值，丢弃中间帧）与**攒批**（logs 每 500ms 打包一次，有界 4096 行）后，经 `TrafficPayload` / `LogBatch` 类型化事件推入前端；内核重启或断连时按 500ms → 10s 指数退避自动重连，内核停止即 `abort` 孤儿任务。渲染进程已不再打开任何原生 `WebSocket`。
 
-> 双内核生命周期：TUN 开启期间（`Enabling | On`）所有拉起常规 Sidecar 的企图被统一守卫（`owns_ports`）拒绝，提权内核句柄经 `Child::wait()` 回收，杜绝 `<defunct>` 僵尸与 9091/7897 端口抢占。
+> 双内核生命周期：TUN 开启期间（`Enabling | On`）所有拉起常规 Sidecar 的企图被统一守卫（`owns_ports`）拒绝。提权内核在 Windows 经进程句柄 + `TerminateProcess`、在 Linux 经 SIGTERM→SIGKILL 时钟 escalation 回收，杜绝 `<defunct>` 僵尸与 9091/7897 端口抢占；每一次状态迁移都会打出 `[TUN_LIFECYCLE]` 日志，复用内核日志通道直达前端。
 
 ---
 
@@ -179,9 +182,11 @@ graph TB
 - Node.js >= 20（LTS，CI 实测）
 - Rust >= 1.78（stable）
 - **Linux 构建依赖**：`libwebkit2gtk-4.1-dev`、`libappindicator3-dev`、`librsvg2-dev`、`patchelf`、`libssl-dev`（Arch 系：`webkit2gtk-4.1`、`libappindicator-gtk3`、`librsvg`、`openssl`）
-- **Mihomo Core**：将对应平台的二进制放置于 `src-tauri/binaries/`（`bundle.externalBin` 依此命名解析，缺失会导致构建失败）：
-  - Windows: `mihomo-x86_64-pc-windows-msvc.exe`
-  - Linux: `mihomo-x86_64-unknown-linux-gnu`（需 `chmod +x`）
+- **Mihomo Core**：当前 pin 为 **v1.19.32**。将对应平台的二进制放置于 `src-tauri/binaries/`（`bundle.externalBin` 依此命名解析，缺失会导致构建失败）：
+  - Windows: `mihomo-x86_64-pc-windows-msvc.exe`（取自 `mihomo-windows-amd64-compatible-v1.19.32.zip` 内的 exe）
+  - Linux: `mihomo-x86_64-unknown-linux-gnu`（取自 `mihomo-linux-amd64-v1.19.32.gz` 解压后的二进制，需 `chmod +x`）
+
+  升级内核时只需改 `.github/actions/fetch-mihomo/action.yml` 里的 `version` 与两个 `sha256`（版本与摘要刻意 pin 在同一文件），前端显示的版本号会随之自动更新。
 
 ### 本地开发
 

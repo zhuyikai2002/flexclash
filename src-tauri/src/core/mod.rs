@@ -6,6 +6,7 @@ pub mod geodata;
 pub mod ingest;
 pub mod job_object;
 pub mod kernel_events;
+pub mod kernel_version;
 pub mod log_parse;
 pub mod proc;
 pub mod route_guard;

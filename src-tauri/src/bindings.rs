@@ -73,6 +73,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::commands::kernel::stop_kernel,
             crate::commands::kernel::restart_kernel::<tauri::Wry>,
             crate::commands::kernel::get_kernel_state::<tauri::Wry>,
+            // Reads `mihomo -v` off disk, so it answers with no kernel running.
+            crate::commands::kernel::get_kernel_binary_version::<tauri::Wry>,
             // -- Mihomo REST facade ----------------------------------------
             // The renderer never talks to 127.0.0.1:9091 directly; every call
             // goes through these, which is what lets the controller port stay

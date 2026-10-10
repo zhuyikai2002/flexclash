@@ -112,6 +112,20 @@ fn registry() -> &'static Mutex<Option<ElevatedChild>> {
     ELEVATED_PID.get_or_init(|| Mutex::new(None))
 }
 
+/// Public, platform-agnostic access to the sidecar path resolver.
+///
+/// The resolver itself lives in the per-platform `platform` modules (its search
+/// chain names different files per target), so callers outside this module —
+/// `core::kernel_version` needs the same answer to report the version of the
+/// binary that would actually be launched — go through here rather than
+/// duplicating a fourth copy of the chain.
+pub fn resolve_mihomo_binary_pub<R: Runtime>(
+    app: &AppHandle<R>,
+    work_dir: &std::path::Path,
+) -> Result<std::path::PathBuf> {
+    platform::resolve_mihomo_binary(app, work_dir)
+}
+
 /// Emit one `[TUN_LIFECYCLE]` line through the shared kernel-log channel.
 ///
 /// Reuses `core::tun::lifecycle_log` so the elevate layer and the state

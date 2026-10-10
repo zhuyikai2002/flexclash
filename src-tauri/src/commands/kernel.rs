@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::core::sidecar::{self, KernelState, SidecarHandle};
 use crate::core::tun;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 
 #[tauri::command]
 #[specta::specta]
@@ -70,4 +70,32 @@ pub fn get_kernel_state<R: Runtime>(
         return KernelState::Running;
     }
     handle.state()
+}
+
+/// Version of the bundled mihomo binary, e.g. `"v1.19.32"`.
+///
+/// Deliberately distinct from `commands::mihomo::get_mihomo_version`, which
+/// asks the *running* controller (`GET /version`) and therefore fails whenever
+/// no kernel is up. This one reads the binary itself, so the About panel and
+/// the subscribe dialog's `User-Agent` hint work before the proxy has ever been
+/// started — and it stays correct across a kernel swap, because there is no
+/// literal on the frontend to drift.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_kernel_binary_version<R: Runtime>(app: AppHandle<R>) -> Result<String> {
+    // `mihomo -v` spawns a process and waits for it. Doing that on an async
+    // worker would occupy a tokio thread, and because every Tauri IPC call is
+    // dispatched onto the same runtime, a single blocked worker makes the
+    // entire app look frozen — the exact failure `commands::tun::off_runtime`
+    // was introduced to eliminate. Never call `probe_kernel_version` inline.
+    match tauri::async_runtime::spawn_blocking(move || {
+        crate::core::kernel_version::probe_kernel_version(&app)
+    })
+    .await
+    {
+        Ok(res) => res,
+        Err(e) => Err(AppError::Shell(format!(
+            "kernel version probe task failed: {e}"
+        ))),
+    }
 }

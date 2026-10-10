@@ -20,12 +20,13 @@
  *  still wrap the call in try/catch so a denied OS-level access
  *  (e.g. a non-text format) does not break the dialog.
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { X, Link, FileCode2, ClipboardPaste, Loader2 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readText } from '@tauri-apps/plugin-clipboard-manager'
 import { useProfilesStore } from '@/stores/profiles'
 import { useI18n } from '@/composables/useI18n'
+import { getKernelVersion } from '@/utils/tauri-bridge'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -45,6 +46,15 @@ const pastedYaml = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
 const hint = ref<string | null>(null) // clipboard auto-detect message
+
+// Kernel version backing the `User-Agent` hint. Read from the bundled binary
+// rather than hard-coded: the literal this replaced (`mihomo/1.19.30`) was
+// already a kernel release behind and nothing flagged the drift, so the dialog
+// was telling users to send a `User-Agent` the app itself never sends.
+// `null` means "not known" — still probing, plain browser preview, or a probe
+// failure — and the template degrades to a version-less hint rather than
+// showing an empty code block.
+const kernelVersion = ref<string | null>(null)
 
 function reset() {
   url.value = ''; name.value = ''; filePath.value = ''
@@ -112,6 +122,22 @@ watch(
   { immediate: true },
 )
 
+// The kernel version cannot change while the app runs, so this is fetched
+// once per dialog open rather than per render. Same `watch(props.open)`
+// shape as the clipboard probe above, deliberately: `onMounted` would fire
+// only for the dialog's first mount and every later re-open would keep
+// showing whatever was resolved back then.
+watch(
+  () => props.open,
+  (open) => {
+    if (!open || kernelVersion.value !== null) return
+    void getKernelVersion().then((v) => {
+      kernelVersion.value = v
+    })
+  },
+  { immediate: true },
+)
+
 async function pickFile() {
   try {
     const sel = await open({
@@ -156,6 +182,17 @@ const tabs = [
   { id: 'file'  as const, label: t('profiles.add_file'), icon: FileCode2 },
   { id: 'paste' as const, label: 'Paste YAML',           icon: ClipboardPaste },
 ]
+
+// The `User-Agent` line is advisory: providers generally accept anything, but
+// some fingerprint on the exact kernel. mihomo prints its tag as `v1.19.32`
+// while the `User-Agent` form has no `v`, so strip it here rather than making
+// the Rust side return two different shapes for one fact.
+const kernelUserAgent = computed(() => {
+  const v = kernelVersion.value
+  // Unknown version: name the client but claim no version, which is honest
+  // and still a valid `User-Agent` — better than rendering an empty element.
+  return v ? `mihomo/${v.replace(/^v/, '')}` : 'mihomo'
+})
 </script>
 
 <template>
@@ -224,7 +261,8 @@ const tabs = [
               />
             </label>
             <p class="text-[11px] text-zinc-500">
-              User-Agent: <code class="text-zinc-300 font-mono">mihomo/1.19.30</code>
+              User-Agent:
+              <code class="text-zinc-300 font-mono">{{ kernelUserAgent }}</code>
             </p>
           </div>
 

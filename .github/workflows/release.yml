@@ -140,14 +140,15 @@ jobs:
           # Attach the release to the tag that triggered the run.
           tagName: ${{ github.ref_name }}
           releaseName: "FlexClash ${{ github.ref_name }}"
-          releaseBody: |
-            Multi-platform build of FlexClash ${{ github.ref_name }}.
-
-            - **Linux**: `.deb`, `.rpm` and `.AppImage` (x86_64)
-            - **Windows**: NSIS `.exe` installer and `.msi` (x64)
-
-            See the assets below. On Arch/EndeavourOS, `packaging/arch/PKGBUILD`
-            builds a `flexclash-bin` package from the Linux `.deb`.
+          # `release_notes.md` is the SINGLE source of truth for the changelog.
+          # It becomes this Release's body *and* `latest.json > notes` (read by
+          # `scripts/gen-latest-json.py`), so the page and the in-app updater
+          # dialog can never disagree.
+          #
+          # This was an inline English template instead, which meant the GitHub
+          # Release page showed none of the actual changelog while the app
+          # dialog showed all of it. `bodyPath` is relative to the workspace.
+          bodyPath: release_notes.md
           # NOT a draft and NOT a prerelease, deliberately: the updater polls
           # `releases/latest/download/latest.json`, and `/latest/` excludes both.
           releaseDraft: false
